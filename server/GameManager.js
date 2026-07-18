@@ -267,6 +267,15 @@ class GameManager {
     const player = this.players.get(socketId);
     return !!player && !player.lobbyId && !player.gameId;
   }
+
+  shutdown() {
+    this.lobbies.forEach((lobby) => {
+      if (lobby.countdownInterval) {
+        clearInterval(lobby.countdownInterval);
+        lobby.countdownInterval = null;
+      }
+    });
+  }
 }
 
 module.exports = GameManager;

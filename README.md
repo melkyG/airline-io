@@ -107,9 +107,22 @@ A real map layer will be added later, replacing the placeholder view.
 
 Airport gameplay and airline systems are intentionally not part of this milestone.
 
-## Future Render deployment
+## Deploy on Render
 
-Render deployment configuration will be added later. The server already uses process.env.PORT.
+1. Push this repository to GitHub.
+2. In Render, create a new Web Service and connect the repository.
+3. Configure the service with:
+	- Language/Runtime: Node
+	- Branch: main
+	- Root Directory: leave blank
+	- Build Command: npm ci
+	- Start Command: npm start
+	- Health Check Path: /health
+4. Deploy the service.
+
+Notes:
+- The browser client and Socket.IO server are served from the same origin by this one service.
+- On Render free tier, services may sleep after inactivity and wake up on the next request.
 
 ## Manual test checklist
 

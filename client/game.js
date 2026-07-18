@@ -237,8 +237,7 @@ socket.on('lobby:update', (payload) => {
   if (payload && payload.lobbyId) {
     renderLobbySnapshot(payload);
     if (payload.status === 'waiting') {
-      stopStatusAnimation();
-      startStatusAnimation('Waiting for players');
+      setWaitingStatus();
     }
   }
 });

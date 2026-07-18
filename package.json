@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node server/server.js",
-    "dev": "node --watch server/server.js"
+    "dev": "nodemon server/server.js"
+  },
+  "engines": {
+    "node": ">=22 <25"
   },
   "keywords": [],
   "author": "",

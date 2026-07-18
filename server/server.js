@@ -8,10 +8,15 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 const gameManager = new GameManager(io);
+const clientDir = path.resolve(__dirname, '..', 'client');
 
-app.use(express.static(path.join(__dirname, '..', 'client')));
+app.use(express.static(clientDir));
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'client', 'index.html'));
+  res.sendFile(path.join(clientDir, 'index.html'));
 });
 
 io.on('connection', (socket) => {
@@ -40,9 +45,39 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on port ${PORT}`);
+const HOST = '0.0.0.0';
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+server.listen(PORT, HOST, () => {
+  console.log(`Environment: ${NODE_ENV}`);
+  console.log(`Port: ${PORT}`);
+  console.log(`Server started on ${HOST}:${PORT}`);
 });
 
-// Render deployment will use process.env.PORT.
-// Additional Render configuration will be added later.
+let isShuttingDown = false;
+
+function shutdown(signal) {
+  if (isShuttingDown) {
+    return;
+  }
+
+  isShuttingDown = true;
+  console.log(`Received ${signal}. Shutting down gracefully...`);
+
+  gameManager.shutdown();
+  io.close();
+
+  server.close((error) => {
+    if (error) {
+      console.error('Shutdown error:', error);
+      process.exit(1);
+      return;
+    }
+
+    console.log('HTTP and Socket.IO server closed.');
+    process.exit(0);
+  });
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
