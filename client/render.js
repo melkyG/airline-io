@@ -14,6 +14,7 @@
   }
 
   function createRenderer(documentRef) {
+    const mapRenderer = globalScope.createMapRenderer(documentRef);
     const elements = {
       connectionStatus: documentRef.getElementById('connectionStatus'),
       lobbyPreview: documentRef.getElementById('lobbyPreview'),
@@ -129,6 +130,7 @@
       renderError(state);
       renderScreens(state);
       renderGameState(state);
+      mapRenderer.render(state);
     }
 
     return {
