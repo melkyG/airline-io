@@ -1,27 +1,49 @@
 const socket = io();
 
-const connectionStatusEl = document.getElementById('connectionStatus');
-const lobbyPreviewEl = document.getElementById('lobbyPreview');
 const joinButtonEl = document.getElementById('joinButton');
 const usernameInputEl = document.getElementById('usernameInput');
-const countdownAreaEl = document.getElementById('countdownArea');
-const statusTextEl = document.getElementById('statusText');
-const statusDotsEl = document.getElementById('statusDots');
-const lobbyPlayerListEl = document.getElementById('lobbyPlayerList');
-const statusMessageEl = document.getElementById('statusMessage');
-const lobbyScreenEl = document.getElementById('lobbyScreen');
-const gameScreenEl = document.getElementById('gameScreen');
-const gameStatusEl = document.getElementById('gameStatus');
-const leaderboardEl = document.getElementById('leaderboard');
 
-let connected = false;
-let joined = false;
-let joinPending = false;
-let currentLobbyId = null;
-let currentGameId = null;
-let statusAnimationFrame = null;
-let statusAnimationStep = 0;
-let waitingStatusActive = false;
+function getEmptyLobbyState() {
+  return {
+    lobbyId: null,
+    status: 'waiting',
+    playerCount: 0,
+    maxPlayers: 5,
+    players: [],
+    countdownSeconds: null
+  };
+}
+
+const gameState = window.createGameState({
+  connection: {
+    status: 'connecting'
+  },
+  session: {
+    playerId: null,
+    joined: false,
+    joinPending: false,
+    currentLobbyId: null,
+    currentGameId: null
+  },
+  lobby: getEmptyLobbyState(),
+  ui: {
+    errorMessage: null,
+    screen: 'lobby'
+  },
+  game: {
+    statusText: '',
+    leaderboard: []
+  },
+  waitingAnimation: {
+    step: 0
+  }
+});
+
+const renderer = window.createRenderer(document);
+gameState.subscribe((state) => {
+  renderer.render(state);
+});
+renderer.render(gameState.getState());
 
 function sanitizeUsername(rawValue) {
   const trimmed = (rawValue || '').trim();
@@ -49,128 +71,63 @@ function getUsernameForJoin() {
   return generated;
 }
 
-joinButtonEl.classList.remove('leave-state');
-joinButtonEl.classList.add('join-state');
-initializeStatusAnimation();
-
-function setConnectionStatus(message, state) {
-  connectionStatusEl.textContent = message;
-  connectionStatusEl.className = `status ${state}`;
+function normalizeLobbySnapshot(payload) {
+  const source = payload || {};
+  return {
+    lobbyId: source.lobbyId || null,
+    status: source.status === 'countdown' ? 'countdown' : 'waiting',
+    playerCount: Number.isFinite(source.playerCount) ? source.playerCount : 0,
+    maxPlayers: Number.isFinite(source.maxPlayers) ? source.maxPlayers : 5,
+    players: Array.isArray(source.players) ? source.players : [],
+    countdownSeconds: Number.isFinite(source.countdown) ? source.countdown : null
+  };
 }
 
-function setStatusMessage(message) {
-  statusMessageEl.textContent = message;
+function applyLobbySnapshot(payload) {
+  const lobbySnapshot = normalizeLobbySnapshot(payload);
+  gameState.update(() => ({
+    lobby: lobbySnapshot
+  }));
 }
 
-function showError(message) {
-  if (message) {
-    console.error(message);
-    setStatusMessage(message);
-  } else {
-    setStatusMessage('');
-  }
-}
-
-function getDotsForStep(step) {
-  const sequence = ['', '.', '. .', '. . .'];
-  return sequence[step % sequence.length];
-}
-
-function renderWaitingStatus() {
-  if (!waitingStatusActive) {
-    return;
-  }
-
-  statusTextEl.textContent = 'Waiting for players';
-  statusDotsEl.textContent = getDotsForStep(statusAnimationStep);
-}
-
-function setWaitingStatus() {
-  waitingStatusActive = true;
-  renderWaitingStatus();
-}
-
-function setStatusText(message) {
-  waitingStatusActive = false;
-  statusTextEl.textContent = message;
-  statusDotsEl.textContent = '';
-}
-
-function initializeStatusAnimation() {
-  if (statusAnimationFrame) {
-    return;
-  }
-
-  statusAnimationStep = 0;
-  setWaitingStatus();
-
-  statusAnimationFrame = setInterval(() => {
-    if (!waitingStatusActive) {
-      return;
+setInterval(() => {
+  gameState.update((state) => {
+    if (state.lobby.status !== 'waiting') {
+      return null;
     }
 
-    statusAnimationStep = (statusAnimationStep + 1) % 4;
-    renderWaitingStatus();
-  }, 850);
-}
-
-function resetLobbyView() {
-  joined = false;
-  currentLobbyId = null;
-  joinButtonEl.disabled = false;
-  joinButtonEl.textContent = 'Join';
-  joinButtonEl.classList.remove('leave-state');
-  joinButtonEl.classList.add('join-state');
-  usernameInputEl.disabled = false;
-  setWaitingStatus();
-  lobbyPlayerListEl.innerHTML = '';
-  setStatusMessage('');
-}
-
-function renderLobbySnapshot(payload) {
-  const safePayload = payload || {
-    lobbyId: null,
-    status: 'waiting',
-    playerCount: 0,
-    maxPlayers: 5,
-    players: [],
-    countdown: null
-  };
-
-  currentLobbyId = safePayload.lobbyId;
-  lobbyPreviewEl.textContent = `${safePayload.playerCount}/${safePayload.maxPlayers} players`;
-  lobbyPlayerListEl.innerHTML = '';
-
-  if (!Array.isArray(safePayload.players)) {
-    return;
-  }
-
-  safePayload.players.forEach((player) => {
-    const item = document.createElement('li');
-    item.textContent = `${player.displayName} ${player.connected ? '(connected)' : '(disconnected)'}`;
-    lobbyPlayerListEl.appendChild(item);
+    return {
+      waitingAnimation: {
+        step: (state.waitingAnimation.step + 1) % 4
+      }
+    };
   });
-}
+}, 850);
 
 joinButtonEl.addEventListener('click', () => {
-  if (!connected || joinPending) {
+  const state = gameState.getState();
+  const isConnected = state.connection.status === 'connected';
+
+  if (!isConnected || state.session.joinPending) {
     return;
   }
 
-  if (!joined) {
-    joinPending = true;
-    joinButtonEl.disabled = true;
-    joinButtonEl.textContent = 'Joining...';
-    showError('');
+  if (!state.session.joined) {
+    gameState.update(() => ({
+      session: { joinPending: true },
+      ui: { errorMessage: null }
+    }));
+
     const username = getUsernameForJoin();
     socket.emit('lobby:join', { username });
     return;
   }
 
-  joinPending = true;
-  joinButtonEl.disabled = true;
-  joinButtonEl.textContent = 'Leaving...';
-  showError('');
+  gameState.update(() => ({
+    session: { joinPending: true },
+    ui: { errorMessage: null }
+  }));
+
   socket.emit('lobby:leave');
 });
 
@@ -182,96 +139,127 @@ usernameInputEl.addEventListener('keydown', (event) => {
 });
 
 socket.on('connect', () => {
-  connected = true;
-  setConnectionStatus('Connected', 'connected');
+  gameState.update(() => ({
+    connection: { status: 'connected' }
+  }));
+
   console.log('Connected to the server.');
 });
 
 socket.on('disconnect', () => {
-  connected = false;
-  setConnectionStatus('Disconnected', 'disconnected');
-  showError('Connection lost. Reconnecting...');
-  resetLobbyView();
-  lobbyScreenEl.classList.remove('hidden');
-  gameScreenEl.classList.add('hidden');
+  gameState.update(() => ({
+    connection: { status: 'disconnected' },
+    session: {
+      playerId: null,
+      joined: false,
+      joinPending: false,
+      currentLobbyId: null,
+      currentGameId: null
+    },
+    lobby: getEmptyLobbyState(),
+    ui: {
+      errorMessage: 'Connection lost. Reconnecting...',
+      screen: 'lobby'
+    },
+    game: {
+      statusText: '',
+      leaderboard: []
+    }
+  }));
 });
 
 socket.on('connection:ready', ({ playerId }) => {
+  gameState.update(() => ({
+    session: { playerId }
+  }));
+
   console.log(`Player ID ready: ${playerId}`);
 });
 
 socket.on('lobby:preview', (payload) => {
-  if (joined || currentGameId) {
+  const state = gameState.getState();
+  if (state.session.joined || state.session.currentGameId) {
     return;
   }
-  renderLobbySnapshot(payload);
+
+  applyLobbySnapshot(payload);
 });
 
 socket.on('lobby:joined', ({ lobbyId, playerId }) => {
-  joined = true;
-  joinPending = false;
-  currentLobbyId = lobbyId;
-  joinButtonEl.disabled = false;
-  joinButtonEl.textContent = 'Leave';
-  joinButtonEl.classList.remove('join-state');
-  joinButtonEl.classList.add('leave-state');
-  usernameInputEl.disabled = true;
+  gameState.update(() => ({
+    session: {
+      playerId,
+      joined: true,
+      joinPending: false,
+      currentLobbyId: lobbyId
+    }
+  }));
+
   console.log(`Joined lobby ${lobbyId} as ${playerId}.`);
 });
 
 socket.on('lobby:left', ({ lobbyId, playerId }) => {
-  joined = false;
-  joinPending = false;
-  currentLobbyId = null;
-  joinButtonEl.disabled = false;
-  joinButtonEl.textContent = 'Join';
-  joinButtonEl.classList.remove('leave-state');
-  joinButtonEl.classList.add('join-state');
-  usernameInputEl.disabled = false;
-  setWaitingStatus();
-  lobbyPlayerListEl.innerHTML = '';
+  gameState.update(() => ({
+    session: {
+      joined: false,
+      joinPending: false,
+      currentLobbyId: null
+    },
+    lobby: getEmptyLobbyState()
+  }));
+
   console.log(`Left lobby ${lobbyId} as ${playerId}.`);
 });
 
 socket.on('lobby:update', (payload) => {
   if (payload && payload.lobbyId) {
-    renderLobbySnapshot(payload);
-    if (payload.status === 'waiting') {
-      setWaitingStatus();
-    }
+    applyLobbySnapshot(payload);
   }
 });
 
-socket.on('lobby:countdown', ({ lobbyId, secondsRemaining }) => {
-  setStatusText(`Starting in ${secondsRemaining}`);
+socket.on('lobby:countdown', ({ secondsRemaining }) => {
+  gameState.update(() => ({
+    lobby: {
+      status: 'countdown',
+      countdownSeconds: secondsRemaining
+    }
+  }));
 });
 
 socket.on('lobby:countdown-cancelled', ({ lobbyId, message }) => {
-  setWaitingStatus();
+  gameState.update(() => ({
+    lobby: {
+      status: 'waiting',
+      countdownSeconds: null
+    }
+  }));
+
   console.warn(`${message} (${lobbyId})`);
 });
 
 socket.on('lobby:error', ({ message }) => {
-  joinPending = false;
-  joinButtonEl.disabled = false;
-  joinButtonEl.textContent = joined ? 'Leave' : 'Join';
-  joinButtonEl.classList.toggle('leave-state', joined);
-  joinButtonEl.classList.toggle('join-state', !joined);
-  showError(message);
+  gameState.update(() => ({
+    session: { joinPending: false },
+    ui: { errorMessage: message || '' }
+  }));
+
+  if (message) {
+    console.error(message);
+  }
 });
 
 socket.on('game:started', (payload) => {
-  currentGameId = payload.gameId;
-  lobbyScreenEl.classList.add('hidden');
-  gameScreenEl.classList.remove('hidden');
-  gameStatusEl.textContent = `Game ${payload.gameId} is active`;
-  leaderboardEl.innerHTML = '';
-
-  payload.leaderboard.forEach((entry) => {
-    const item = document.createElement('li');
-    item.textContent = `${entry.displayName} — ${entry.score}`;
-    leaderboardEl.appendChild(item);
-  });
+  gameState.update(() => ({
+    session: {
+      currentGameId: payload.gameId,
+      joinPending: false
+    },
+    ui: { screen: 'game' },
+    game: {
+      statusText: `Game ${payload.gameId} is active`,
+      leaderboard: Array.isArray(payload.leaderboard) ? payload.leaderboard : []
+    }
+  }));
 
   console.log('Game started.');
 });
