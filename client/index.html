@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Airline.io</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="banner">
+        <div class="banner-left">
+          <div class="banner-title">Airline.io</div>
+          <div class="banner-version">V1.0</div>
+        </div>
+        <div class="banner-center">Multiplayer lobby prototype</div>
+        <div class="banner-right">
+          <div class="banner-label">Connection:</div>
+          <div id="connectionStatus" class="status connected">Connecting...</div>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <div class="username-wrapper">
+          <label class="username-label" for="usernameInput">Username:</label>
+          <input id="usernameInput" class="username-input" type="text" maxlength="20" autocomplete="off" spellcheck="false" placeholder="Enter a name" />
+        </div>
+
+        <section id="lobbyScreen" class="lobby-panel">
+          <div class="lobby-meta-row">
+            <span class="lobby-meta-label">Lobby</span>
+            <div id="lobbyPreview" class="player-count">0/5 players</div>
+          </div>
+          <div class="section-divider"></div>
+          <ul id="lobbyPlayerList" class="player-list"></ul>
+          <div id="statusMessage" class="status-message" aria-live="polite"></div>
+          <button id="joinButton" class="join-button">Join</button>
+          <div class="footer-divider"></div>
+          <div id="countdownArea" class="status-line" aria-live="polite">
+            <span id="statusText" class="status-line-text">Waiting for players</span>
+            <span id="statusDots" class="status-line-dots" aria-hidden="true"></span>
+          </div>
+        </section>
+
+        <section id="gameScreen" class="game-card hidden">
+          <h2>Map Placeholder</h2>
+          <div id="gameStatus" class="game-status">Game has started.</div>
+          <div class="map-box">Map Placeholder</div>
+
+          <div class="game-panel">
+            <h2>Leaderboard</h2>
+            <ol id="leaderboard"></ol>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/game.js"></script>
+  </body>
+</html>
