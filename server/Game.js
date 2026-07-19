@@ -1,9 +1,10 @@
 class Game {
-  constructor(id, manager) {
-    this.id = id;
-    this.status = 'active';
+  constructor(initialState, manager) {
+    this.id = initialState.id;
+    this.status = initialState.status;
     this.players = new Map();
-    this.createdAt = Date.now();
+    this.createdAt = initialState.createdAt;
+    this.authoritativeState = initialState;
     this.gameState = {
       mapPlaceholder: 'Map Placeholder'
     };

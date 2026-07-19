@@ -2,6 +2,7 @@ const { uniqueNamesGenerator, adjectives, animals } = require('unique-names-gene
 const Player = require('./Player');
 const Lobby = require('./Lobby');
 const Game = require('./Game');
+const { createGame } = require('./gameFactory');
 
 class GameManager {
   constructor(io) {
@@ -167,10 +168,11 @@ class GameManager {
       return null;
     }
 
-    const gameId = `game-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const game = new Game(gameId, this);
+    const lobbyPlayers = Array.from(lobby.players.values());
+    const initialGame = createGame(lobbyPlayers);
+    const game = new Game(initialGame, this);
 
-    Array.from(lobby.players.values()).forEach((player) => {
+    lobbyPlayers.forEach((player) => {
       player.socket.leave(lobby.getRoomName());
       player.socket.join(game.getRoomName());
       this.playerLobbyIds.delete(player.id);
