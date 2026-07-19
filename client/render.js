@@ -105,22 +105,13 @@
     }
 
     function renderGameState(state) {
-      elements.gameStatus.textContent = state.game.statusText || 'Game has started.';
+      const gameId = state.game && state.game.id ? state.game.id : null;
+      elements.gameStatus.textContent = gameId ? `Game ${gameId} is active` : 'Game has started.';
       elements.leaderboard.innerHTML = '';
 
-      if (!Array.isArray(state.game.leaderboard)) {
-        return;
-      }
-
-      const fragment = documentRef.createDocumentFragment();
-
-      state.game.leaderboard.forEach((entry) => {
-        const item = documentRef.createElement('li');
-        item.textContent = `${entry.displayName} — ${entry.score}`;
-        fragment.appendChild(item);
-      });
-
-      elements.leaderboard.appendChild(fragment);
+      const placeholder = documentRef.createElement('li');
+      placeholder.textContent = 'Leaderboard placeholder';
+      elements.leaderboard.appendChild(placeholder);
     }
 
     function render(state) {

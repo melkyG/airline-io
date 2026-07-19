@@ -14,6 +14,16 @@ function getEmptyLobbyState() {
   };
 }
 
+function getEmptyGameState() {
+  return {
+    id: null,
+    status: null,
+    createdAt: null,
+    players: [],
+    airports: []
+  };
+}
+
 const gameState = window.createGameState({
   connection: {
     status: 'connecting'
@@ -30,10 +40,7 @@ const gameState = window.createGameState({
     errorMessage: null,
     screen: 'lobby'
   },
-  game: {
-    statusText: '',
-    leaderboard: []
-  },
+  game: getEmptyGameState(),
   waitingAnimation: {
     step: 0
   }
@@ -161,10 +168,7 @@ socket.on('disconnect', () => {
       errorMessage: 'Connection lost. Reconnecting...',
       screen: 'lobby'
     },
-    game: {
-      statusText: '',
-      leaderboard: []
-    }
+    game: getEmptyGameState()
   }));
 });
 
@@ -249,16 +253,15 @@ socket.on('lobby:error', ({ message }) => {
 });
 
 socket.on('game:started', (payload) => {
+  const authoritativeGame = payload && payload.game ? payload.game : getEmptyGameState();
+
   gameState.update(() => ({
     session: {
-      currentGameId: payload.gameId,
+      currentGameId: authoritativeGame.id,
       joinPending: false
     },
     ui: { screen: 'game' },
-    game: {
-      statusText: `Game ${payload.gameId} is active`,
-      leaderboard: Array.isArray(payload.leaderboard) ? payload.leaderboard : []
-    }
+    game: authoritativeGame
   }));
 
   console.log('Game started.');

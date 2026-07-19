@@ -20,24 +20,13 @@ class Game {
     this.broadcastState();
   }
 
-  buildLeaderboard() {
-    return Array.from(this.players.values())
-      .sort((a, b) => a.joinedAt - b.joinedAt)
-      .map((player, index) => ({
-        playerId: player.id,
-        displayName: player.displayName,
-        score: player.score,
-        connected: player.connected,
-        rank: index + 1
-      }));
-  }
-
   getPublicState() {
     return {
-      gameId: this.id,
-      status: this.status,
-      mapPlaceholder: this.gameState.mapPlaceholder,
-      leaderboard: this.buildLeaderboard()
+      game: {
+        ...this.authoritativeState,
+        players: this.authoritativeState.players.map((player) => ({ ...player })),
+        airports: this.authoritativeState.airports.map((airport) => ({ ...airport }))
+      }
     };
   }
 

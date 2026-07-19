@@ -32,8 +32,7 @@
       },
       ui: { ...initialState.ui },
       game: {
-        ...initialState.game,
-        leaderboard: Array.isArray(initialState.game.leaderboard) ? initialState.game.leaderboard.slice() : []
+        ...initialState.game
       },
       waitingAnimation: { ...initialState.waitingAnimation }
     };
@@ -59,7 +58,7 @@
         session: mergeSection(state.session, patch.session),
         lobby: mergeSection(state.lobby, patch.lobby),
         ui: mergeSection(state.ui, patch.ui),
-        game: mergeSection(state.game, patch.game),
+        game: typeof patch.game === 'undefined' ? state.game : mergeSection(undefined, patch.game),
         waitingAnimation: mergeSection(state.waitingAnimation, patch.waitingAnimation)
       };
 
