@@ -31,6 +31,11 @@
       leaderboard: documentRef.getElementById('leaderboard')
     };
 
+    function formatCapital(value) {
+      const numeric = Number.isFinite(value) ? value : 0;
+      return numeric.toLocaleString();
+    }
+
     function renderConnectionStatus(state) {
       const presentation = getConnectionPresentation(state.connection.status);
       elements.connectionStatus.textContent = presentation.text;
@@ -109,9 +114,23 @@
       elements.gameStatus.textContent = gameId ? `Game ${gameId} is active` : 'Game has started.';
       elements.leaderboard.innerHTML = '';
 
-      const placeholder = documentRef.createElement('li');
-      placeholder.textContent = 'Leaderboard placeholder';
-      elements.leaderboard.appendChild(placeholder);
+      const sourcePlayers = Array.isArray(state.game && state.game.players) ? state.game.players : [];
+      const leaderboard = [...sourcePlayers].sort((left, right) => {
+        const leftCapital = Number.isFinite(left.capital) ? left.capital : 0;
+        const rightCapital = Number.isFinite(right.capital) ? right.capital : 0;
+        return rightCapital - leftCapital;
+      });
+
+      const fragment = documentRef.createDocumentFragment();
+
+      leaderboard.forEach((player, index) => {
+        const item = documentRef.createElement('li');
+        const username = player && player.username ? player.username : 'Unknown';
+        item.textContent = `${username} $${formatCapital(player.capital)}`;
+        fragment.appendChild(item);
+      });
+
+      elements.leaderboard.appendChild(fragment);
     }
 
     function render(state) {
