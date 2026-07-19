@@ -16,6 +16,7 @@
   function createRenderer(documentRef) {
     const mapRenderer = globalScope.createMapRenderer(documentRef);
     const elements = {
+      mainContent: documentRef.querySelector('.main-content'),
       connectionStatus: documentRef.getElementById('connectionStatus'),
       lobbyPreview: documentRef.getElementById('lobbyPreview'),
       joinButton: documentRef.getElementById('joinButton'),
@@ -98,6 +99,7 @@
 
     function renderScreens(state) {
       const showGameScreen = state.ui.screen === 'game';
+      elements.mainContent.classList.toggle('game-active', showGameScreen);
       elements.lobbyScreen.classList.toggle('hidden', showGameScreen);
       elements.gameScreen.classList.toggle('hidden', !showGameScreen);
     }
