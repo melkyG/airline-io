@@ -2,6 +2,8 @@ const socket = io();
 
 const joinButtonEl = document.getElementById('joinButton');
 const usernameInputEl = document.getElementById('usernameInput');
+const gameTimerEl = document.getElementById('gameTimer');
+let gameCountdownIntervalId = null;
 
 function getEmptyLobbyState() {
   return {
@@ -26,6 +28,56 @@ function getEmptyGameState() {
     players: [],
     airports: []
   };
+}
+
+function formatRemainingTime(endsAt) {
+  if (!Number.isFinite(endsAt)) {
+    return '00:00';
+  }
+
+  const remainingMs = Math.max(0, endsAt - Date.now());
+  const remainingTotalSeconds = Math.floor(remainingMs / 1000);
+  const minutes = Math.floor(remainingTotalSeconds / 60);
+  const seconds = remainingTotalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function updateGameTimerDisplay() {
+  if (!gameTimerEl) {
+    return false;
+  }
+
+  const state = gameState.getState();
+  if (state.ui.screen !== 'game' || !state.game || !Number.isFinite(state.game.endsAt)) {
+    gameTimerEl.textContent = '00:00';
+    return false;
+  }
+
+  gameTimerEl.textContent = formatRemainingTime(state.game.endsAt);
+  return state.game.endsAt - Date.now() > 0;
+}
+
+function stopGameCountdown() {
+  if (gameCountdownIntervalId) {
+    clearInterval(gameCountdownIntervalId);
+    gameCountdownIntervalId = null;
+  }
+}
+
+function startGameCountdown() {
+  stopGameCountdown();
+
+  const shouldContinue = updateGameTimerDisplay();
+  if (!shouldContinue) {
+    return;
+  }
+
+  gameCountdownIntervalId = setInterval(() => {
+    const keepRunning = updateGameTimerDisplay();
+    if (!keepRunning) {
+      stopGameCountdown();
+    }
+  }, 1000);
 }
 
 const gameState = window.createGameState({
@@ -158,6 +210,7 @@ socket.on('connect', () => {
 });
 
 socket.on('disconnect', () => {
+  stopGameCountdown();
   gameState.update(() => ({
     connection: { status: 'disconnected' },
     session: {
@@ -207,6 +260,7 @@ socket.on('lobby:joined', ({ lobbyId, playerId }) => {
 });
 
 socket.on('lobby:left', ({ lobbyId, playerId }) => {
+  stopGameCountdown();
   gameState.update(() => ({
     session: {
       joined: false,
@@ -267,6 +321,8 @@ socket.on('game:started', (payload) => {
     ui: { screen: 'game' },
     game: authoritativeGame
   }));
+
+  startGameCountdown();
 
   console.log('Game started.');
 });

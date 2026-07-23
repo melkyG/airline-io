@@ -55,7 +55,7 @@
       }
 
       mapInstance = globalScope.L.map(mapContainer, {
-        zoomControl: true,
+        zoomControl: false,
         zoomSnap: 0,
         minZoom: 2,
         maxZoom: 18,

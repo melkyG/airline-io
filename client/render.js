@@ -28,6 +28,7 @@
       lobbyScreen: documentRef.getElementById('lobbyScreen'),
       gameScreen: documentRef.getElementById('gameScreen'),
       gameStatus: documentRef.getElementById('gameStatus'),
+      gameTimer: documentRef.getElementById('gameTimer'),
       leaderboard: documentRef.getElementById('leaderboard')
     };
 
@@ -107,6 +108,9 @@
     function renderGameState(state) {
       const gameId = state.game && state.game.id ? state.game.id : null;
       elements.gameStatus.textContent = gameId ? `Game ${gameId} is active` : 'Game has started.';
+      if (elements.gameTimer) {
+        elements.gameTimer.textContent = '00:00';
+      }
       elements.leaderboard.innerHTML = '';
 
       const sourcePlayers = Array.isArray(state.game && state.game.players) ? state.game.players : [];
