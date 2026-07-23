@@ -52,11 +52,22 @@
           <h2>Map Placeholder</h2>
           <div id="gameStatus" class="game-status">Game has started.</div>
           <div id="gameTimer" class="game-status">00:00</div>
+          <button id="devAddScoreButton" class="hud-dev-button" type="button">+500 Score</button>
           <div id="mapContainer" class="map-box"></div>
 
           <div class="game-panel">
             <h2>Leaderboard</h2>
             <ol id="leaderboard"></ol>
+          </div>
+
+          <div id="resultsOverlay" class="results-overlay hidden" aria-hidden="true">
+            <div class="results-overlay-backdrop"></div>
+            <div class="results-modal" role="dialog" aria-modal="true" aria-labelledby="resultsTitle">
+              <h2 id="resultsTitle">Game Results</h2>
+              <p id="resultsWinner" class="results-winner"></p>
+              <p id="resultsEndReason" class="results-end-reason"></p>
+              <ol id="resultsStandings" class="results-standings"></ol>
+            </div>
           </div>
         </section>
       </main>

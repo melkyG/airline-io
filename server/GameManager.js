@@ -270,11 +270,36 @@ class GameManager {
     return !!player && !player.lobbyId && !player.gameId;
   }
 
+  handleDeveloperScoreRequest(socketId, amount = 500) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return false;
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return false;
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return false;
+    }
+
+    return game.addScore(player.id, amount);
+  }
+
   shutdown() {
     this.lobbies.forEach((lobby) => {
       if (lobby.countdownInterval) {
         clearInterval(lobby.countdownInterval);
         lobby.countdownInterval = null;
+      }
+    });
+
+    this.games.forEach((game) => {
+      if (game && typeof game.dispose === 'function') {
+        game.dispose();
       }
     });
   }

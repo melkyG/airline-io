@@ -15,6 +15,7 @@
 
   function createRenderer(documentRef) {
     const mapRenderer = globalScope.createMapRenderer(documentRef);
+    let renderedResultsKey = null;
     const elements = {
       mainContent: documentRef.querySelector('.main-content'),
       connectionStatus: documentRef.getElementById('connectionStatus'),
@@ -29,7 +30,11 @@
       gameScreen: documentRef.getElementById('gameScreen'),
       gameStatus: documentRef.getElementById('gameStatus'),
       gameTimer: documentRef.getElementById('gameTimer'),
-      leaderboard: documentRef.getElementById('leaderboard')
+      leaderboard: documentRef.getElementById('leaderboard'),
+      resultsOverlay: documentRef.getElementById('resultsOverlay'),
+      resultsWinner: documentRef.getElementById('resultsWinner'),
+      resultsEndReason: documentRef.getElementById('resultsEndReason'),
+      resultsStandings: documentRef.getElementById('resultsStandings')
     };
 
     function renderConnectionStatus(state) {
@@ -108,9 +113,6 @@
     function renderGameState(state) {
       const gameId = state.game && state.game.id ? state.game.id : null;
       elements.gameStatus.textContent = gameId ? `Game ${gameId} is active` : 'Game has started.';
-      if (elements.gameTimer) {
-        elements.gameTimer.textContent = '00:00';
-      }
       elements.leaderboard.innerHTML = '';
 
       const sourcePlayers = Array.isArray(state.game && state.game.players) ? state.game.players : [];
@@ -133,6 +135,92 @@
       elements.leaderboard.appendChild(fragment);
     }
 
+    function getResultsRenderKey(state) {
+      const game = state.game || {};
+      const gameId = game.id || 'unknown';
+      const endedAt = Number.isFinite(game.endedAt) ? game.endedAt : 'na';
+      const generatedAt = game.results && Number.isFinite(game.results.generatedAt) ? game.results.generatedAt : 'na';
+      return `${gameId}:${endedAt}:${generatedAt}`;
+    }
+
+    function normalizeEndReason(reason) {
+      if (reason === 'score') {
+        return 'Score target reached';
+      }
+
+      if (reason === 'time') {
+        return 'Time expired';
+      }
+
+      return 'Unknown';
+    }
+
+    function renderResultsOverlay(state) {
+      if (!elements.resultsOverlay || !elements.gameScreen) {
+        return;
+      }
+
+      const game = state.game || {};
+      const shouldShow = state.ui.screen === 'game' && game.status === 'ended';
+
+      elements.gameScreen.classList.toggle('results-overlay-active', shouldShow);
+      elements.resultsOverlay.classList.toggle('hidden', !shouldShow);
+      elements.resultsOverlay.setAttribute('aria-hidden', shouldShow ? 'false' : 'true');
+
+      if (!shouldShow) {
+        renderedResultsKey = null;
+        return;
+      }
+
+      const nextKey = getResultsRenderKey(state);
+      if (nextKey === renderedResultsKey) {
+        return;
+      }
+
+      const results = game.results && typeof game.results === 'object' ? game.results : null;
+      const winnerName = results && results.winner && results.winner.username ? results.winner.username : 'Unavailable';
+      const endReasonText = normalizeEndReason(game.endReason);
+
+      if (elements.resultsWinner) {
+        elements.resultsWinner.innerHTML = '';
+        const winnerLabel = documentRef.createElement('span');
+        winnerLabel.textContent = 'Winner: ';
+        const winnerNameElement = documentRef.createElement('strong');
+        winnerNameElement.textContent = winnerName;
+        elements.resultsWinner.appendChild(winnerLabel);
+        elements.resultsWinner.appendChild(winnerNameElement);
+      }
+
+      if (!elements.resultsStandings) {
+        renderedResultsKey = nextKey;
+        return;
+      }
+
+      elements.resultsStandings.innerHTML = '';
+
+      const standings = results && Array.isArray(results.standings) ? results.standings : [];
+      if (standings.length === 0) {
+        const emptyItem = documentRef.createElement('li');
+        emptyItem.textContent = 'Final standings unavailable.';
+        elements.resultsStandings.appendChild(emptyItem);
+        renderedResultsKey = nextKey;
+        return;
+      }
+
+      const standingsFragment = documentRef.createDocumentFragment();
+      standings.forEach((entry, index) => {
+        const username = entry && entry.username ? entry.username : 'Unknown';
+        const score = Number.isFinite(entry && entry.score) ? entry.score : 0;
+
+        const item = documentRef.createElement('li');
+        item.textContent = `${username} - Score ${score}`;
+        standingsFragment.appendChild(item);
+      });
+
+      elements.resultsStandings.appendChild(standingsFragment);
+      renderedResultsKey = nextKey;
+    }
+
     function render(state) {
       renderConnectionStatus(state);
       renderLobbyPreview(state);
@@ -142,6 +230,7 @@
       renderError(state);
       renderScreens(state);
       renderGameState(state);
+      renderResultsOverlay(state);
       mapRenderer.render(state);
     }
 

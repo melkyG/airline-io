@@ -3,6 +3,7 @@ const socket = io();
 const joinButtonEl = document.getElementById('joinButton');
 const usernameInputEl = document.getElementById('usernameInput');
 const gameTimerEl = document.getElementById('gameTimer');
+const devAddScoreButtonEl = document.getElementById('devAddScoreButton');
 let gameCountdownIntervalId = null;
 
 function getEmptyLobbyState() {
@@ -50,6 +51,10 @@ function updateGameTimerDisplay() {
   const state = gameState.getState();
   if (state.ui.screen !== 'game' || !state.game || !Number.isFinite(state.game.endsAt)) {
     gameTimerEl.textContent = '00:00';
+    return false;
+  }
+
+  if (state.game.status !== 'active') {
     return false;
   }
 
@@ -200,6 +205,20 @@ usernameInputEl.addEventListener('keydown', (event) => {
     joinButtonEl.click();
   }
 });
+
+if (devAddScoreButtonEl) {
+  devAddScoreButtonEl.addEventListener('click', () => {
+    const state = gameState.getState();
+    const isConnected = state.connection.status === 'connected';
+    const inGame = state.ui.screen === 'game' && !!state.session.currentGameId;
+
+    if (!isConnected || !inGame) {
+      return;
+    }
+
+    socket.emit('dev:score:add');
+  });
+}
 
 socket.on('connect', () => {
   gameState.update(() => ({

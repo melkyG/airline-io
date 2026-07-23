@@ -39,6 +39,10 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('dev:score:add', () => {
+    gameManager.handleDeveloperScoreRequest(socket.id, 500);
+  });
+
   socket.on('disconnect', () => {
     gameManager.handleDisconnect(socket.id);
   });
