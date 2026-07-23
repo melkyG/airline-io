@@ -35,6 +35,10 @@ test('client stores authoritative game without leaderboard property', () => {
       id: null,
       status: null,
       createdAt: null,
+      startedAt: null,
+      endsAt: null,
+      durationMs: null,
+      scoreToWin: null,
       players: [],
       airports: []
     },
@@ -46,14 +50,18 @@ test('client stores authoritative game without leaderboard property', () => {
       id: 'game-1',
       status: 'active',
       createdAt: 123,
-      players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
+      startedAt: 123,
+      endsAt: 1800123,
+      durationMs: 1800000,
+      scoreToWin: 1000,
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
       airports: []
     }
   }));
 
   const snapshot = state.getState();
 
-  assert.deepEqual(Object.keys(snapshot.game).sort(), ['airports', 'createdAt', 'id', 'players', 'status']);
+  assert.deepEqual(Object.keys(snapshot.game).sort(), ['airports', 'createdAt', 'durationMs', 'endsAt', 'id', 'players', 'scoreToWin', 'startedAt', 'status']);
   assert.equal('leaderboard' in snapshot.game, false);
 
   delete global.window;

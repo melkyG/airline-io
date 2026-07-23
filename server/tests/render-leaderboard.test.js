@@ -95,14 +95,14 @@ function createRendererUnderTest() {
   return { renderer, elements: documentRef.elements };
 }
 
-test('renderer derives leaderboard from game players sorted by descending capital', () => {
+test('renderer derives leaderboard from game players sorted by descending score', () => {
   const { renderer, elements } = createRendererUnderTest();
   const players = [
-    { id: 'p1', username: 'Alice', capital: 1000000 },
-    { id: 'p2', username: 'Bob', capital: 2500000 },
-    { id: 'p3', username: 'Charlie', capital: 1000000 },
-    { id: 'p4', username: 'Dana', capital: 500000 },
-    { id: 'p5', username: 'Eli', capital: 1500000 }
+    { id: 'p1', username: 'Alice', capital: 1000000, score: 10 },
+    { id: 'p2', username: 'Bob', capital: 2500000, score: 25 },
+    { id: 'p3', username: 'Charlie', capital: 1000000, score: 10 },
+    { id: 'p4', username: 'Dana', capital: 500000, score: 5 },
+    { id: 'p5', username: 'Eli', capital: 1500000, score: 15 }
   ];
 
   const beforeOrder = players.map((player) => player.id);
@@ -126,11 +126,11 @@ test('renderer derives leaderboard from game players sorted by descending capita
 
   assert.equal(rendered.length, 5);
   assert.deepEqual(rendered, [
-    'Bob $2,500,000',
-    'Eli $1,500,000',
-    'Alice $1,000,000',
-    'Charlie $1,000,000',
-    'Dana $500,000'
+    'Bob — 25',
+    'Eli — 15',
+    'Alice — 10',
+    'Charlie — 10',
+    'Dana — 5'
   ]);
 
   assert.deepEqual(players.map((player) => player.id), beforeOrder);

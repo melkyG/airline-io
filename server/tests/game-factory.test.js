@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createGame, STARTING_CAPITAL } = require('../gameFactory');
+const { createGame, STARTING_CAPITAL, STARTING_SCORE, GAME_DURATION_MS, SCORE_TO_WIN } = require('../gameFactory');
 
 function makeLobbyPlayers() {
   return [
@@ -30,15 +30,19 @@ test('createGame builds the expected initial authoritative state shape', () => {
   assert.equal(game.status, 'active');
   assert.equal(typeof game.createdAt, 'number');
   assert.ok(Number.isFinite(game.createdAt));
+  assert.equal(game.startedAt, game.createdAt);
+  assert.equal(game.endsAt, game.startedAt + GAME_DURATION_MS);
+  assert.equal(game.durationMs, GAME_DURATION_MS);
+  assert.equal(game.scoreToWin, SCORE_TO_WIN);
 
   assert.equal(Array.isArray(game.players), true);
   assert.equal(game.players.length, 2);
 
   assert.deepEqual(
-    game.players.map((player) => ({ id: player.id, username: player.username })),
+    game.players.map((player) => ({ id: player.id, username: player.username, score: player.score })),
     [
-      { id: 'socket-1', username: 'Alice' },
-      { id: 'socket-2', username: 'Bob' }
+      { id: 'socket-1', username: 'Alice', score: STARTING_SCORE },
+      { id: 'socket-2', username: 'Bob', score: STARTING_SCORE }
     ]
   );
 
@@ -64,9 +68,11 @@ test('mutating game players does not mutate original lobby players', () => {
 
   game.players[0].username = 'Changed';
   game.players[0].capital = 0;
+  game.players[0].score = 99;
 
   assert.equal(lobbyPlayers[0].displayName, 'Alice');
   assert.equal(lobbyPlayers[0].capital, undefined);
+  assert.equal(lobbyPlayers[0].score, 5);
 });
 
 test('two games are independent objects and have different IDs', () => {

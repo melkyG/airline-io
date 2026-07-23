@@ -31,11 +31,6 @@
       leaderboard: documentRef.getElementById('leaderboard')
     };
 
-    function formatCapital(value) {
-      const numeric = Number.isFinite(value) ? value : 0;
-      return numeric.toLocaleString();
-    }
-
     function renderConnectionStatus(state) {
       const presentation = getConnectionPresentation(state.connection.status);
       elements.connectionStatus.textContent = presentation.text;
@@ -116,17 +111,18 @@
 
       const sourcePlayers = Array.isArray(state.game && state.game.players) ? state.game.players : [];
       const leaderboard = [...sourcePlayers].sort((left, right) => {
-        const leftCapital = Number.isFinite(left.capital) ? left.capital : 0;
-        const rightCapital = Number.isFinite(right.capital) ? right.capital : 0;
-        return rightCapital - leftCapital;
+        const leftScore = Number.isFinite(left.score) ? left.score : 0;
+        const rightScore = Number.isFinite(right.score) ? right.score : 0;
+        return rightScore - leftScore;
       });
 
       const fragment = documentRef.createDocumentFragment();
 
-      leaderboard.forEach((player, index) => {
+      leaderboard.forEach((player) => {
         const item = documentRef.createElement('li');
         const username = player && player.username ? player.username : 'Unknown';
-        item.textContent = `${username} $${formatCapital(player.capital)}`;
+        const score = Number.isFinite(player && player.score) ? player.score : 0;
+        item.textContent = `${username} — ${score}`;
         fragment.appendChild(item);
       });
 

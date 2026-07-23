@@ -19,6 +19,10 @@ function getEmptyGameState() {
     id: null,
     status: null,
     createdAt: null,
+    startedAt: null,
+    endsAt: null,
+    durationMs: null,
+    scoreToWin: null,
     players: [],
     airports: []
   };
