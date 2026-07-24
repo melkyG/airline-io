@@ -602,6 +602,10 @@ body {
 }
 
 @media (max-width: 700px), (max-height: 500px) and (orientation: landscape) {
+  .main-content.game-active {
+    --leaderboard-mobile-scale: 0.45;
+  }
+
   .banner {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr);
     align-items: center;
@@ -683,9 +687,13 @@ body {
   }
 
   .main-content.game-active .game-panel {
-    top: 0.75rem;
-    right: 0.75rem;
+    top: 0.45rem;
+    right: 0.45rem;
     width: min(260px, 70vw);
+    max-height: calc(100dvh - 0.9rem);
+    transform: scale(var(--leaderboard-mobile-scale));
+    transform-origin: top right;
+    pointer-events: none;
   }
 
   .main-content.game-active .hud-dev-button {
