@@ -680,7 +680,31 @@ body {
 
   .results-modal {
     width: min(560px, 95vw);
-    padding: 1rem;
+    max-height: calc(100% - 0.7rem);
+    padding: 0.7rem 0.9rem 0.85rem;
+  }
+
+  .results-overlay {
+    padding: 0.35rem 0.5rem 0.35rem;
+  }
+
+  .results-modal h2 {
+    margin: 0.1rem 0 0.6rem;
+    font-size: 1.2rem;
+  }
+
+  .results-winner {
+    margin: 1rem 0;
+    font-size: 1.08rem;
+  }
+
+  .results-standings-header {
+    margin-top: 0.55rem;
+    padding-bottom: 0.28rem;
+  }
+
+  .results-standings {
+    margin-top: 0.3rem;
   }
 
   .lobby-panel,
