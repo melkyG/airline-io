@@ -116,7 +116,7 @@ renderer.render(gameState.getState());
 function sanitizeUsername(rawValue) {
   const trimmed = (rawValue || '').trim();
   const cleaned = trimmed.replace(/[^A-Za-z0-9 _-]/g, '');
-  return cleaned.slice(0, 20);
+  return cleaned.slice(0, 25);
 }
 
 function generateUsername() {
@@ -160,7 +160,8 @@ function applyLobbySnapshot(payload) {
 
 setInterval(() => {
   gameState.update((state) => {
-    if (state.lobby.status !== 'waiting') {
+    const shouldAnimateLobbyDots = state.lobby.status === 'waiting' || state.lobby.status === 'countdown';
+    if (!shouldAnimateLobbyDots) {
       return null;
     }
 

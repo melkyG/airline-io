@@ -37,7 +37,7 @@ class GameManager {
   normalizeUsername(username) {
     const trimmed = (username || '').trim();
     const sanitized = trimmed.replace(/[^A-Za-z0-9 _-]/g, '');
-    const cleaned = sanitized.slice(0, 20);
+    const cleaned = sanitized.slice(0, 25);
     return cleaned || this.generateFunnyUsername();
   }
 
