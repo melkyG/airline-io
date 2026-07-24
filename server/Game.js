@@ -1,3 +1,10 @@
+const { AIRPORT_CATALOG } = require('./airports/catalog');
+
+const AIRPORT_DEFINITIONS_BY_ID = AIRPORT_CATALOG.reduce((lookup, airport) => {
+  lookup.set(airport.id, airport);
+  return lookup;
+}, new Map());
+
 class Game {
   constructor(initialState, manager) {
     this.id = initialState.id;
@@ -187,12 +194,40 @@ class Game {
     return true;
   }
 
+  createPublicAirportSnapshot() {
+    const airportStates = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
+
+    return airportStates.reduce((publicAirports, airportState) => {
+      const definition = AIRPORT_DEFINITIONS_BY_ID.get(airportState.airportId);
+      if (!definition) {
+        console.warn(
+          `Game ${this.id} has airport state for unknown airport ID: ${String(airportState.airportId)}`
+        );
+        return publicAirports;
+      }
+
+      publicAirports.push({
+        id: definition.id,
+        iata: definition.iata,
+        name: definition.name,
+        city: definition.city,
+        country: definition.country,
+        lat: definition.lat,
+        lng: definition.lng,
+        size: definition.size,
+        ownerPlayerId: airportState.ownerPlayerId ?? null
+      });
+
+      return publicAirports;
+    }, []);
+  }
+
   getPublicState() {
     return {
       game: {
         ...this.authoritativeState,
         players: this.authoritativeState.players.map((player) => ({ ...player })),
-        airports: this.authoritativeState.airports.map((airport) => ({ ...airport }))
+        airports: this.createPublicAirportSnapshot()
       }
     };
   }

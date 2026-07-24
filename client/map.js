@@ -1,6 +1,15 @@
 (function bootstrapMapModule(globalScope) {
   const WORLD_BOUNDS = [[-85.0511, -180], [85.0511, 180]];
   const BASEMAP_MAX_ZOOM = 6;
+  const AIRPORT_ICON =
+    typeof globalScope.L !== 'undefined'
+      ? globalScope.L.divIcon({
+          className: 'airport-marker',
+          html: '<span class="airport-marker-dot" aria-hidden="true"></span>',
+          iconSize: [14, 14],
+          iconAnchor: [7, 7]
+        })
+      : null;
   const BASEMAP_CONFIG = {
     name: 'Stadia.AlidadeSmoothVector',
     styleUrl: '/assets/map-style/airline-basemap.json',
@@ -26,6 +35,73 @@
     let hasFittedWorld = false;
     const markerCollection = [];
     const routeCollection = [];
+    const airportMarkersById = new Map();
+
+    function getAirportMarkerId(airport, index) {
+      if (airport && airport.id) {
+        return String(airport.id);
+      }
+
+      if (airport && airport.iata) {
+        return String(airport.iata);
+      }
+
+      return `airport-${index}`;
+    }
+
+    function clearAirportMarkers(map) {
+      airportMarkersById.forEach((marker) => {
+        map.removeLayer(marker);
+      });
+
+      airportMarkersById.clear();
+    }
+
+    function syncAirportMarkers(map, airports) {
+      const sourceAirports = Array.isArray(airports) ? airports : [];
+      const activeMarkerIds = new Set();
+
+      sourceAirports.forEach((airport, index) => {
+        const lat = Number(airport && airport.lat);
+        const lng = Number(airport && airport.lng);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          return;
+        }
+
+        const markerId = getAirportMarkerId(airport, index);
+        activeMarkerIds.add(markerId);
+
+        const existingMarker = airportMarkersById.get(markerId);
+        if (existingMarker) {
+          existingMarker.setLatLng([lat, lng]);
+          return;
+        }
+
+        const markerOptions = {
+          interactive: false,
+          keyboard: false
+        };
+
+        if (AIRPORT_ICON) {
+          markerOptions.icon = AIRPORT_ICON;
+        }
+
+        const marker = globalScope.L.marker([lat, lng], markerOptions);
+
+        marker.addTo(map);
+        airportMarkersById.set(markerId, marker);
+      });
+
+      Array.from(airportMarkersById.entries()).forEach(([markerId, marker]) => {
+        if (activeMarkerIds.has(markerId)) {
+          return;
+        }
+
+        map.removeLayer(marker);
+        airportMarkersById.delete(markerId);
+      });
+    }
 
     function canMeasureViewport() {
       return !!mapContainer && mapContainer.clientWidth > 0 && mapContainer.clientHeight > 0;
@@ -97,6 +173,10 @@
 
     function render(state) {
       if (!state || !state.ui || state.ui.screen !== 'game') {
+        if (mapInstance) {
+          clearAirportMarkers(mapInstance);
+          mapContainer.classList.remove('map-visible');
+        }
         return;
       }
 
@@ -109,6 +189,7 @@
       const shouldForceFit = !hasFittedWorld || Math.abs(map.getZoom() - map.getMinZoom()) < 0.0001;
       map.invalidateSize();
       updateViewportMinZoom(map, { forceFit: shouldForceFit });
+      syncAirportMarkers(map, state.game && state.game.airports);
       hasFittedWorld = true;
     }
 

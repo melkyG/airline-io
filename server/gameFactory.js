@@ -1,9 +1,17 @@
 const { randomUUID } = require('node:crypto');
+const { AIRPORT_CATALOG } = require('./airports/catalog');
 
 const STARTING_CAPITAL = 1000000;
 const STARTING_SCORE = 0;
 const GAME_DURATION_MS = 30 * 60 * 1000;
 const SCORE_TO_WIN = 1000;
+
+function createInitialAirportState() {
+  return AIRPORT_CATALOG.map((airport) => ({
+    airportId: airport.id,
+    ownerPlayerId: null
+  }));
+}
 
 function createGame(lobbyPlayers) {
   const startedAt = Date.now();
@@ -23,7 +31,7 @@ function createGame(lobbyPlayers) {
     durationMs: GAME_DURATION_MS,
     scoreToWin: SCORE_TO_WIN,
     players,
-    airports: []
+    airports: createInitialAirportState()
   };
 }
 

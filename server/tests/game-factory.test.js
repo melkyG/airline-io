@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createGame, STARTING_CAPITAL, STARTING_SCORE, GAME_DURATION_MS, SCORE_TO_WIN } = require('../gameFactory');
+const { AIRPORT_CATALOG } = require('../airports/catalog');
 
 function makeLobbyPlayers() {
   return [
@@ -51,7 +52,7 @@ test('createGame builds the expected initial authoritative state shape', () => {
     [STARTING_CAPITAL, STARTING_CAPITAL]
   );
 
-  assert.deepEqual(game.airports, []);
+  assert.deepEqual(game.airports, [{ airportId: 'YYZ', ownerPlayerId: null }]);
 });
 
 test('createGame does not reuse lobby player object references', () => {
@@ -87,4 +88,35 @@ test('two games are independent objects and have different IDs', () => {
   gameA.players[0].username = 'Altered A';
 
   assert.equal(gameB.players[0].username, 'Alice');
+});
+
+test('two games do not share mutable airport-state object references', () => {
+  const lobbyPlayers = makeLobbyPlayers();
+  const gameA = createGame(lobbyPlayers);
+  const gameB = createGame(lobbyPlayers);
+
+  assert.notEqual(gameA.airports, gameB.airports);
+  assert.notEqual(gameA.airports[0], gameB.airports[0]);
+
+  gameA.airports[0].ownerPlayerId = gameA.players[0].id;
+
+  assert.equal(gameA.airports[0].ownerPlayerId, gameA.players[0].id);
+  assert.equal(gameB.airports[0].ownerPlayerId, null);
+});
+
+test('airport catalog is immutable shared static world data', () => {
+  assert.equal(Object.isFrozen(AIRPORT_CATALOG), true);
+  assert.equal(Array.isArray(AIRPORT_CATALOG), true);
+  assert.equal(AIRPORT_CATALOG.length, 1);
+  assert.equal(Object.isFrozen(AIRPORT_CATALOG[0]), true);
+
+  const originalName = AIRPORT_CATALOG[0].name;
+
+  try {
+    AIRPORT_CATALOG[0].name = 'Changed';
+  } catch (error) {
+    // Assignment to frozen objects may throw in strict mode.
+  }
+
+  assert.equal(AIRPORT_CATALOG[0].name, originalName);
 });

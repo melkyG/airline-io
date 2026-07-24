@@ -398,6 +398,21 @@ body {
   font: inherit;
 }
 
+.airport-marker {
+  background: transparent;
+  border: 0;
+}
+
+.airport-marker-dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(15, 23, 42, 0.9);
+  background: #38bdf8;
+  box-shadow: 0 0 0 2px rgba(226, 232, 240, 0.9);
+}
+
 .game-panel {
   background: rgba(15, 23, 42, 0.75);
   border-radius: 12px;
