@@ -1,0 +1,1175 @@
+{
+  "bearing": 0,
+  "center": [
+    10.184401828277087,
+    -1.1368683772161605e-13
+  ],
+  "glyphs": "https://tiles.stadiamaps.com/fonts/{fontstack}/{range}.pbf",
+  "layers": [
+    {
+      "id": "background",
+      "paint": {
+        "background-color": "rgb(242,243,240)"
+      },
+      "type": "background"
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "in",
+          "admin_level",
+          3,
+          4
+        ],
+        [
+          "!=",
+          "maritime",
+          1
+        ]
+      ],
+      "id": "boundary_state",
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "visible"
+      },
+      "paint": {
+        "line-blur": 0.4,
+        "line-color": "rgb(230, 204, 207)",
+        "line-dasharray": [
+          3,
+          3
+        ],
+        "line-opacity": 0.5,
+        "line-width": {
+          "base": 1.15,
+          "stops": [
+            [
+              2,
+              0.45
+            ],
+            [
+              6,
+              0.9
+            ],
+            [
+              10,
+              1.4
+            ],
+            [
+              22,
+              4
+            ]
+          ]
+        }
+      },
+      "source": "openmaptiles",
+      "source-layer": "boundary",
+      "type": "line"
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "==",
+          "admin_level",
+          2
+        ],
+        [
+          "!=",
+          "maritime",
+          1
+        ]
+      ],
+      "id": "boundary_country",
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-blur": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              0.4
+            ],
+            [
+              22,
+              4
+            ]
+          ]
+        },
+        "line-color": "rgb(230, 204, 207)",
+        "line-opacity": 0.9,
+        "line-width": {
+          "base": 1.1,
+          "stops": [
+            [
+              2,
+              0.8
+            ],
+            [
+              6,
+              1.4
+            ],
+            [
+              10,
+              2.2
+            ],
+            [
+              22,
+              12
+            ]
+          ]
+        }
+      },
+      "source": "openmaptiles",
+      "source-layer": "boundary",
+      "type": "line"
+    },
+    {
+      "filter": [
+        "==",
+        "$type",
+        "Polygon"
+      ],
+      "id": "water",
+      "layout": {
+        "visibility": "visible"
+      },
+      "paint": {
+        "fill-antialias": true,
+        "fill-color": "#c1c9cc"
+      },
+      "source": "openmaptiles",
+      "source-layer": "water",
+      "type": "fill"
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "Point"
+        ],
+        [
+          "all",
+          [
+            "!=",
+            "capital",
+            2
+          ],
+          [
+            "==",
+            "class",
+            "city"
+          ],
+          [
+            ">",
+            "rank",
+            3
+          ],
+          [
+            "<=",
+            "rank",
+            8
+          ]
+        ]
+      ],
+      "id": "place_city",
+      "layout": {
+        "icon-image": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              "circle-11"
+            ],
+            [
+              8,
+              ""
+            ]
+          ]
+        },
+        "icon-size": 0.4,
+        "text-anchor": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              "left"
+            ],
+            [
+              8,
+              "center"
+            ]
+          ]
+        },
+        "text-field": [
+          "let",
+          "latin",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:latin"
+            ],
+            ""
+          ],
+          "nonlatin",
+          [
+            "case",
+            [
+              "all",
+              [
+                "has",
+                "name:nonlatin"
+              ],
+              [
+                "is-supported-script",
+                [
+                  "get",
+                  "name:nonlatin"
+                ]
+              ]
+            ],
+            [
+              "get",
+              "name:nonlatin"
+            ],
+            ""
+          ],
+          [
+            "case",
+            [
+              "all",
+              [
+                "!=",
+                [
+                  "var",
+                  "latin"
+                ],
+                ""
+              ],
+              [
+                "!=",
+                [
+                  "var",
+                  "nonlatin"
+                ],
+                ""
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              "\n",
+              [
+                "var",
+                "nonlatin"
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              [
+                "var",
+                "nonlatin"
+              ]
+            ]
+          ]
+        ],
+        "text-font": [
+          "Stadia Regular"
+        ],
+        "text-justify": "left",
+        "text-line-height": 1.55,
+        "text-offset": [
+          0.5,
+          0.2
+        ],
+        "text-size": {
+          "base": 1,
+          "stops": [
+            [
+              3,
+              10
+            ],
+            [
+              14,
+              18
+            ]
+          ]
+        },
+        "text-transform": "uppercase",
+        "visibility": "visible"
+      },
+      "paint": {
+        "icon-opacity": 0.7,
+        "text-color": "rgb(117, 129, 145)",
+        "text-halo-blur": 1,
+        "text-halo-color": "rgb(242,243,240)",
+        "text-halo-width": 1
+      },
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "type": "symbol",
+      "minzoom": 4
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "Point"
+        ],
+        [
+          "all",
+          [
+            "!=",
+            "capital",
+            2
+          ],
+          [
+            "<=",
+            "rank",
+            3
+          ],
+          [
+            "==",
+            "class",
+            "city"
+          ]
+        ]
+      ],
+      "id": "place_city_large",
+      "layout": {
+        "icon-image": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              "circle-11"
+            ],
+            [
+              8,
+              ""
+            ]
+          ]
+        },
+        "icon-size": 0.4,
+        "text-anchor": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              "left"
+            ],
+            [
+              8,
+              "center"
+            ]
+          ]
+        },
+        "text-field": [
+          "let",
+          "latin",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:latin"
+            ],
+            ""
+          ],
+          "nonlatin",
+          [
+            "case",
+            [
+              "all",
+              [
+                "has",
+                "name:nonlatin"
+              ],
+              [
+                "is-supported-script",
+                [
+                  "get",
+                  "name:nonlatin"
+                ]
+              ]
+            ],
+            [
+              "get",
+              "name:nonlatin"
+            ],
+            ""
+          ],
+          [
+            "case",
+            [
+              "all",
+              [
+                "!=",
+                [
+                  "var",
+                  "latin"
+                ],
+                ""
+              ],
+              [
+                "!=",
+                [
+                  "var",
+                  "nonlatin"
+                ],
+                ""
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              "\n",
+              [
+                "var",
+                "nonlatin"
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              [
+                "var",
+                "nonlatin"
+              ]
+            ]
+          ]
+        ],
+        "text-font": [
+          "Stadia Regular"
+        ],
+        "text-justify": "left",
+        "text-line-height": 1.55,
+        "text-offset": [
+          0.5,
+          0.2
+        ],
+        "text-size": {
+          "base": 1,
+          "stops": [
+            [
+              4,
+              11
+            ],
+            [
+              12,
+              18
+            ],
+            [
+              14,
+              22
+            ]
+          ]
+        },
+        "text-transform": "uppercase",
+        "visibility": "visible"
+      },
+      "paint": {
+        "icon-opacity": 0.7,
+        "text-color": "rgb(117, 129, 145)",
+        "text-halo-blur": 1,
+        "text-halo-color": "rgb(242,243,240)",
+        "text-halo-width": 1
+      },
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "type": "symbol"
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "Point"
+        ],
+        [
+          "all",
+          [
+            "==",
+            "capital",
+            2
+          ],
+          [
+            "==",
+            "class",
+            "city"
+          ],
+          [
+            ">",
+            "rank",
+            3
+          ]
+        ]
+      ],
+      "id": "place_capital_gen1",
+      "layout": {
+        "icon-image": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              "star-11"
+            ],
+            [
+              8,
+              ""
+            ]
+          ]
+        },
+        "icon-size": 1,
+        "symbol-avoid-edges": true,
+        "text-anchor": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              "left"
+            ],
+            [
+              8,
+              "center"
+            ]
+          ]
+        },
+        "text-field": [
+          "let",
+          "latin",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:latin"
+            ],
+            ""
+          ],
+          "nonlatin",
+          [
+            "case",
+            [
+              "all",
+              [
+                "has",
+                "name:nonlatin"
+              ],
+              [
+                "is-supported-script",
+                [
+                  "get",
+                  "name:nonlatin"
+                ]
+              ]
+            ],
+            [
+              "get",
+              "name:nonlatin"
+            ],
+            ""
+          ],
+          [
+            "case",
+            [
+              "all",
+              [
+                "!=",
+                [
+                  "var",
+                  "latin"
+                ],
+                ""
+              ],
+              [
+                "!=",
+                [
+                  "var",
+                  "nonlatin"
+                ],
+                ""
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              "\n",
+              [
+                "var",
+                "nonlatin"
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              [
+                "var",
+                "nonlatin"
+              ]
+            ]
+          ]
+        ],
+        "text-font": [
+          "Stadia Regular"
+        ],
+        "text-justify": "left",
+        "text-line-height": 1.55,
+        "text-offset": [
+          0.5,
+          0.2
+        ],
+        "text-size": {
+          "base": 1,
+          "stops": [
+            [
+              3,
+              13
+            ],
+            [
+              14,
+              24
+            ]
+          ]
+        },
+        "text-transform": "uppercase",
+        "visibility": "visible"
+      },
+      "minzoom": 4,
+      "paint": {
+        "icon-opacity": 0.7,
+        "text-color": "rgb(117, 129, 145)",
+        "text-halo-blur": 1,
+        "text-halo-color": "rgb(242,243,240)",
+        "text-halo-width": 1
+      },
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "type": "symbol"
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "Point"
+        ],
+        [
+          "all",
+          [
+            "==",
+            "capital",
+            2
+          ],
+          [
+            "==",
+            "class",
+            "city"
+          ],
+          [
+            "<=",
+            "rank",
+            3
+          ]
+        ]
+      ],
+      "id": "place_capital_gen0",
+      "layout": {
+        "icon-image": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              "star-11"
+            ],
+            [
+              8,
+              ""
+            ]
+          ]
+        },
+        "icon-size": 1,
+        "text-anchor": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              "left"
+            ],
+            [
+              8,
+              "center"
+            ]
+          ]
+        },
+        "text-field": [
+          "let",
+          "latin",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:latin"
+            ],
+            ""
+          ],
+          "nonlatin",
+          [
+            "case",
+            [
+              "all",
+              [
+                "has",
+                "name:nonlatin"
+              ],
+              [
+                "is-supported-script",
+                [
+                  "get",
+                  "name:nonlatin"
+                ]
+              ]
+            ],
+            [
+              "get",
+              "name:nonlatin"
+            ],
+            ""
+          ],
+          [
+            "case",
+            [
+              "all",
+              [
+                "!=",
+                [
+                  "var",
+                  "latin"
+                ],
+                ""
+              ],
+              [
+                "!=",
+                [
+                  "var",
+                  "nonlatin"
+                ],
+                ""
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              "\n",
+              [
+                "var",
+                "nonlatin"
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              [
+                "var",
+                "nonlatin"
+              ]
+            ]
+          ]
+        ],
+        "text-font": [
+          "Stadia Regular"
+        ],
+        "text-justify": "left",
+        "text-line-height": 1.55,
+        "text-offset": [
+          0.5,
+          0.2
+        ],
+        "text-size": {
+          "base": 1,
+          "stops": [
+            [
+              3,
+              13
+            ],
+            [
+              14,
+              24
+            ]
+          ]
+        },
+        "text-transform": "uppercase",
+        "visibility": "visible"
+      },
+      "paint": {
+        "icon-opacity": 0.7,
+        "text-color": "rgb(117, 129, 145)",
+        "text-halo-blur": 1,
+        "text-halo-color": "rgb(242,243,240)",
+        "text-halo-width": 1
+      },
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "type": "symbol"
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "Point"
+        ],
+        [
+          "all",
+          [
+            "==",
+            "class",
+            "country"
+          ],
+          [
+            ">=",
+            "rank",
+            2
+          ]
+        ]
+      ],
+      "id": "place_country_other",
+      "layout": {
+        "symbol-avoid-edges": true,
+        "text-field": [
+          "let",
+          "latin",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:latin"
+            ],
+            ""
+          ],
+          "nonlatin",
+          [
+            "case",
+            [
+              "all",
+              [
+                "has",
+                "name:nonlatin"
+              ],
+              [
+                "is-supported-script",
+                [
+                  "get",
+                  "name:nonlatin"
+                ]
+              ]
+            ],
+            [
+              "get",
+              "name:nonlatin"
+            ],
+            ""
+          ],
+          [
+            "case",
+            [
+              "all",
+              [
+                "!=",
+                [
+                  "var",
+                  "latin"
+                ],
+                ""
+              ],
+              [
+                "!=",
+                [
+                  "var",
+                  "nonlatin"
+                ],
+                ""
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              "\n",
+              [
+                "var",
+                "nonlatin"
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              [
+                "var",
+                "nonlatin"
+              ]
+            ]
+          ]
+        ],
+        "text-font": [
+          "Stadia Semibold"
+        ],
+        "text-letter-spacing": 0.05,
+        "text-line-height": 1.55,
+        "text-padding": 10,
+        "text-size": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              12
+            ],
+            [
+              6,
+              14
+            ],
+            [
+              9,
+              24
+            ]
+          ]
+        },
+        "text-transform": "uppercase",
+        "visibility": "visible"
+      },
+      "maxzoom": 10,
+      "minzoom": 1,
+      "paint": {
+        "text-color": {
+          "base": 1,
+          "stops": [
+            [
+              3,
+              "rgb(157,169,177)"
+            ],
+            [
+              4,
+              "rgb(153, 153, 153)"
+            ]
+          ]
+        },
+        "text-halo-color": "rgba(236,236,234,0.7)",
+        "text-halo-width": 1.4
+      },
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "type": "symbol"
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "Point"
+        ],
+        [
+          "all",
+          [
+            "<=",
+            "rank",
+            1
+          ],
+          [
+            "==",
+            "class",
+            "country"
+          ]
+        ]
+      ],
+      "id": "place_country_major",
+      "layout": {
+        "symbol-avoid-edges": true,
+        "text-anchor": "center",
+        "text-field": [
+          "let",
+          "latin",
+          [
+            "coalesce",
+            [
+              "get",
+              "name:latin"
+            ],
+            ""
+          ],
+          "nonlatin",
+          [
+            "case",
+            [
+              "all",
+              [
+                "has",
+                "name:nonlatin"
+              ],
+              [
+                "is-supported-script",
+                [
+                  "get",
+                  "name:nonlatin"
+                ]
+              ]
+            ],
+            [
+              "get",
+              "name:nonlatin"
+            ],
+            ""
+          ],
+          [
+            "case",
+            [
+              "all",
+              [
+                "!=",
+                [
+                  "var",
+                  "latin"
+                ],
+                ""
+              ],
+              [
+                "!=",
+                [
+                  "var",
+                  "nonlatin"
+                ],
+                ""
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              "\n",
+              [
+                "var",
+                "nonlatin"
+              ]
+            ],
+            [
+              "concat",
+              [
+                "var",
+                "latin"
+              ],
+              [
+                "var",
+                "nonlatin"
+              ]
+            ]
+          ]
+        ],
+        "text-font": [
+          "Stadia Semibold"
+        ],
+        "text-letter-spacing": 0.05,
+        "text-line-height": 1.55,
+        "text-size": {
+          "base": 1.4,
+          "stops": [
+            [
+              0,
+              12
+            ],
+            [
+              6,
+              16
+            ],
+            [
+              9,
+              24
+            ]
+          ]
+        },
+        "text-transform": "uppercase",
+        "visibility": "visible"
+      },
+      "maxzoom": 10,
+      "minzoom": 1,
+      "paint": {
+        "text-color": {
+          "base": 1,
+          "stops": [
+            [
+              3,
+              "rgb(157,169,177)"
+            ],
+            [
+              4,
+              "rgb(153, 153, 153)"
+            ]
+          ]
+        },
+        "text-halo-color": "rgba(236,236,234,0.7)",
+        "text-halo-width": 1.4
+      },
+      "source": "openmaptiles",
+      "source-layer": "place",
+      "type": "symbol"
+    }
+  ],
+  "metadata": {
+    "mapbox:autocomposite": false,
+    "openmaptiles:version": "3.x"
+  },
+  "name": "Airline Basemap",
+  "pitch": 0,
+  "sources": {
+    "openmaptiles": {
+      "type": "vector",
+      "scheme": "xyz",
+      "url": "https://tiles.stadiamaps.com/data/openmaptiles.json"
+    }
+  },
+  "sprite": "https://tiles.stadiamaps.com/styles/alidade-smooth/sprite",
+  "version": 8,
+  "zoom": 0.89026415
+}

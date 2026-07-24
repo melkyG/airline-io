@@ -1,29 +1,22 @@
 (function bootstrapMapModule(globalScope) {
   const WORLD_BOUNDS = [[-85.0511, -180], [85.0511, 180]];
   const BASEMAP_MAX_ZOOM = 6;
-  const STADIA_API_KEY = '';
   const BASEMAP_CONFIG = {
-    name: 'Stadia.AlidadeSmooth',
-    tileUrl: 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png',
+    name: 'Stadia.AlidadeSmoothVector',
+    styleUrl: '/assets/map-style/airline-basemap.json',
+    apiKey: '',
     attribution:
       '&copy; <a href="https://stadiamaps.com/" target="_blank">Stadia Maps</a> ' +
       '&copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> ' +
       '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>',
-    apiKey: STADIA_API_KEY
-  };
-  const TILE_OPTIONS = {
-    attribution: BASEMAP_CONFIG.attribution,
-    noWrap: true,
-    bounds: WORLD_BOUNDS,
-    maxZoom: BASEMAP_MAX_ZOOM
   };
 
-  function getBasemapTileUrl() {
+  function getBasemapStyleUrl() {
     if (!BASEMAP_CONFIG.apiKey) {
-      return BASEMAP_CONFIG.tileUrl;
+      return BASEMAP_CONFIG.styleUrl;
     }
 
-    return `${BASEMAP_CONFIG.tileUrl}?api_key=${encodeURIComponent(BASEMAP_CONFIG.apiKey)}`;
+    return `${BASEMAP_CONFIG.styleUrl}?api_key=${encodeURIComponent(BASEMAP_CONFIG.apiKey)}`;
   }
 
   function createMapRenderer(documentRef) {
@@ -82,7 +75,10 @@
         maxBoundsViscosity: 1
       }).setView([20, 0], 2);
 
-      globalScope.L.tileLayer(getBasemapTileUrl(), TILE_OPTIONS).addTo(mapInstance);
+      globalScope.L.maplibreGL({
+        style: getBasemapStyleUrl(),
+        attribution: BASEMAP_CONFIG.attribution
+      }).addTo(mapInstance);
       mapInstance.setMaxBounds(WORLD_BOUNDS);
       updateViewportMinZoom(mapInstance, { forceFit: true });
 
