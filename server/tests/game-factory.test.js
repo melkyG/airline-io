@@ -52,7 +52,7 @@ test('createGame builds the expected initial authoritative state shape', () => {
     [STARTING_CAPITAL, STARTING_CAPITAL]
   );
 
-  assert.deepEqual(game.airports, [{ airportId: 'YYZ', ownerPlayerId: null }]);
+  assert.deepEqual(game.airports, [{ airportId: 'YYZ', ownerPlayerId: null, saleListing: null }]);
 });
 
 test('createGame does not reuse lobby player object references', () => {
@@ -99,9 +99,12 @@ test('two games do not share mutable airport-state object references', () => {
   assert.notEqual(gameA.airports[0], gameB.airports[0]);
 
   gameA.airports[0].ownerPlayerId = gameA.players[0].id;
+  gameA.airports[0].saleListing = { sellerPlayerId: gameA.players[0].id, listPrice: 350000 };
 
   assert.equal(gameA.airports[0].ownerPlayerId, gameA.players[0].id);
+  assert.deepEqual(gameA.airports[0].saleListing, { sellerPlayerId: gameA.players[0].id, listPrice: 350000 });
   assert.equal(gameB.airports[0].ownerPlayerId, null);
+  assert.equal(gameB.airports[0].saleListing, null);
 });
 
 test('airport catalog is immutable shared static world data', () => {
@@ -111,12 +114,15 @@ test('airport catalog is immutable shared static world data', () => {
   assert.equal(Object.isFrozen(AIRPORT_CATALOG[0]), true);
 
   const originalName = AIRPORT_CATALOG[0].name;
+  const originalBasePrice = AIRPORT_CATALOG[0].basePrice;
 
   try {
     AIRPORT_CATALOG[0].name = 'Changed';
+    AIRPORT_CATALOG[0].basePrice = 1;
   } catch (error) {
     // Assignment to frozen objects may throw in strict mode.
   }
 
   assert.equal(AIRPORT_CATALOG[0].name, originalName);
+  assert.equal(AIRPORT_CATALOG[0].basePrice, originalBasePrice);
 });

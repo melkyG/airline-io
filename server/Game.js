@@ -215,18 +215,34 @@ class Game {
         lat: definition.lat,
         lng: definition.lng,
         size: definition.size,
-        ownerPlayerId: airportState.ownerPlayerId ?? null
+        basePrice: definition.basePrice,
+        ownerPlayerId: airportState.ownerPlayerId ?? null,
+        saleListing:
+          airportState.saleListing && typeof airportState.saleListing === 'object'
+            ? { ...airportState.saleListing }
+            : null
       });
 
       return publicAirports;
     }, []);
   }
 
+  createPublicPlayerSnapshot() {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+
+    return players.map((player) => ({
+      id: player.id,
+      username: player.username,
+      score: player.score,
+      capital: player.capital
+    }));
+  }
+
   getPublicState() {
     return {
       game: {
         ...this.authoritativeState,
-        players: this.authoritativeState.players.map((player) => ({ ...player })),
+        players: this.createPublicPlayerSnapshot(),
         airports: this.createPublicAirportSnapshot()
       }
     };

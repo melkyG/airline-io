@@ -1,13 +1,21 @@
 (function bootstrapMapModule(globalScope) {
   const WORLD_BOUNDS = [[-85.0511, -180], [85.0511, 180]];
-  const BASEMAP_MAX_ZOOM = 6;
+  const BASEMAP_MAX_ZOOM = 7;
+  const AIRPORT_ICON_SIZE = 48;
   const AIRPORT_ICON =
     typeof globalScope.L !== 'undefined'
       ? globalScope.L.divIcon({
-          className: 'airport-marker',
-          html: '<span class="airport-marker-dot" aria-hidden="true"></span>',
-          iconSize: [14, 14],
-          iconAnchor: [7, 7]
+          className: 'airport-marker airport-marker--control-tower-svg',
+          html:
+            `<svg class="airport-marker-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
+            `<rect class="airport-marker-base" x="5.5" y="18" width="13" height="3" rx="1.6"/>` +
+            `<rect class="airport-marker-shaft" x="10.2" y="9.4" width="3.6" height="8.6" rx="1.6"/>` +
+            `<rect class="airport-marker-room" x="6.2" y="4.2" width="11.6" height="6.2" rx="2.1"/>` +
+            `<rect class="airport-marker-window" x="8" y="6.2" width="8" height="2" rx="0.8"/>` +
+            `<rect class="airport-marker-antenna" x="11.55" y="2" width="1" height="2.4" rx="0.45"/>` +
+            `</svg>`,
+          iconSize: [AIRPORT_ICON_SIZE, AIRPORT_ICON_SIZE],
+          iconAnchor: [AIRPORT_ICON_SIZE / 2, AIRPORT_ICON_SIZE / 2]
         })
       : null;
   const BASEMAP_CONFIG = {

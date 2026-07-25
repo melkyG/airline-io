@@ -399,10 +399,208 @@ body {
 }
 
 .airport-marker {
+  position: relative;
+  pointer-events: none;
   background: transparent;
   border: 0;
+  --airport-marker-stroke: #1f2937;
+  --airport-marker-room-fill: #0ea5e9;
+  --airport-marker-shaft-fill: #334155;
+  --airport-marker-base-fill: #0f172a;
+  --airport-marker-window-fill: #e2e8f0;
+  --airport-marker-antenna-fill: #1f2937;
 }
 
+.airport-marker-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 1px 1px rgba(15, 23, 42, 0.35));
+}
+
+.airport-marker-base {
+  fill: var(--airport-marker-base-fill);
+  stroke: var(--airport-marker-stroke);
+  stroke-width: 0.9;
+}
+
+.airport-marker-shaft {
+  fill: var(--airport-marker-shaft-fill);
+  stroke: var(--airport-marker-stroke);
+  stroke-width: 0.8;
+}
+
+.airport-marker-room {
+  fill: var(--airport-marker-room-fill);
+  stroke: var(--airport-marker-stroke);
+  stroke-width: 0.9;
+}
+
+.airport-marker-window {
+  fill: var(--airport-marker-window-fill);
+  opacity: 0.95;
+}
+
+.airport-marker-antenna {
+  fill: var(--airport-marker-antenna-fill);
+}
+
+.airport-marker-core,
+.airport-marker-accent {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.airport-marker-core::before,
+.airport-marker-core::after,
+.airport-marker-accent::before,
+.airport-marker-accent::after {
+  content: '';
+  position: absolute;
+  box-sizing: border-box;
+}
+
+/* 1) Minimal filled circle */
+.airport-marker--minimal-filled-circle .airport-marker-core::before {
+  inset: 3px;
+  border-radius: 50%;
+  background: #0ea5e9;
+  border: 2px solid rgba(15, 23, 42, 0.88);
+  box-shadow: 0 0 0 2px rgba(241, 245, 249, 0.9);
+}
+
+/* 2) Outlined circle */
+.airport-marker--outlined-circle .airport-marker-core::before {
+  inset: 2px;
+  border-radius: 50%;
+  background: rgba(248, 250, 252, 0.85);
+  border: 2px solid #334155;
+}
+
+/* 3) Airplane silhouette */
+.airport-marker--airplane-silhouette .airport-marker-core::before {
+  content: '\2708';
+  inset: 0;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  transform: rotate(-20deg);
+  text-shadow: 0 1px 0 rgba(248, 250, 252, 0.95);
+}
+
+/* 4) Runway */
+.airport-marker--runway .airport-marker-core::before {
+  left: 6px;
+  top: 2px;
+  width: 6px;
+  height: 14px;
+  border-radius: 3px;
+  background: #475569;
+  transform: rotate(28deg);
+}
+
+.airport-marker--runway .airport-marker-accent::before {
+  left: 8px;
+  top: 4px;
+  width: 2px;
+  height: 10px;
+  border-radius: 1px;
+  background: rgba(241, 245, 249, 0.95);
+  transform: rotate(28deg);
+}
+
+/* 5) Airport control tower */
+.airport-marker--control-tower .airport-marker-core::before {
+  left: 7px;
+  bottom: 3px;
+  width: 4px;
+  height: 10px;
+  border-radius: 1px;
+  background: #334155;
+}
+
+.airport-marker--control-tower .airport-marker-core::after {
+  left: 4px;
+  top: 2px;
+  width: 10px;
+  height: 5px;
+  border-radius: 2px;
+  background: #0ea5e9;
+  border: 1px solid #1e293b;
+}
+
+/* 6) Hexagonal hub */
+.airport-marker--hex-hub .airport-marker-core::before {
+  inset: 2px;
+  background: #38bdf8;
+  clip-path: polygon(25% 6%, 75% 6%, 94% 50%, 75% 94%, 25% 94%, 6% 50%);
+  box-shadow: inset 0 0 0 2px #1e293b;
+}
+
+.airport-marker--hex-hub .airport-marker-accent::before {
+  left: 7px;
+  top: 7px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(241, 245, 249, 0.96);
+}
+
+/* 7) Aviation beacon */
+.airport-marker--beacon .airport-marker-core::before {
+  left: 6px;
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #0284c7;
+  border: 1px solid #1e293b;
+}
+
+.airport-marker--beacon .airport-marker-accent::before {
+  left: 2px;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(2, 132, 199, 0.45);
+}
+
+/* 8) Modern flat badge */
+.airport-marker--flat-badge .airport-marker-core::before {
+  left: 2px;
+  top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: #0f172a;
+  border: 1px solid #64748b;
+  box-shadow: 0 0 0 1px rgba(241, 245, 249, 0.75);
+}
+
+.airport-marker--flat-badge .airport-marker-accent::before {
+  left: 5px;
+  top: 5px;
+  width: 8px;
+  height: 2px;
+  border-radius: 2px;
+  background: #38bdf8;
+}
+
+.airport-marker--flat-badge .airport-marker-accent::after {
+  left: 6px;
+  top: 9px;
+  width: 6px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(148, 163, 184, 0.9);
+}
+
+/* Backward-compatible alias for previous single-style class if reused elsewhere. */
 .airport-marker-dot {
   display: block;
   width: 14px;

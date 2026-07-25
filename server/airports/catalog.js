@@ -7,7 +7,8 @@ const AIRPORT_CATALOG = Object.freeze([
     country: 'Canada',
     lat: 43.6777,
     lng: -79.6248,
-    size: 'large'
+    size: 'large',
+    basePrice: 300000
   })
 ]);
 

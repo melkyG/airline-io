@@ -9,7 +9,8 @@ const SCORE_TO_WIN = 1000;
 function createInitialAirportState() {
   return AIRPORT_CATALOG.map((airport) => ({
     airportId: airport.id,
-    ownerPlayerId: null
+    ownerPlayerId: null,
+    saleListing: null
   }));
 }
 
