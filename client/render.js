@@ -130,6 +130,7 @@
       const gameId = state.game && state.game.id ? state.game.id : null;
       elements.gameStatus.textContent = gameId ? `Game ${gameId} is active` : 'Game has started.';
       elements.leaderboard.innerHTML = '';
+      const localPlayerId = state && state.session ? state.session.playerId : null;
 
       const sourcePlayers = Array.isArray(state.game && state.game.players) ? state.game.players : [];
       const leaderboard = [...sourcePlayers].sort((left, right) => {
@@ -144,6 +145,11 @@
         const item = documentRef.createElement('li');
         item.className = 'leaderboard-row';
         const username = player && player.username ? player.username : 'Unknown';
+        const isLocalPlayer =
+          !!player &&
+          player.id != null &&
+          localPlayerId != null &&
+          String(player.id) === String(localPlayerId);
         const score = Number.isFinite(player && player.score) ? player.score : 0;
 
         const content = documentRef.createElement('div');
@@ -151,7 +157,7 @@
 
         const playerName = documentRef.createElement('span');
         playerName.className = 'leaderboard-player';
-        playerName.textContent = username;
+        playerName.textContent = isLocalPlayer ? `${username} (You)` : username;
 
         const spacer = documentRef.createElement('span');
         spacer.className = 'leaderboard-spacer';
