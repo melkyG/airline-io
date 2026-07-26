@@ -1,4 +1,6 @@
 const { AIRPORT_CATALOG } = require('./airports/catalog');
+const { AIRCRAFT_CATALOG, AIRCRAFT_CATALOG_BY_ID } = require('./aircraft/catalog');
+const { createOwnedAircraftInstance } = require('./aircraft/ownership');
 
 const AIRPORT_DEFINITIONS_BY_ID = AIRPORT_CATALOG.reduce((lookup, airport) => {
   lookup.set(airport.id, airport);
@@ -13,7 +15,8 @@ class Game {
     this.createdAt = initialState.createdAt;
     this.authoritativeState = {
       ...initialState,
-      status: initialState.status
+      status: initialState.status,
+      ownedAircraft: Array.isArray(initialState.ownedAircraft) ? initialState.ownedAircraft : []
     };
     this.endTimeoutId = null;
     this.hasBroadcastStarted = false;
@@ -248,6 +251,64 @@ class Game {
       playerId: player.id,
       airportId: airportDefinition.id,
       pricePaid: basePrice,
+      remainingCapital: player.capital
+    };
+  }
+
+  purchaseAircraftFromGame(playerId, aircraftCatalogId) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const normalizedAircraftCatalogId = String(aircraftCatalogId || '').trim();
+
+    const player = players.find((candidate) => candidate.id === playerId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player was not found in authoritative game state.'
+      };
+    }
+
+    const aircraftDefinition = AIRCRAFT_CATALOG_BY_ID[normalizedAircraftCatalogId];
+    const purchasePrice = aircraftDefinition ? aircraftDefinition.purchasePrice : null;
+    if (!aircraftDefinition || !Number.isFinite(purchasePrice) || purchasePrice < 0) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_NOT_FOUND',
+        message: 'Aircraft was not found.'
+      };
+    }
+
+    const currentCapital = Number.isFinite(player.capital) ? player.capital : 0;
+    if (currentCapital < purchasePrice) {
+      return {
+        success: false,
+        code: 'INSUFFICIENT_CAPITAL',
+        message: 'Player does not have enough capital for this purchase.'
+      };
+    }
+
+    const ownedAircraftInstance = createOwnedAircraftInstance({
+      ownerPlayerId: player.id,
+      aircraftCatalogId: aircraftDefinition.aircraftCatalogId,
+      acquisitionPrice: purchasePrice
+    });
+
+    player.capital = currentCapital - purchasePrice;
+    ownedAircraft.push(ownedAircraftInstance);
+    this.authoritativeState.ownedAircraft = ownedAircraft;
+
+    this.broadcastState();
+
+    return {
+      success: true,
+      code: 'OK',
+      playerId: player.id,
+      aircraftInstanceId: ownedAircraftInstance.aircraftInstanceId,
+      aircraftCatalogId: aircraftDefinition.aircraftCatalogId,
+      pricePaid: purchasePrice,
       remainingCapital: player.capital
     };
   }
@@ -553,12 +614,30 @@ class Game {
     }));
   }
 
+  createPublicOwnedAircraftSnapshot() {
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+
+    return ownedAircraft.map((aircraft) => ({
+      ...aircraft
+    }));
+  }
+
+  createPublicAircraftCatalogSnapshot() {
+    return AIRCRAFT_CATALOG.map((aircraft) => ({
+      ...aircraft
+    }));
+  }
+
   getPublicState() {
     return {
       game: {
         ...this.authoritativeState,
         players: this.createPublicPlayerSnapshot(),
-        airports: this.createPublicAirportSnapshot()
+        airports: this.createPublicAirportSnapshot(),
+        ownedAircraft: this.createPublicOwnedAircraftSnapshot(),
+        aircraftCatalog: this.createPublicAircraftCatalogSnapshot()
       }
     };
   }

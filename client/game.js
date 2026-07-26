@@ -12,6 +12,9 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
 });
 let gameCountdownIntervalId = null;
 let selectedAirportId = null;
+let selectedAircraftCatalogId = null;
+let isAircraftSelectionModalOpen = false;
+let isAircraftPurchasePending = false;
 
 function getEmptyLobbyState() {
   return {
@@ -34,7 +37,9 @@ function getEmptyGameState() {
     durationMs: null,
     scoreToWin: null,
     players: [],
-    airports: []
+    airports: [],
+    ownedAircraft: [],
+    aircraftCatalog: []
   };
 }
 
@@ -118,6 +123,7 @@ const renderer = window.createRenderer(document);
 gameState.subscribe((state) => {
   renderer.render(state);
   refreshAirportInteractionModal(state);
+  refreshAircraftSelectionModal(state);
 });
 renderer.render(gameState.getState());
 
@@ -163,6 +169,88 @@ if (gameScreenEl) {
   gameScreenEl.appendChild(airportModalOverlayEl);
 }
 
+const aircraftModalOverlayEl = document.createElement('div');
+aircraftModalOverlayEl.className = 'aircraft-interaction-overlay hidden';
+aircraftModalOverlayEl.setAttribute('aria-hidden', 'true');
+
+const aircraftModalDialogEl = document.createElement('div');
+aircraftModalDialogEl.className = 'aircraft-interaction-modal';
+aircraftModalDialogEl.setAttribute('role', 'dialog');
+aircraftModalDialogEl.setAttribute('aria-modal', 'true');
+
+const aircraftModalCloseButtonEl = document.createElement('button');
+aircraftModalCloseButtonEl.type = 'button';
+aircraftModalCloseButtonEl.className = 'aircraft-interaction-close';
+aircraftModalCloseButtonEl.setAttribute('aria-label', 'Close aircraft modal');
+aircraftModalCloseButtonEl.textContent = 'x';
+
+const aircraftModalTitleEl = document.createElement('h3');
+aircraftModalTitleEl.className = 'aircraft-interaction-title';
+
+const aircraftModalListEl = document.createElement('div');
+aircraftModalListEl.className = 'aircraft-interaction-list';
+
+const aircraftModalDetailsEl = document.createElement('div');
+aircraftModalDetailsEl.className = 'aircraft-interaction-details';
+
+const aircraftModalMessageEl = document.createElement('p');
+aircraftModalMessageEl.className = 'aircraft-interaction-row';
+
+const aircraftModalManufacturerValueEl = document.createElement('span');
+const aircraftModalPriceValueEl = document.createElement('span');
+const aircraftModalRangeValueEl = document.createElement('span');
+
+[
+  ['Manufacturer', aircraftModalManufacturerValueEl],
+  ['Price', aircraftModalPriceValueEl],
+  ['Range', aircraftModalRangeValueEl]
+].forEach(([label, valueEl]) => {
+  const row = document.createElement('p');
+  row.className = 'aircraft-interaction-row';
+  row.innerHTML = `<span class="aircraft-interaction-label">${label}:</span> `;
+  valueEl.className = 'aircraft-interaction-value';
+  row.appendChild(valueEl);
+  aircraftModalDetailsEl.appendChild(row);
+});
+
+const aircraftModalBuyButtonEl = document.createElement('button');
+aircraftModalBuyButtonEl.type = 'button';
+aircraftModalBuyButtonEl.className = 'aircraft-interaction-action-button';
+aircraftModalBuyButtonEl.textContent = 'Buy';
+aircraftModalBuyButtonEl.addEventListener('click', () => {
+  if (isAircraftPurchasePending) {
+    return;
+  }
+
+  const selectedAircraft = getSelectedAircraftCatalogEntry(gameState.getState());
+  if (!selectedAircraft) {
+    return;
+  }
+
+  isAircraftPurchasePending = true;
+  setAircraftModalMessage('Submitting purchase request...', 'info');
+  refreshAircraftSelectionModal(gameState.getState());
+  socket.emit('aircraft:purchase:request', {
+    aircraftCatalogId: selectedAircraft.aircraftCatalogId
+  });
+});
+
+const aircraftModalActionsEl = document.createElement('div');
+aircraftModalActionsEl.className = 'aircraft-interaction-actions';
+aircraftModalActionsEl.appendChild(aircraftModalBuyButtonEl);
+
+aircraftModalDialogEl.appendChild(aircraftModalCloseButtonEl);
+aircraftModalDialogEl.appendChild(aircraftModalTitleEl);
+aircraftModalDialogEl.appendChild(aircraftModalListEl);
+aircraftModalDialogEl.appendChild(aircraftModalDetailsEl);
+aircraftModalDialogEl.appendChild(aircraftModalMessageEl);
+aircraftModalDialogEl.appendChild(aircraftModalActionsEl);
+aircraftModalOverlayEl.appendChild(aircraftModalDialogEl);
+
+if (gameScreenEl) {
+  gameScreenEl.appendChild(aircraftModalOverlayEl);
+}
+
 function formatCurrencyValue(value) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
@@ -188,10 +276,39 @@ function getAuthoritativePlayerById(state, playerId) {
   return players.find((player) => player && String(player.id) === String(playerId)) || null;
 }
 
+function getAircraftCatalogEntries(state) {
+  const aircraftCatalog = Array.isArray(state && state.game && state.game.aircraftCatalog) ? state.game.aircraftCatalog : [];
+  return aircraftCatalog.filter((aircraft) => aircraft && typeof aircraft === 'object');
+}
+
+function getSelectedAircraftCatalogEntry(state) {
+  const aircraftCatalog = getAircraftCatalogEntries(state);
+  if (aircraftCatalog.length === 0) {
+    return null;
+  }
+
+  const selectedAircraft = aircraftCatalog.find(
+    (aircraft) => String(aircraft.aircraftCatalogId) === String(selectedAircraftCatalogId)
+  );
+  return selectedAircraft || aircraftCatalog[0] || null;
+}
+
 function closeAirportInteractionModal() {
   selectedAirportId = null;
   airportModalOverlayEl.classList.add('hidden');
   airportModalOverlayEl.setAttribute('aria-hidden', 'true');
+}
+
+function closeAircraftSelectionModal() {
+  isAircraftSelectionModalOpen = false;
+  setAircraftModalMessage('', 'info');
+  aircraftModalOverlayEl.classList.add('hidden');
+  aircraftModalOverlayEl.setAttribute('aria-hidden', 'true');
+}
+
+function setAircraftModalMessage(message, tone = 'info') {
+  aircraftModalMessageEl.textContent = message || '';
+  aircraftModalMessageEl.setAttribute('data-tone', tone);
 }
 
 function emitAirportPurchaseUnownedRequest(airportId) {
@@ -231,6 +348,72 @@ function createAirportActionButton(label, onClick) {
   button.textContent = label;
   button.addEventListener('click', onClick);
   return button;
+}
+
+function createAircraftOptionButton(aircraft, isSelected) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `aircraft-interaction-option${isSelected ? ' selected' : ''}`;
+  button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+  button.innerHTML =
+    `<span class="aircraft-interaction-option-name">${aircraft.manufacturer} ${aircraft.model}</span>` +
+    `<span class="aircraft-interaction-option-price">${formatCurrencyValue(aircraft.purchasePrice)}</span>`;
+  button.addEventListener('click', () => {
+    selectedAircraftCatalogId = String(aircraft.aircraftCatalogId);
+    refreshAircraftSelectionModal(gameState.getState());
+  });
+  return button;
+}
+
+function renderAircraftSelectionDetails(aircraft) {
+  aircraftModalManufacturerValueEl.textContent = `${aircraft.manufacturer} ${aircraft.model}`;
+  aircraftModalPriceValueEl.textContent = formatCurrencyValue(aircraft.purchasePrice);
+  aircraftModalRangeValueEl.textContent = `${Number.isFinite(aircraft.rangeKm) ? aircraft.rangeKm : 0} km`;
+}
+
+function refreshAircraftSelectionModal(state) {
+  const aircraftCatalog = getAircraftCatalogEntries(state);
+  if (aircraftCatalog.length === 0) {
+    closeAircraftSelectionModal();
+    return;
+  }
+
+  if (!state || !state.ui || state.ui.screen !== 'game') {
+    closeAircraftSelectionModal();
+    return;
+  }
+
+  const selectedAircraft = getSelectedAircraftCatalogEntry(state) || aircraftCatalog[0];
+  if (
+    !selectedAircraftCatalogId ||
+    !aircraftCatalog.some((aircraft) => String(aircraft.aircraftCatalogId) === String(selectedAircraftCatalogId))
+  ) {
+    selectedAircraftCatalogId = String(selectedAircraft.aircraftCatalogId);
+  }
+
+  aircraftModalTitleEl.textContent = `Select an aircraft (${aircraftCatalog.length})`;
+  aircraftModalListEl.innerHTML = '';
+  aircraftCatalog.forEach((aircraft) => {
+    aircraftModalListEl.appendChild(
+      createAircraftOptionButton(
+        aircraft,
+        String(aircraft.aircraftCatalogId) === String(selectedAircraft.aircraftCatalogId)
+      )
+    );
+  });
+
+  renderAircraftSelectionDetails(selectedAircraft);
+  aircraftModalBuyButtonEl.disabled = isAircraftPurchasePending;
+  aircraftModalBuyButtonEl.textContent = isAircraftPurchasePending ? 'Buying...' : 'Buy';
+
+  if (isAircraftSelectionModalOpen) {
+    aircraftModalOverlayEl.classList.remove('hidden');
+    aircraftModalOverlayEl.setAttribute('aria-hidden', 'false');
+    return;
+  }
+
+  aircraftModalOverlayEl.classList.add('hidden');
+  aircraftModalOverlayEl.setAttribute('aria-hidden', 'true');
 }
 
 function renderAirportInteractionActions(state, airport) {
@@ -349,7 +532,15 @@ function openAirportInteractionModal(airportId) {
   refreshAirportInteractionModal(gameState.getState());
 }
 
+function openAircraftSelectionModal() {
+  isAircraftSelectionModalOpen = true;
+  setAircraftModalMessage('', 'info');
+  selectedAircraftCatalogId = null;
+  refreshAircraftSelectionModal(gameState.getState());
+}
+
 renderer.setAirportSelectHandler(openAirportInteractionModal);
+renderer.setAircraftSelectHandler(openAircraftSelectionModal);
 
 airportModalCloseButtonEl.addEventListener('click', () => {
   closeAirportInteractionModal();
@@ -363,16 +554,31 @@ airportModalOverlayEl.addEventListener('click', (event) => {
   closeAirportInteractionModal();
 });
 
+aircraftModalCloseButtonEl.addEventListener('click', () => {
+  closeAircraftSelectionModal();
+});
+
+aircraftModalOverlayEl.addEventListener('click', (event) => {
+  if (event.target !== aircraftModalOverlayEl) {
+    return;
+  }
+
+  closeAircraftSelectionModal();
+});
+
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') {
     return;
   }
 
-  if (airportModalOverlayEl.classList.contains('hidden')) {
+  if (!airportModalOverlayEl.classList.contains('hidden')) {
+    closeAirportInteractionModal();
     return;
   }
 
-  closeAirportInteractionModal();
+  if (!aircraftModalOverlayEl.classList.contains('hidden')) {
+    closeAircraftSelectionModal();
+  }
 });
 
 function sanitizeUsername(rawValue) {
@@ -745,4 +951,18 @@ socket.on('game:started', (payload) => {
 
 socket.on('game:state', (payload) => {
   applyAuthoritativeGamePayload(payload);
+});
+
+socket.on('aircraft:purchase:result', (result = {}) => {
+  isAircraftPurchasePending = false;
+
+  if (!result.success) {
+    const message = result.message || 'Aircraft purchase failed.';
+    setAircraftModalMessage(message, 'error');
+    refreshAircraftSelectionModal(gameState.getState());
+    return;
+  }
+
+  setAircraftModalMessage('', 'info');
+  closeAircraftSelectionModal();
 });

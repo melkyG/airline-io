@@ -109,34 +109,34 @@
           "stops": [
             [
               0,
-              0.4
+              0.2
             ],
             [
               22,
-              4
+              1.4
             ]
           ]
         },
         "line-color": "#666666",
-        "line-opacity": 0.9,
+        "line-opacity": 0.52,
         "line-width": {
-          "base": 1.1,
+          "base": 1.05,
           "stops": [
             [
               2,
-              0.8
+              0.65
             ],
             [
               6,
-              1.4
+              0.95
             ],
             [
               10,
-              2.2
+              1.35
             ],
             [
               22,
-              12
+              4.2
             ]
           ]
         }
@@ -162,6 +162,69 @@
       "source": "openmaptiles",
       "source-layer": "water",
       "type": "fill"
+    },
+    {
+      "filter": [
+        "all",
+        [
+          "==",
+          "$type",
+          "Polygon"
+        ],
+        [
+          "in",
+          "class",
+          "ocean",
+          "sea"
+        ]
+      ],
+      "id": "coastline_country_outline",
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round",
+        "visibility": "visible"
+      },
+      "paint": {
+        "line-blur": {
+          "base": 1,
+          "stops": [
+            [
+              0,
+              0.2
+            ],
+            [
+              22,
+              1.4
+            ]
+          ]
+        },
+        "line-color": "#666666",
+        "line-opacity": 0.52,
+        "line-width": {
+          "base": 1.05,
+          "stops": [
+            [
+              2,
+              0.65
+            ],
+            [
+              6,
+              0.95
+            ],
+            [
+              10,
+              1.35
+            ],
+            [
+              22,
+              4.2
+            ]
+          ]
+        }
+      },
+      "source": "openmaptiles",
+      "source-layer": "water",
+      "type": "line"
     },
     {
       "filter": [

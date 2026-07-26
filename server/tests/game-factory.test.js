@@ -60,6 +60,9 @@ test('createGame builds the expected initial authoritative state shape', () => {
       saleListing: null
     }))
   );
+
+  assert.equal(Array.isArray(game.ownedAircraft), true);
+  assert.deepEqual(game.ownedAircraft, []);
 });
 
 test('createGame does not reuse lobby player object references', () => {
@@ -112,6 +115,13 @@ test('two games do not share mutable airport-state object references', () => {
   assert.deepEqual(gameA.airports[0].saleListing, { sellerPlayerId: gameA.players[0].id, listPrice: 350000 });
   assert.equal(gameB.airports[0].ownerPlayerId, null);
   assert.equal(gameB.airports[0].saleListing, null);
+});
+
+test('new games start with no owned aircraft before purchasing is implemented', () => {
+  const lobbyPlayers = makeLobbyPlayers();
+  const game = createGame(lobbyPlayers);
+
+  assert.deepEqual(game.ownedAircraft, []);
 });
 
 test('airport catalog is immutable shared static world data', () => {

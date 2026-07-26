@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Game = require('../Game');
+const { AIRCRAFT_CATALOG } = require('../aircraft/catalog');
 
 test('game:started public payload includes authoritative game wrapper', () => {
   const initialState = {
@@ -14,6 +15,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
     players: [
       { id: 'p1', username: 'Alice', capital: 1000000, score: 0, internalOnlyField: 'secret' }
     ],
+    ownedAircraft: [],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null }
     ]
@@ -44,6 +46,10 @@ test('game:started public payload includes authoritative game wrapper', () => {
       players: [
         { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
       ],
+      ownedAircraft: [],
+      aircraftCatalog: AIRCRAFT_CATALOG.map((aircraft) => ({
+        ...aircraft
+      })),
       airports: [
         {
           id: 'YYZ',
@@ -96,6 +102,7 @@ test('game:started public player payload includes only explicit public fields', 
         internalOnlyField: 'hidden-value'
       }
     ],
+    ownedAircraft: [],
     airports: []
   };
 
@@ -136,6 +143,7 @@ test('game:started public payload includes airport definition plus game-owned mu
     players: [
       { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
     ],
+    ownedAircraft: [],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null }
     ]
@@ -184,6 +192,7 @@ test('unknown airport IDs in game state are skipped with warning during public p
     players: [
       { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
     ],
+    ownedAircraft: [],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null },
       { airportId: 'UNKNOWN', ownerPlayerId: null, saleListing: null }
@@ -231,6 +240,7 @@ test('airport saleListing is projected as a new object when present', () => {
     players: [
       { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
     ],
+    ownedAircraft: [],
     airports: [
       {
         airportId: 'YYZ',

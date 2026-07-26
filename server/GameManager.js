@@ -528,6 +528,52 @@ class GameManager {
     return this.handleAirportSellToGameRequest(socketId, airportId);
   }
 
+  handleAircraftPurchaseRequest(socketId, aircraftCatalogId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.purchaseAircraftFromGame(player.id, aircraftCatalogId);
+  }
+
+  handleAircraftPurchaseSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const aircraftCatalogId = requestPayload ? requestPayload.aircraftCatalogId : undefined;
+
+    if (typeof aircraftCatalogId !== 'string' || aircraftCatalogId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_NOT_FOUND',
+        message: 'Aircraft was not found.'
+      };
+    }
+
+    return this.handleAircraftPurchaseRequest(socketId, aircraftCatalogId);
+  }
+
   shutdown() {
     this.lobbies.forEach((lobby) => {
       if (lobby.countdownInterval) {

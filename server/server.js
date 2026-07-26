@@ -68,6 +68,11 @@ io.on('connection', (socket) => {
     socket.emit('airport:sell-to-game:result', result);
   });
 
+  socket.on('aircraft:purchase:request', (payload = {}) => {
+    const result = gameManager.handleAircraftPurchaseSocketRequest(socket.id, payload);
+    socket.emit('aircraft:purchase:result', result);
+  });
+
   socket.on('disconnect', () => {
     gameManager.handleDisconnect(socket.id);
   });

@@ -32,7 +32,8 @@ function createGame(lobbyPlayers) {
     durationMs: GAME_DURATION_MS,
     scoreToWin: SCORE_TO_WIN,
     players,
-    airports: createInitialAirportState()
+    airports: createInitialAirportState(),
+    ownedAircraft: []
   };
 }
 

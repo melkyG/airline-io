@@ -40,7 +40,8 @@ test('client stores authoritative game without leaderboard property', () => {
       durationMs: null,
       scoreToWin: null,
       players: [],
-      airports: []
+      airports: [],
+      ownedAircraft: []
     },
     waitingAnimation: { step: 0 }
   });
@@ -55,13 +56,14 @@ test('client stores authoritative game without leaderboard property', () => {
       durationMs: 1800000,
       scoreToWin: 1000,
       players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
-      airports: []
+      airports: [],
+      ownedAircraft: []
     }
   }));
 
   const snapshot = state.getState();
 
-  assert.deepEqual(Object.keys(snapshot.game).sort(), ['airports', 'createdAt', 'durationMs', 'endsAt', 'id', 'players', 'scoreToWin', 'startedAt', 'status']);
+  assert.deepEqual(Object.keys(snapshot.game).sort(), ['airports', 'createdAt', 'durationMs', 'endsAt', 'id', 'ownedAircraft', 'players', 'scoreToWin', 'startedAt', 'status']);
   assert.equal('leaderboard' in snapshot.game, false);
 
   delete global.window;

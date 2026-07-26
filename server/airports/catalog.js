@@ -1,4 +1,4 @@
-const AIRPORT_CATALOG = Object.freeze([
+const FULL_AIRPORT_CATALOG = Object.freeze([
   Object.freeze({
     id: 'YYZ',
     iata: 'YYZ',
@@ -860,6 +860,52 @@ const AIRPORT_CATALOG = Object.freeze([
   })
 ]);
 
+const PRIMARY_AIRPORT_IATA_BY_COUNTRY = Object.freeze({
+  Australia: 'SYD',
+  Canada: 'YYZ',
+  France: 'CDG',
+  Japan: 'HND',
+  'South Africa': 'JNB',
+  Switzerland: 'ZRH',
+  'United Kingdom': 'LHR',
+  'United States': 'JFK'
+});
+
+const ACTIVE_PRIMARY_IATA_BY_COUNTRY = (() => {
+  const airportsByCountry = FULL_AIRPORT_CATALOG.reduce((lookup, airport) => {
+    if (!lookup.has(airport.country)) {
+      lookup.set(airport.country, []);
+    }
+
+    lookup.get(airport.country).push(airport);
+    return lookup;
+  }, new Map());
+
+  return Array.from(airportsByCountry.entries()).reduce((lookup, [country, airports]) => {
+    const preferredIata = PRIMARY_AIRPORT_IATA_BY_COUNTRY[country];
+    const chosenAirport = preferredIata
+      ? airports.find((airport) => airport.iata === preferredIata) || airports[0]
+      : airports[0];
+
+    lookup.set(country, chosenAirport.iata);
+    return lookup;
+  }, new Map());
+})();
+
+const AIRPORT_CATALOG = Object.freeze(
+  FULL_AIRPORT_CATALOG.filter((airport) => ACTIVE_PRIMARY_IATA_BY_COUNTRY.get(airport.country) === airport.iata)
+);
+
+// ------------------------------------------------------------------
+// Reserved airports for future expansion
+// Temporarily disabled while gameplay systems are developed.
+// ------------------------------------------------------------------
+const RESERVED_AIRPORT_CATALOG = Object.freeze(
+  FULL_AIRPORT_CATALOG.filter((airport) => ACTIVE_PRIMARY_IATA_BY_COUNTRY.get(airport.country) !== airport.iata)
+);
+
 module.exports = {
-  AIRPORT_CATALOG
+  AIRPORT_CATALOG,
+  RESERVED_AIRPORT_CATALOG,
+  FULL_AIRPORT_CATALOG
 };

@@ -1,0 +1,37 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "run-server-tests-once",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-aircraft-tests-only",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/aircraft-purchase.test.js",
+				"server/tests/owned-aircraft.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-aircraft-tests-only",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/aircraft-purchase.test.js",
+				"server/tests/owned-aircraft.test.js"
+			],
+			"isBackground": false
+		}
+	]
+}

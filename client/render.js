@@ -21,6 +21,7 @@
   function createRenderer(documentRef) {
     const mapRenderer = globalScope.createMapRenderer(documentRef);
     let renderedResultsKey = null;
+    let aircraftSelectHandler = null;
     const elements = {
       mainContent: documentRef.querySelector('.main-content'),
       connectionStatus: documentRef.getElementById('connectionStatus'),
@@ -43,6 +44,24 @@
       resultsStandingsHeader: documentRef.getElementById('resultsStandingsHeader'),
       resultsStandings: documentRef.getElementById('resultsStandings')
     };
+    const capitalHudContentEl = documentRef.createElement('span');
+    capitalHudContentEl.className = 'capital-hud-content';
+    const capitalHudActionButtonEl = documentRef.createElement('button');
+    capitalHudActionButtonEl.type = 'button';
+    capitalHudActionButtonEl.className = 'capital-hud-action-button';
+    capitalHudActionButtonEl.textContent = 'Aircraft +';
+    if (typeof capitalHudActionButtonEl.addEventListener === 'function') {
+      capitalHudActionButtonEl.addEventListener('click', () => {
+        if (typeof aircraftSelectHandler === 'function') {
+          aircraftSelectHandler();
+        }
+      });
+    }
+
+    if (elements.capitalHud) {
+      elements.capitalHud.appendChild(capitalHudContentEl);
+      elements.capitalHud.appendChild(capitalHudActionButtonEl);
+    }
 
     function renderConnectionStatus(state) {
       const presentation = getConnectionPresentation(state.connection.status);
@@ -152,25 +171,7 @@
           String(player.id) === String(localPlayerId);
         const score = Number.isFinite(player && player.score) ? player.score : 0;
 
-        const content = documentRef.createElement('div');
-        content.className = 'leaderboard-content';
-
-        const playerName = documentRef.createElement('span');
-        playerName.className = 'leaderboard-player';
-        playerName.textContent = isLocalPlayer ? `${username} (You)` : username;
-
-        const spacer = documentRef.createElement('span');
-        spacer.className = 'leaderboard-spacer';
-        spacer.setAttribute('aria-hidden', 'true');
-
-        const scoreValue = documentRef.createElement('span');
-        scoreValue.className = 'leaderboard-score';
-        scoreValue.textContent = String(score);
-
-        content.appendChild(playerName);
-        content.appendChild(spacer);
-        content.appendChild(scoreValue);
-        item.appendChild(content);
+        item.textContent = isLocalPlayer ? `${username} (You) — ${score}` : `${username} — ${score}`;
         fragment.appendChild(item);
       });
 
@@ -190,7 +191,7 @@
         state.game.status === 'active';
 
       if (!isActiveGame) {
-        elements.capitalHud.textContent = '';
+        capitalHudContentEl.textContent = '';
         elements.capitalHud.classList.add('hidden');
         return;
       }
@@ -198,14 +199,34 @@
       const localPlayerId = state && state.session ? state.session.playerId : null;
       const players = Array.isArray(state && state.game && state.game.players) ? state.game.players : [];
       const localPlayer = players.find((player) => player && String(player.id) === String(localPlayerId));
+      const airports = Array.isArray(state && state.game && state.game.airports) ? state.game.airports : [];
+      const ownedAircraft = Array.isArray(state && state.game && state.game.ownedAircraft) ? state.game.ownedAircraft : [];
 
       if (!localPlayer || !Number.isFinite(localPlayer.capital)) {
-        elements.capitalHud.textContent = '';
+        capitalHudContentEl.textContent = '';
         elements.capitalHud.classList.add('hidden');
         return;
       }
 
-      elements.capitalHud.textContent = `Capital: ${CAPITAL_FORMATTER.format(localPlayer.capital)}`;
+      const ownedAirportCount = airports.reduce((count, airport) => {
+        if (!airport || airport.ownerPlayerId == null || localPlayerId == null) {
+          return count;
+        }
+
+        return String(airport.ownerPlayerId) === String(localPlayerId) ? count + 1 : count;
+      }, 0);
+
+      const ownedAircraftCount = ownedAircraft.reduce((count, aircraft) => {
+        if (!aircraft || aircraft.ownerPlayerId == null || localPlayerId == null) {
+          return count;
+        }
+
+        return String(aircraft.ownerPlayerId) === String(localPlayerId) ? count + 1 : count;
+      }, 0);
+
+      capitalHudContentEl.textContent =
+        `Capital: ${CAPITAL_FORMATTER.format(localPlayer.capital)}\n` +
+        `Airports: ${ownedAirportCount} | Fleet: ${ownedAircraftCount}`;
       elements.capitalHud.classList.remove('hidden');
     }
 
@@ -332,9 +353,14 @@
       mapRenderer.setAirportSelectHandler(handler);
     }
 
+    function setAircraftSelectHandler(handler) {
+      aircraftSelectHandler = handler;
+    }
+
     return {
       render,
       setAirportSelectHandler,
+      setAircraftSelectHandler,
       renderConnectionStatus,
       renderLobbyPreview,
       renderPlayerList,
