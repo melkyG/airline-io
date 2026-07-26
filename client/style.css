@@ -377,6 +377,7 @@ body {
   border-radius: 12px;
   font-size: 1.25rem;
   overflow: hidden;
+  position: relative;
 }
 
 .main-content.game-active .map-box {
@@ -400,7 +401,7 @@ body {
 
 .airport-marker {
   position: relative;
-  pointer-events: none;
+  pointer-events: auto;
   background: transparent;
   border: 0;
   --airport-marker-stroke: #1f2937;
@@ -409,6 +410,46 @@ body {
   --airport-marker-base-fill: #0f172a;
   --airport-marker-window-fill: #e2e8f0;
   --airport-marker-antenna-fill: #1f2937;
+}
+
+.airport-tooltip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1300;
+  min-width: 5.4rem;
+  max-width: 9rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(2, 6, 23, 0.45);
+}
+
+.airport-tooltip-hidden {
+  display: none;
+}
+
+.airport-tooltip-code {
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.airport-tooltip-price {
+  margin-top: 0.1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.airport-tooltip-owner {
+  margin-top: 0.12rem;
+  color: #cbd5e1;
 }
 
 .airport-marker-svg {

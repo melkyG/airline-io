@@ -9,6 +9,17 @@ const AIRPORT_CATALOG = Object.freeze([
     lng: -79.6248,
     size: 'large',
     basePrice: 300000
+  }),
+  Object.freeze({
+    id: 'DFW',
+    iata: 'DFW',
+    name: 'Dallas/Fort Worth International Airport',
+    city: 'Dallas-Fort Worth',
+    country: 'United States',
+    lat: 32.8998,
+    lng: -97.0403,
+    size: 'large',
+    basePrice: 320000
   })
 ]);
 

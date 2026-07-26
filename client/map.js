@@ -2,6 +2,13 @@
   const WORLD_BOUNDS = [[-85.0511, -180], [85.0511, 180]];
   const BASEMAP_MAX_ZOOM = 7;
   const AIRPORT_ICON_SIZE = 48;
+  const AIRPORT_TOOLTIP_OFFSET_X = 14;
+  const AIRPORT_TOOLTIP_OFFSET_Y = -10;
+  const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0
+  });
   const AIRPORT_ICON =
     typeof globalScope.L !== 'undefined'
       ? globalScope.L.divIcon({
@@ -44,6 +51,130 @@
     const markerCollection = [];
     const routeCollection = [];
     const airportMarkersById = new Map();
+    let activeHoveredAirportId = null;
+    let latestGameSnapshot = null;
+    const tooltipElement = mapContainer ? documentRef.createElement('div') : null;
+    const tooltipCodeElement = tooltipElement ? documentRef.createElement('div') : null;
+    const tooltipPriceElement = tooltipElement ? documentRef.createElement('div') : null;
+    const tooltipOwnerElement = tooltipElement ? documentRef.createElement('div') : null;
+
+    if (tooltipElement) {
+      tooltipElement.className = 'airport-tooltip airport-tooltip-hidden';
+      tooltipCodeElement.className = 'airport-tooltip-code';
+      tooltipPriceElement.className = 'airport-tooltip-price';
+      tooltipOwnerElement.className = 'airport-tooltip-owner';
+      tooltipElement.appendChild(tooltipCodeElement);
+      tooltipElement.appendChild(tooltipPriceElement);
+      tooltipElement.appendChild(tooltipOwnerElement);
+      mapContainer.appendChild(tooltipElement);
+    }
+
+    function formatCurrencyValue(value) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) {
+        return CURRENCY_FORMATTER.format(0);
+      }
+
+      return CURRENCY_FORMATTER.format(numericValue);
+    }
+
+    function createPlayersById(players) {
+      return (Array.isArray(players) ? players : []).reduce((lookup, player) => {
+        if (!player || !player.id) {
+          return lookup;
+        }
+
+        lookup.set(String(player.id), player);
+        return lookup;
+      }, new Map());
+    }
+
+    function getAirportTooltipData(airportId) {
+      const game = latestGameSnapshot || {};
+      const airports = Array.isArray(game.airports) ? game.airports : [];
+      const playersById = createPlayersById(game.players);
+      const airport = airports.find((candidate) => {
+        if (!candidate) {
+          return false;
+        }
+
+        const candidateId = candidate.id || candidate.iata;
+        return String(candidateId) === String(airportId);
+      });
+
+      if (!airport) {
+        return null;
+      }
+
+      const hasListingPrice =
+        airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice);
+      const relevantPrice = hasListingPrice ? airport.saleListing.askingPrice : airport.basePrice;
+      const ownerPlayerId = airport.ownerPlayerId;
+      const ownerText =
+        ownerPlayerId == null
+          ? 'Unowned'
+          : ((playersById.get(String(ownerPlayerId)) || {}).username || 'Unknown');
+
+      return {
+        code: airport.iata || airport.id || String(airportId),
+        price: formatCurrencyValue(relevantPrice),
+        ownerText
+      };
+    }
+
+    function hideAirportTooltip() {
+      activeHoveredAirportId = null;
+      if (!tooltipElement) {
+        return;
+      }
+
+      tooltipElement.classList.add('airport-tooltip-hidden');
+    }
+
+    function positionAirportTooltip(map, marker) {
+      if (!tooltipElement || !map || !marker || !mapContainer) {
+        return;
+      }
+
+      const markerPoint = map.latLngToContainerPoint(marker.getLatLng());
+      const containerWidth = mapContainer.clientWidth;
+      const containerHeight = mapContainer.clientHeight;
+      const tooltipWidth = tooltipElement.offsetWidth;
+      const tooltipHeight = tooltipElement.offsetHeight;
+
+      let left = markerPoint.x + AIRPORT_TOOLTIP_OFFSET_X;
+      let top = markerPoint.y + AIRPORT_TOOLTIP_OFFSET_Y;
+
+      left = Math.max(6, Math.min(left, Math.max(6, containerWidth - tooltipWidth - 6)));
+      top = Math.max(6, Math.min(top, Math.max(6, containerHeight - tooltipHeight - 6)));
+
+      tooltipElement.style.left = `${Math.round(left)}px`;
+      tooltipElement.style.top = `${Math.round(top)}px`;
+    }
+
+    function refreshAirportTooltip(map) {
+      if (!tooltipElement || !activeHoveredAirportId) {
+        return;
+      }
+
+      const marker = airportMarkersById.get(activeHoveredAirportId);
+      const tooltipData = getAirportTooltipData(activeHoveredAirportId);
+      if (!marker || !tooltipData) {
+        hideAirportTooltip();
+        return;
+      }
+
+      tooltipCodeElement.textContent = tooltipData.code;
+      tooltipPriceElement.textContent = tooltipData.price;
+      tooltipOwnerElement.textContent = tooltipData.ownerText;
+      tooltipElement.classList.remove('airport-tooltip-hidden');
+      positionAirportTooltip(map, marker);
+    }
+
+    function showAirportTooltip(map, airportId) {
+      activeHoveredAirportId = airportId;
+      refreshAirportTooltip(map);
+    }
 
     function getAirportMarkerId(airport, index) {
       if (airport && airport.id) {
@@ -63,6 +194,7 @@
       });
 
       airportMarkersById.clear();
+      hideAirportTooltip();
     }
 
     function syncAirportMarkers(map, airports) {
@@ -87,7 +219,7 @@
         }
 
         const markerOptions = {
-          interactive: false,
+          interactive: true,
           keyboard: false
         };
 
@@ -96,6 +228,16 @@
         }
 
         const marker = globalScope.L.marker([lat, lng], markerOptions);
+
+        marker.on('mouseover', () => {
+          showAirportTooltip(map, markerId);
+        });
+
+        marker.on('mouseout', () => {
+          if (activeHoveredAirportId === markerId) {
+            hideAirportTooltip();
+          }
+        });
 
         marker.addTo(map);
         airportMarkersById.set(markerId, marker);
@@ -108,7 +250,12 @@
 
         map.removeLayer(marker);
         airportMarkersById.delete(markerId);
+        if (activeHoveredAirportId === markerId) {
+          hideAirportTooltip();
+        }
       });
+
+      refreshAirportTooltip(map);
     }
 
     function canMeasureViewport() {
@@ -174,6 +321,11 @@
         const wasAtMinZoom = Math.abs(mapInstance.getZoom() - mapInstance.getMinZoom()) < 0.0001;
         mapInstance.invalidateSize({ debounceMoveend: true });
         updateViewportMinZoom(mapInstance, { forceFit: wasAtMinZoom });
+        refreshAirportTooltip(mapInstance);
+      });
+
+      mapInstance.on('move zoom', () => {
+        refreshAirportTooltip(mapInstance);
       });
 
       return mapInstance;
@@ -194,10 +346,12 @@
       }
 
       mapContainer.classList.add('map-visible');
+      latestGameSnapshot = state.game || null;
       const shouldForceFit = !hasFittedWorld || Math.abs(map.getZoom() - map.getMinZoom()) < 0.0001;
       map.invalidateSize();
       updateViewportMinZoom(map, { forceFit: shouldForceFit });
       syncAirportMarkers(map, state.game && state.game.airports);
+      refreshAirportTooltip(map);
       hasFittedWorld = true;
     }
 
