@@ -289,6 +289,245 @@ class GameManager {
     return game.addScore(player.id, amount);
   }
 
+  handleAirportPurchaseRequest(socketId, airportId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.purchaseUnownedAirport(player.id, airportId);
+  }
+
+  handleAirportPurchaseSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const airportId = requestPayload ? requestPayload.airportId : undefined;
+
+    if (typeof airportId !== 'string' || airportId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'AIRPORT_NOT_FOUND',
+        message: 'Airport was not found.'
+      };
+    }
+
+    return this.handleAirportPurchaseRequest(socketId, airportId);
+  }
+
+  handleAirportListingRequest(socketId, airportId, askingPrice) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.listAirportForSale(player.id, airportId, askingPrice);
+  }
+
+  handleAirportListingSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const airportId = requestPayload ? requestPayload.airportId : undefined;
+    const askingPrice = requestPayload ? requestPayload.askingPrice : undefined;
+
+    if (typeof airportId !== 'string' || airportId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid airportId.'
+      };
+    }
+
+    if (typeof askingPrice !== 'number' || !Number.isFinite(askingPrice)) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a finite askingPrice.'
+      };
+    }
+
+    return this.handleAirportListingRequest(socketId, airportId, askingPrice);
+  }
+
+  handleAirportListingCancelRequest(socketId, airportId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.cancelAirportListing(player.id, airportId);
+  }
+
+  handleAirportListingCancelSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const airportId = requestPayload ? requestPayload.airportId : undefined;
+
+    if (typeof airportId !== 'string' || airportId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid airportId.'
+      };
+    }
+
+    return this.handleAirportListingCancelRequest(socketId, airportId);
+  }
+
+  handleAirportListedPurchaseRequest(socketId, airportId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.purchaseListedAirport(player.id, airportId);
+  }
+
+  handleAirportListedPurchaseSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const airportId = requestPayload ? requestPayload.airportId : undefined;
+
+    if (typeof airportId !== 'string' || airportId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid airportId.'
+      };
+    }
+
+    return this.handleAirportListedPurchaseRequest(socketId, airportId);
+  }
+
+  handleAirportSellToGameRequest(socketId, airportId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.sellAirportToGame(player.id, airportId);
+  }
+
+  handleAirportSellToGameSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const airportId = requestPayload ? requestPayload.airportId : undefined;
+
+    if (typeof airportId !== 'string' || airportId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid airportId.'
+      };
+    }
+
+    return this.handleAirportSellToGameRequest(socketId, airportId);
+  }
+
   shutdown() {
     this.lobbies.forEach((lobby) => {
       if (lobby.countdownInterval) {

@@ -46,8 +46,9 @@ test('game ends by score threshold and records endReason/endedAt once', () => {
   assert.equal(game.authoritativeState.endReason, 'score');
   assert.equal(typeof game.authoritativeState.endedAt, 'number');
   assert.equal(game.endTimeoutId, null);
-  assert.equal(emitted.length, 1);
+  assert.equal(emitted.length, 2);
   assert.equal(emitted[0].eventName, 'game:started');
+  assert.equal(emitted[1].eventName, 'game:state');
 
   const endedAt = game.authoritativeState.endedAt;
   const secondEndAttempt = game.endGame('time');
@@ -80,7 +81,9 @@ test('game ends by time expiration and records time end reason', () => {
   assert.equal(game.authoritativeState.endReason, 'time');
   assert.equal(typeof game.authoritativeState.endedAt, 'number');
   assert.equal(game.endTimeoutId, null);
-  assert.equal(emitted.length, 1);
+  assert.equal(emitted.length, 2);
+  assert.equal(emitted[0].eventName, 'game:started');
+  assert.equal(emitted[1].eventName, 'game:state');
 });
 
 test('dispose clears pending expiration timeout for active game', () => {
@@ -133,6 +136,8 @@ test('addScore updates authoritative player score and broadcasts while active', 
   assert.equal(updated, true);
   assert.equal(game.authoritativeState.players[0].score, 510);
   assert.equal(emitted.length, 2);
+  assert.equal(emitted[0].eventName, 'game:started');
+  assert.equal(emitted[1].eventName, 'game:state');
   assert.equal(game.status, 'active');
 });
 
@@ -161,6 +166,35 @@ test('addScore can end the game via score win condition', () => {
   assert.equal(game.status, 'ended');
   assert.equal(game.authoritativeState.endReason, 'score');
   assert.equal(emitted.length, 2);
+  assert.equal(emitted[0].eventName, 'game:started');
+  assert.equal(emitted[1].eventName, 'game:state');
+});
+
+test('game:started is emitted only once at initialization while later updates use game:state', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const initialState = {
+    id: 'game-start-once',
+    status: 'active',
+    createdAt: 10,
+    startedAt: 10,
+    endsAt: Date.now() + 60000,
+    durationMs: 60000,
+    scoreToWin: 5000,
+    players: [
+      { id: 'p1', username: 'Alice', capital: 1000000, score: 10 }
+    ],
+    airports: []
+  };
+
+  const game = new Game(initialState, manager);
+  game.initialize();
+  game.addScore('p1', 5);
+  game.addScore('p1', 10);
+
+  assert.equal(emitted[0].eventName, 'game:started');
+  assert.equal(emitted[1].eventName, 'game:state');
+  assert.equal(emitted[2].eventName, 'game:state');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:started').length, 1);
 });
 
 test('GameManager.shutdown disposes active game timers', () => {
@@ -249,8 +283,10 @@ test('endGame stores authoritative results ranked by score then capital', () => 
     ['p2', 'p1', 'p3']
   );
 
-  assert.equal(emitted.length, 1);
-  const payload = emitted[0].payload;
+  assert.equal(emitted.length, 2);
+  assert.equal(emitted[0].eventName, 'game:started');
+  assert.equal(emitted[1].eventName, 'game:state');
+  const payload = emitted[1].payload;
   assert.ok(payload.game.results);
   assert.equal(payload.game.results.winner.id, 'p2');
 });

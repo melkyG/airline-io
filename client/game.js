@@ -458,7 +458,7 @@ socket.on('lobby:error', ({ message }) => {
   }
 });
 
-socket.on('game:started', (payload) => {
+function applyAuthoritativeGamePayload(payload) {
   const authoritativeGame = payload && payload.game ? payload.game : getEmptyGameState();
 
   gameState.update(() => ({
@@ -472,5 +472,15 @@ socket.on('game:started', (payload) => {
 
   startGameCountdown();
 
+  return authoritativeGame;
+}
+
+socket.on('game:started', (payload) => {
+  applyAuthoritativeGamePayload(payload);
+
   console.log('Game started.');
+});
+
+socket.on('game:state', (payload) => {
+  applyAuthoritativeGamePayload(payload);
 });

@@ -43,6 +43,31 @@ io.on('connection', (socket) => {
     gameManager.handleDeveloperScoreRequest(socket.id, 500);
   });
 
+  socket.on('airport:purchase:request', (payload = {}) => {
+    const result = gameManager.handleAirportPurchaseSocketRequest(socket.id, payload);
+    socket.emit('airport:purchase:result', result);
+  });
+
+  socket.on('airport:list:request', (payload = {}) => {
+    const result = gameManager.handleAirportListingSocketRequest(socket.id, payload);
+    socket.emit('airport:list:result', result);
+  });
+
+  socket.on('airport:listing:cancel:request', (payload = {}) => {
+    const result = gameManager.handleAirportListingCancelSocketRequest(socket.id, payload);
+    socket.emit('airport:listing:cancel:result', result);
+  });
+
+  socket.on('airport:purchase-listed:request', (payload = {}) => {
+    const result = gameManager.handleAirportListedPurchaseSocketRequest(socket.id, payload);
+    socket.emit('airport:purchase-listed:result', result);
+  });
+
+  socket.on('airport:sell-to-game:request', (payload = {}) => {
+    const result = gameManager.handleAirportSellToGameSocketRequest(socket.id, payload);
+    socket.emit('airport:sell-to-game:result', result);
+  });
+
   socket.on('disconnect', () => {
     gameManager.handleDisconnect(socket.id);
   });
