@@ -4,7 +4,14 @@ const joinButtonEl = document.getElementById('joinButton');
 const usernameInputEl = document.getElementById('usernameInput');
 const gameTimerEl = document.getElementById('gameTimer');
 const devAddScoreButtonEl = document.getElementById('devAddScoreButton');
+const gameScreenEl = document.getElementById('gameScreen');
+const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 0
+});
 let gameCountdownIntervalId = null;
+let selectedAirportId = null;
 
 function getEmptyLobbyState() {
   return {
@@ -110,8 +117,263 @@ const gameState = window.createGameState({
 const renderer = window.createRenderer(document);
 gameState.subscribe((state) => {
   renderer.render(state);
+  refreshAirportInteractionModal(state);
 });
 renderer.render(gameState.getState());
+
+const airportModalOverlayEl = document.createElement('div');
+airportModalOverlayEl.className = 'airport-interaction-overlay hidden';
+airportModalOverlayEl.setAttribute('aria-hidden', 'true');
+
+const airportModalDialogEl = document.createElement('div');
+airportModalDialogEl.className = 'airport-interaction-modal';
+airportModalDialogEl.setAttribute('role', 'dialog');
+airportModalDialogEl.setAttribute('aria-modal', 'true');
+
+const airportModalCloseButtonEl = document.createElement('button');
+airportModalCloseButtonEl.type = 'button';
+airportModalCloseButtonEl.className = 'airport-interaction-close';
+airportModalCloseButtonEl.setAttribute('aria-label', 'Close airport modal');
+airportModalCloseButtonEl.textContent = 'x';
+
+const airportModalTitleEl = document.createElement('h3');
+airportModalTitleEl.className = 'airport-interaction-title';
+
+const airportModalOwnerRowEl = document.createElement('p');
+airportModalOwnerRowEl.className = 'airport-interaction-row';
+airportModalOwnerRowEl.innerHTML = '<span class="airport-interaction-label">Owner:</span> <span class="airport-interaction-value" data-airport-owner></span>';
+const airportModalOwnerValueEl = airportModalOwnerRowEl.querySelector('[data-airport-owner]');
+
+const airportModalPriceRowEl = document.createElement('p');
+airportModalPriceRowEl.className = 'airport-interaction-row';
+airportModalPriceRowEl.innerHTML = '<span class="airport-interaction-label">Price:</span> <span class="airport-interaction-value" data-airport-price></span>';
+const airportModalPriceValueEl = airportModalPriceRowEl.querySelector('[data-airport-price]');
+
+const airportModalActionsEl = document.createElement('div');
+airportModalActionsEl.className = 'airport-interaction-actions';
+
+airportModalDialogEl.appendChild(airportModalCloseButtonEl);
+airportModalDialogEl.appendChild(airportModalTitleEl);
+airportModalDialogEl.appendChild(airportModalOwnerRowEl);
+airportModalDialogEl.appendChild(airportModalPriceRowEl);
+airportModalDialogEl.appendChild(airportModalActionsEl);
+airportModalOverlayEl.appendChild(airportModalDialogEl);
+
+if (gameScreenEl) {
+  gameScreenEl.appendChild(airportModalOverlayEl);
+}
+
+function formatCurrencyValue(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return CURRENCY_FORMATTER.format(0);
+  }
+
+  return CURRENCY_FORMATTER.format(numericValue);
+}
+
+function getAuthoritativeAirportById(state, airportId) {
+  const airports = Array.isArray(state && state.game && state.game.airports) ? state.game.airports : [];
+  return airports.find((airport) => {
+    if (!airport) {
+      return false;
+    }
+
+    return String(airport.id || airport.iata) === String(airportId);
+  }) || null;
+}
+
+function getAuthoritativePlayerById(state, playerId) {
+  const players = Array.isArray(state && state.game && state.game.players) ? state.game.players : [];
+  return players.find((player) => player && String(player.id) === String(playerId)) || null;
+}
+
+function closeAirportInteractionModal() {
+  selectedAirportId = null;
+  airportModalOverlayEl.classList.add('hidden');
+  airportModalOverlayEl.setAttribute('aria-hidden', 'true');
+}
+
+function emitAirportPurchaseUnownedRequest(airportId) {
+  socket.emit('airport:purchase:request', { airportId });
+}
+
+function emitAirportPurchaseListedRequest(airportId) {
+  socket.emit('airport:purchase-listed:request', { airportId });
+}
+
+function emitAirportCancelListingRequest(airportId) {
+  socket.emit('airport:listing:cancel:request', { airportId });
+}
+
+function emitAirportSellToGameRequest(airportId) {
+  socket.emit('airport:sell-to-game:request', { airportId });
+}
+
+function emitAirportListRequestWithPrompt(airportId) {
+  const rawInput = window.prompt('Enter asking price', '');
+  if (rawInput == null) {
+    return;
+  }
+
+  const askingPrice = Number(String(rawInput).replace(/[,$\s]/g, ''));
+  if (!Number.isFinite(askingPrice) || askingPrice <= 0) {
+    return;
+  }
+
+  socket.emit('airport:list:request', { airportId, askingPrice });
+}
+
+function createAirportActionButton(label, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'airport-interaction-action-button';
+  button.textContent = label;
+  button.addEventListener('click', onClick);
+  return button;
+}
+
+function renderAirportInteractionActions(state, airport) {
+  airportModalActionsEl.innerHTML = '';
+
+  const localPlayerId = state && state.session ? state.session.playerId : null;
+  const ownerPlayerId = airport.ownerPlayerId;
+  const hasOwner = ownerPlayerId != null;
+  const isOwnedByLocalPlayer = hasOwner && localPlayerId != null && String(ownerPlayerId) === String(localPlayerId);
+  const hasListing = !!(airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice));
+  const airportId = String(airport.id || airport.iata);
+
+  if (!hasOwner) {
+    airportModalActionsEl.appendChild(
+      createAirportActionButton('Purchase', () => emitAirportPurchaseUnownedRequest(airportId))
+    );
+    return;
+  }
+
+  if (isOwnedByLocalPlayer) {
+    if (hasListing) {
+      airportModalActionsEl.appendChild(
+        createAirportActionButton('Cancel Listing', () => emitAirportCancelListingRequest(airportId))
+      );
+    } else {
+      airportModalActionsEl.appendChild(
+        createAirportActionButton('List', () => emitAirportListRequestWithPrompt(airportId))
+      );
+    }
+
+    airportModalActionsEl.appendChild(
+      createAirportActionButton('Sell to Game', () => emitAirportSellToGameRequest(airportId))
+    );
+    return;
+  }
+
+  if (hasListing) {
+    airportModalActionsEl.appendChild(
+      createAirportActionButton('Purchase', () => emitAirportPurchaseListedRequest(airportId))
+    );
+  }
+}
+
+function renderAirportInteractionPrice(airport) {
+  airportModalPriceValueEl.innerHTML = '';
+  const basePrice = formatCurrencyValue(airport.basePrice);
+  const hasListingPrice =
+    airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice);
+
+  if (!hasListingPrice) {
+    airportModalPriceValueEl.textContent = basePrice;
+    return;
+  }
+
+  const basePriceEl = document.createElement('span');
+  basePriceEl.className = 'airport-interaction-price-base';
+  basePriceEl.textContent = basePrice;
+
+  const listedPriceEl = document.createElement('span');
+  listedPriceEl.className = 'airport-interaction-price-listed';
+  listedPriceEl.textContent = formatCurrencyValue(airport.saleListing.askingPrice);
+
+  airportModalPriceValueEl.appendChild(basePriceEl);
+  airportModalPriceValueEl.appendChild(document.createTextNode(' '));
+  airportModalPriceValueEl.appendChild(listedPriceEl);
+}
+
+function resolveAirportOwnerText(state, airport) {
+  const ownerPlayerId = airport.ownerPlayerId;
+  if (ownerPlayerId == null) {
+    return 'Unowned';
+  }
+
+  const localPlayerId = state && state.session ? state.session.playerId : null;
+  if (localPlayerId != null && String(ownerPlayerId) === String(localPlayerId)) {
+    return 'You';
+  }
+
+  const ownerPlayer = getAuthoritativePlayerById(state, ownerPlayerId);
+  return ownerPlayer && ownerPlayer.username ? ownerPlayer.username : 'Unknown';
+}
+
+function refreshAirportInteractionModal(state) {
+  if (!selectedAirportId) {
+    return;
+  }
+
+  if (!state || !state.ui || state.ui.screen !== 'game') {
+    closeAirportInteractionModal();
+    return;
+  }
+
+  const airport = getAuthoritativeAirportById(state, selectedAirportId);
+  if (!airport) {
+    closeAirportInteractionModal();
+    return;
+  }
+
+  const airportCode = airport.iata || airport.id || selectedAirportId;
+  const airportName = airport.name || 'Unknown Airport';
+  airportModalTitleEl.textContent = `${airportName} (${airportCode})`;
+  airportModalOwnerValueEl.textContent = resolveAirportOwnerText(state, airport);
+  renderAirportInteractionPrice(airport);
+  renderAirportInteractionActions(state, airport);
+
+  airportModalOverlayEl.classList.remove('hidden');
+  airportModalOverlayEl.setAttribute('aria-hidden', 'false');
+}
+
+function openAirportInteractionModal(airportId) {
+  if (!airportId) {
+    return;
+  }
+
+  selectedAirportId = String(airportId);
+  refreshAirportInteractionModal(gameState.getState());
+}
+
+renderer.setAirportSelectHandler(openAirportInteractionModal);
+
+airportModalCloseButtonEl.addEventListener('click', () => {
+  closeAirportInteractionModal();
+});
+
+airportModalOverlayEl.addEventListener('click', (event) => {
+  if (event.target !== airportModalOverlayEl) {
+    return;
+  }
+
+  closeAirportInteractionModal();
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') {
+    return;
+  }
+
+  if (airportModalOverlayEl.classList.contains('hidden')) {
+    return;
+  }
+
+  closeAirportInteractionModal();
+});
 
 function sanitizeUsername(rawValue) {
   const trimmed = (rawValue || '').trim();

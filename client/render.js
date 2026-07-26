@@ -1,5 +1,10 @@
 (function bootstrapRenderer(globalScope) {
   const WAITING_DOTS = ['', '.', '. .', '. . .'];
+  const CAPITAL_FORMATTER = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0
+  });
 
   function getConnectionPresentation(status) {
     if (status === 'connected') {
@@ -31,6 +36,7 @@
       gameStatus: documentRef.getElementById('gameStatus'),
       gameTimer: documentRef.getElementById('gameTimer'),
       leaderboard: documentRef.getElementById('leaderboard'),
+      capitalHud: documentRef.getElementById('capitalHud'),
       resultsOverlay: documentRef.getElementById('resultsOverlay'),
       resultsWinner: documentRef.getElementById('resultsWinner'),
       resultsEndReason: documentRef.getElementById('resultsEndReason'),
@@ -165,6 +171,38 @@
       elements.leaderboard.appendChild(fragment);
     }
 
+    function renderLocalCapitalHud(state) {
+      if (!elements.capitalHud) {
+        return;
+      }
+
+      const isActiveGame =
+        state &&
+        state.ui &&
+        state.ui.screen === 'game' &&
+        state.game &&
+        state.game.status === 'active';
+
+      if (!isActiveGame) {
+        elements.capitalHud.textContent = '';
+        elements.capitalHud.classList.add('hidden');
+        return;
+      }
+
+      const localPlayerId = state && state.session ? state.session.playerId : null;
+      const players = Array.isArray(state && state.game && state.game.players) ? state.game.players : [];
+      const localPlayer = players.find((player) => player && String(player.id) === String(localPlayerId));
+
+      if (!localPlayer || !Number.isFinite(localPlayer.capital)) {
+        elements.capitalHud.textContent = '';
+        elements.capitalHud.classList.add('hidden');
+        return;
+      }
+
+      elements.capitalHud.textContent = `Capital: ${CAPITAL_FORMATTER.format(localPlayer.capital)}`;
+      elements.capitalHud.classList.remove('hidden');
+    }
+
     function getResultsRenderKey(state) {
       const game = state.game || {};
       const gameId = game.id || 'unknown';
@@ -275,12 +313,22 @@
       renderError(state);
       renderScreens(state);
       renderGameState(state);
+      renderLocalCapitalHud(state);
       renderResultsOverlay(state);
       mapRenderer.render(state);
     }
 
+    function setAirportSelectHandler(handler) {
+      if (!mapRenderer || typeof mapRenderer.setAirportSelectHandler !== 'function') {
+        return;
+      }
+
+      mapRenderer.setAirportSelectHandler(handler);
+    }
+
     return {
       render,
+      setAirportSelectHandler,
       renderConnectionStatus,
       renderLobbyPreview,
       renderPlayerList,

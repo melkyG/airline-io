@@ -51,6 +51,7 @@
     const markerCollection = [];
     const routeCollection = [];
     const airportMarkersById = new Map();
+    let airportSelectHandler = null;
     let activeHoveredAirportId = null;
     let latestGameSnapshot = null;
     const tooltipElement = mapContainer ? documentRef.createElement('div') : null;
@@ -176,6 +177,18 @@
       refreshAirportTooltip(map);
     }
 
+    function notifyAirportSelected(airportId) {
+      if (typeof airportSelectHandler !== 'function') {
+        return;
+      }
+
+      airportSelectHandler(airportId);
+    }
+
+    function setAirportSelectHandler(handler) {
+      airportSelectHandler = typeof handler === 'function' ? handler : null;
+    }
+
     function getAirportMarkerId(airport, index) {
       if (airport && airport.id) {
         return String(airport.id);
@@ -237,6 +250,10 @@
           if (activeHoveredAirportId === markerId) {
             hideAirportTooltip();
           }
+        });
+
+        marker.on('click', () => {
+          notifyAirportSelected(markerId);
         });
 
         marker.addTo(map);
@@ -357,6 +374,7 @@
 
     return {
       render,
+      setAirportSelectHandler,
       markerCollection,
       routeCollection
     };
