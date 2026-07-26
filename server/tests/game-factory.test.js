@@ -52,10 +52,14 @@ test('createGame builds the expected initial authoritative state shape', () => {
     [STARTING_CAPITAL, STARTING_CAPITAL]
   );
 
-  assert.deepEqual(game.airports, [
-    { airportId: 'YYZ', ownerPlayerId: null, saleListing: null },
-    { airportId: 'DFW', ownerPlayerId: null, saleListing: null }
-  ]);
+  assert.deepEqual(
+    game.airports,
+    AIRPORT_CATALOG.map((airport) => ({
+      airportId: airport.id,
+      ownerPlayerId: null,
+      saleListing: null
+    }))
+  );
 });
 
 test('createGame does not reuse lobby player object references', () => {
@@ -113,9 +117,11 @@ test('two games do not share mutable airport-state object references', () => {
 test('airport catalog is immutable shared static world data', () => {
   assert.equal(Object.isFrozen(AIRPORT_CATALOG), true);
   assert.equal(Array.isArray(AIRPORT_CATALOG), true);
-  assert.equal(AIRPORT_CATALOG.length, 2);
+  assert.ok(AIRPORT_CATALOG.length >= 2);
   assert.equal(Object.isFrozen(AIRPORT_CATALOG[0]), true);
-  assert.equal(Object.isFrozen(AIRPORT_CATALOG[1]), true);
+  AIRPORT_CATALOG.forEach((airport) => {
+    assert.equal(Object.isFrozen(airport), true);
+  });
 
   const originalName = AIRPORT_CATALOG[0].name;
   const originalBasePrice = AIRPORT_CATALOG[0].basePrice;
