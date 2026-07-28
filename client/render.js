@@ -49,9 +49,9 @@
     const capitalHudActionButtonEl = documentRef.createElement('button');
     capitalHudActionButtonEl.type = 'button';
     capitalHudActionButtonEl.className = 'capital-hud-action-button';
-    capitalHudActionButtonEl.textContent = 'Aircraft +';
+    capitalHudActionButtonEl.textContent = 'Shop';
     if (typeof capitalHudActionButtonEl.addEventListener === 'function') {
-      capitalHudActionButtonEl.addEventListener('click', () => {
+      capitalHudActionButtonEl.addEventListener('click', () => {  
         if (typeof aircraftSelectHandler === 'function') {
           aircraftSelectHandler();
         }
@@ -226,7 +226,7 @@
 
       capitalHudContentEl.textContent =
         `Capital: ${CAPITAL_FORMATTER.format(localPlayer.capital)}\n` +
-        `Airports: ${ownedAirportCount} | Fleet: ${ownedAircraftCount}`;
+        `🏢: ${ownedAirportCount} | 🛫: ${ownedAircraftCount}`;
       elements.capitalHud.classList.remove('hidden');
     }
 

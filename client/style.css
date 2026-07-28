@@ -557,38 +557,6 @@ body {
   color: #cbd5e1;
 }
 
-.airport-interaction-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 1400;
-  display: grid;
-  place-items: center;
-  padding: 1rem;
-  background: rgba(2, 6, 23, 0.45);
-}
-
-.airport-interaction-modal {
-  position: relative;
-  width: min(92vw, 360px);
-  border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(15, 23, 42, 0.96);
-  box-shadow: 0 16px 40px rgba(2, 6, 23, 0.6);
-  padding: 0.9rem 1rem 1rem;
-}
-
-.airport-interaction-close {
-  position: absolute;
-  top: 0.4rem;
-  right: 0.45rem;
-  border: 0;
-  background: transparent;
-  color: #cbd5e1;
-  font-size: 1.05rem;
-  line-height: 1;
-  cursor: pointer;
-}
-
 .airport-interaction-title {
   margin: 0 1.3rem 0.6rem 0;
   font-size: 0.98rem;
@@ -642,27 +610,32 @@ body {
   filter: brightness(1.08);
 }
 
-.aircraft-interaction-overlay {
+.shop-modal-overlay {
   position: absolute;
   inset: 0;
   z-index: 1400;
   display: grid;
-  place-items: center;
+  place-items: start center;
   padding: 1rem;
   background: rgba(2, 6, 23, 0.45);
 }
 
-.aircraft-interaction-modal {
+.shop-modal {
   position: relative;
-  width: min(92vw, 460px);
+  width: min(92vw, 500px);
+  min-height: 520px;
+  max-height: 86vh;
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.35);
   background: rgba(15, 23, 42, 0.96);
   box-shadow: 0 16px 40px rgba(2, 6, 23, 0.6);
   padding: 0.9rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-.aircraft-interaction-close {
+.shop-modal-close {
   position: absolute;
   top: 0.4rem;
   right: 0.45rem;
@@ -674,90 +647,138 @@ body {
   cursor: pointer;
 }
 
-.aircraft-interaction-title {
+.shop-modal-title {
   margin: 0 1.3rem 0.7rem 0;
   font-size: 1rem;
   line-height: 1.25;
   color: #f8fafc;
 }
 
-.aircraft-interaction-list {
-  display: grid;
+.shop-modal-tabs {
+  display: flex;
   gap: 0.45rem;
-  margin-top: 0.35rem;
 }
 
-.aircraft-interaction-option {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-  width: 100%;
+.shop-modal-tab {
   border: 1px solid rgba(71, 85, 105, 0.95);
-  border-radius: 10px;
-  padding: 0.65rem 0.78rem;
+  border-radius: 999px;
   background: rgba(15, 23, 42, 0.7);
   color: #e2e8f0;
-  cursor: pointer;
-}
-
-.aircraft-interaction-option.selected {
-  border-color: rgba(56, 189, 248, 0.85);
-  background: rgba(8, 47, 73, 0.88);
-}
-
-.aircraft-interaction-option-name {
-  font-weight: 700;
-}
-
-.aircraft-interaction-option-price {
-  color: #bae6fd;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.aircraft-interaction-details {
-  margin-top: 0.85rem;
-  padding: 0.8rem 0.85rem;
-  border-radius: 10px;
-  border: 1px solid rgba(71, 85, 105, 0.75);
-  background: rgba(2, 6, 23, 0.28);
-}
-
-.aircraft-interaction-row {
-  margin: 0.3rem 0;
-  color: #e2e8f0;
-  font-size: 0.86rem;
-}
-
-.aircraft-interaction-label {
-  color: #94a3b8;
-  margin-right: 0.3rem;
-}
-
-.aircraft-interaction-value {
-  color: #f8fafc;
-}
-
-.aircraft-interaction-actions {
-  margin-top: 0.75rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-}
-
-.aircraft-interaction-action-button {
-  border: 1px solid rgba(125, 211, 252, 0.45);
-  border-radius: 999px;
-  background: rgba(8, 47, 73, 0.7);
-  color: #e0f2fe;
-  padding: 0.38rem 0.72rem;
+  padding: 0.38rem 0.78rem;
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
 }
 
-.aircraft-interaction-action-button:hover {
-  filter: brightness(1.08);
+.shop-modal-tab--active {
+  border-color: rgba(56, 189, 248, 0.85);
+  background: rgba(8, 47, 73, 0.88);
+  color: #e0f2fe;
+}
+
+.shop-modal-content {
+  margin-top: 0.85rem;
+  padding: 0.8rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid rgba(71, 85, 105, 0.75);
+  background: rgba(2, 6, 23, 0.28);
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.shop-modal-panel {
+  margin: 0;
+}
+
+.shop-airport-search-label {
+  display: block;
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.shop-airport-search-input {
+  width: 100%;
+  margin-top: 0.38rem;
+  border: 1px solid rgba(71, 85, 105, 0.95);
+  border-radius: 8px;
+  padding: 0.5rem 0.62rem;
+  background: rgba(15, 23, 42, 0.7);
+  color: #f8fafc;
+  font-size: 0.85rem;
+}
+
+.shop-airport-search-input:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.85);
+}
+
+.shop-airport-results-title {
+  margin: 0.6rem 0 0;
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.shop-airport-results-list {
+  margin-top: 0.35rem;
+  display: grid;
+  gap: 0.4rem;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 0.2rem;
+}
+
+.shop-airport-results-empty {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.82rem;
+}
+
+.shop-airport-option {
+  width: 100%;
+  border: 1px solid rgba(71, 85, 105, 0.95);
+  border-radius: 10px;
+  padding: 0.56rem 0.62rem;
+  background: rgba(15, 23, 42, 0.7);
+  color: #e2e8f0;
+  cursor: pointer;
+  text-align: left;
+  display: grid;
+  gap: 0.18rem;
+}
+
+.shop-airport-option:hover {
+  filter: brightness(1.06);
+}
+
+.shop-airport-option--selected {
+  border-color: rgba(56, 189, 248, 0.85);
+  background: rgba(8, 47, 73, 0.88);
+}
+
+.shop-airport-option-name {
+  font-weight: 700;
+  font-size: 0.84rem;
+}
+
+.shop-airport-option-meta {
+  color: #bae6fd;
+  font-size: 0.76rem;
+}
+
+.shop-modal-panel[data-panel="airports"] .airport-interaction-title {
+  margin-top: 0.62rem;
+}
+
+.shop-modal-panel[data-panel="aircraft"] .airport-interaction-title {
+  margin-top: 0.62rem;
 }
 
 .airport-marker-svg {
