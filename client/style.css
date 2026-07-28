@@ -1041,6 +1041,14 @@ body {
   font-weight: 600;
 }
 
+.main-content.game-active #leaderboard .leaderboard-row--local {
+  color: #fbbf24;
+}
+
+.main-content.game-active #leaderboard .leaderboard-row--local::marker {
+  color: #fbbf24;
+}
+
 .main-content.game-active .game-card.results-overlay-active > :not(.results-overlay) {
   filter: blur(3px) brightness(0.55);
 }

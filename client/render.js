@@ -171,7 +171,29 @@
           String(player.id) === String(localPlayerId);
         const score = Number.isFinite(player && player.score) ? player.score : 0;
 
-        item.textContent = isLocalPlayer ? `${username} (You) — ${score}` : `${username} — ${score}`;
+        if (isLocalPlayer) {
+          item.classList.add('leaderboard-row--local');
+        }
+
+        const content = documentRef.createElement('div');
+        content.className = 'leaderboard-content';
+
+        const playerName = documentRef.createElement('span');
+        playerName.className = 'leaderboard-player';
+        playerName.textContent = isLocalPlayer ? `${username} (You)` : username;
+
+        const spacer = documentRef.createElement('span');
+        spacer.className = 'leaderboard-spacer';
+        spacer.setAttribute('aria-hidden', 'true');
+
+        const scoreValue = documentRef.createElement('span');
+        scoreValue.className = 'leaderboard-score';
+        scoreValue.textContent = String(score);
+
+        content.appendChild(playerName);
+        content.appendChild(spacer);
+        content.appendChild(scoreValue);
+        item.appendChild(content);
         fragment.appendChild(item);
       });
 
