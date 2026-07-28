@@ -1,8 +1,154 @@
-const { uniqueNamesGenerator, adjectives, animals } = require('unique-names-generator');
 const Player = require('./Player');
 const Lobby = require('./Lobby');
 const Game = require('./Game');
 const { createGame } = require('./gameFactory');
+
+const SILLY_ADJECTIVES = Object.freeze([
+  'Silly',
+  'Goofy',
+  'Clumsy',
+  'Sleepy',
+  'Wobbly',
+  'Dizzy',
+  'Muddy',
+  'Gargling',
+  'Bouncy',
+  'Stinky',
+  'Flying',
+  'Smelly',
+  'Rotten',
+  'Abandoned',
+  'Dirty',
+  'Malnourished',
+  'Overencumbered',
+  'Fat',
+  'Oversized',
+  'Brainless',
+  'Confused',
+  'Adopted',
+  'Moldy',
+  'Farting',
+  'Cursed',
+  'Paralyzed',
+  'Crusty',
+  'Greasy',
+  'Soggy',
+  'Crispy',
+  'Sticky',
+  'Sweaty',
+  'Dusty',
+  'Wrinkly',
+  'Cranky',
+  'Spicy',
+  'Grumpy',
+  'Big breasted',
+  'Lost',
+  'Expired',
+  'Suspicious',
+  'Explosive',
+  'Shivering',
+  'Screaming',
+  'Howling',
+  'Leaking',
+  'Toasted',
+  'Burnt',
+  'Radioactive',
+  'Mutated',
+  'Possessed',
+  'Glitchy',
+  'Bootleg',
+  'Tiny',
+  'Boneless',
+  'Hairy',
+  'Slimy',
+  'Diabetic',
+  'Drooling',
+  'Snoring',
+  'Crying',
+  'Screeching',
+  'Screaming',
+  'Drowning',
+  'Frozen',
+]);
+
+const SILLY_NOUNS = Object.freeze([
+  'Goose',
+  'Noodle',
+  'Pancake',
+  'Chaburtz',
+  'Penguin',
+  'Turnip',
+  'Muffin',
+  'Bean',
+  'Goblin',
+  'Zombie',
+  'Doctor',
+  'Diaper',
+  'Hamster',
+  'Dumpster',
+  'Yeti',
+  'Surgeon',
+  'Naresh',
+  'Monkey',
+  'SumoWrestler',
+  'Clown',
+  'Hitchhiker',
+  'Nooblet',
+  'Bob',
+  'ToiletBowl',
+  'Potato',
+  'Banana Peel',
+  'Pickle',
+  'Meatball',
+  'Chicken',
+  'Microwave',
+  'RubberDucky',
+  'Sock',
+  'Terrorist',
+  'TrashCan',
+  'Taliban',
+  'Prisoner',
+  'Vacuum',
+  'LawnMower',
+  'Tire',
+  'Brick',
+  'Rock',
+  'Mop',
+  'Pigeon',
+  'Seagull',
+  'Gremlin',
+  'Gargoyle',
+  'Skeleton',
+  'Ghost',
+  'Waffle',
+  'Burrito',
+  'HotDog',
+  'Donut',
+  'Pilot',
+  'Cactus',
+  'Mushroom',
+  'Gnome',
+  'Wizard',
+  'Pirate',
+  'Ninja',
+  'Caveman',
+  'Alien',
+  'Robot',
+  'Blob',
+  'Blobfish',
+  'Fossil',
+  'Crayon',
+  'Turd',
+  'Fetus',
+  'Cucumber',
+  'Janitor',
+  'Leprechaun',
+  'Vampire',
+  'Werewolf',
+  'Dragon',
+  'Unicorn',
+  'Mermaid',
+]);
 
 class GameManager {
   constructor(io) {
@@ -26,19 +172,82 @@ class GameManager {
     return player;
   }
 
-  generateFunnyUsername() {
-    const sillyAdjectives = ['Silly', 'Goofy', 'Clumsy', 'Sleepy', 'Wobbly', 'Dizzy', 'Muddy', 'Bouncy'];
-    const sillyNouns = ['Goose', 'Noodle', 'Pancake', 'Penguin', 'Turnip', 'Muffin', 'Bean', 'Goblin'];
-    const adjective = sillyAdjectives[Math.floor(Math.random() * sillyAdjectives.length)];
-    const noun = sillyNouns[Math.floor(Math.random() * sillyNouns.length)];
-    return `${adjective} ${noun}`;
-  }
-
   normalizeUsername(username) {
     const trimmed = (username || '').trim();
     const sanitized = trimmed.replace(/[^A-Za-z0-9 _-]/g, '');
-    const cleaned = sanitized.slice(0, 25);
-    return cleaned || this.generateFunnyUsername();
+    return sanitized.slice(0, 25);
+  }
+
+  getLobbyUsernameConstraints(lobby) {
+    const usedFullNames = new Set();
+    const usedAdjectives = new Set();
+    const usedNouns = new Set();
+    const adjectiveLookup = new Set(SILLY_ADJECTIVES.map((word) => word.toLowerCase()));
+    const nounLookup = new Set(SILLY_NOUNS.map((word) => word.toLowerCase()));
+
+    Array.from(lobby.players.values()).forEach((player) => {
+      const displayName = player && typeof player.displayName === 'string' ? player.displayName : '';
+      const normalizedName = displayName.trim().toLowerCase();
+      if (!normalizedName) {
+        return;
+      }
+
+      usedFullNames.add(normalizedName);
+
+      const tokens = normalizedName.split(/\s+/).filter(Boolean);
+      tokens.forEach((token) => {
+        if (adjectiveLookup.has(token)) {
+          usedAdjectives.add(token);
+        }
+
+        if (nounLookup.has(token)) {
+          usedNouns.add(token);
+        }
+      });
+    });
+
+    return {
+      usedFullNames,
+      usedAdjectives,
+      usedNouns
+    };
+  }
+
+  generateLobbyAwareUsername(lobby) {
+    const { usedFullNames, usedAdjectives, usedNouns } = this.getLobbyUsernameConstraints(lobby);
+
+    const availableAdjectives = SILLY_ADJECTIVES.filter(
+      (word) => !usedAdjectives.has(word.toLowerCase())
+    );
+    const availableNouns = SILLY_NOUNS.filter(
+      (word) => !usedNouns.has(word.toLowerCase())
+    );
+
+    const candidateNames = [];
+    availableAdjectives.forEach((adjective) => {
+      availableNouns.forEach((noun) => {
+        const fullName = `${adjective} ${noun}`;
+        if (!usedFullNames.has(fullName.toLowerCase())) {
+          candidateNames.push(fullName);
+        }
+      });
+    });
+
+    if (candidateNames.length > 0) {
+      return candidateNames[Math.floor(Math.random() * candidateNames.length)];
+    }
+
+    let attempt = 0;
+    while (attempt < 1000) {
+      const fallbackName = `Player_${Math.random().toString(36).slice(2, 8)}`;
+      if (!usedFullNames.has(fallbackName.toLowerCase())) {
+        return fallbackName;
+      }
+
+      attempt += 1;
+    }
+
+    return `Player_${Date.now().toString(36)}`;
   }
 
   assignPlayerToLobby(socketId, requestedUsername) {
@@ -55,20 +264,25 @@ class GameManager {
     const targetLobby = this.findBestJoinableLobby();
     const lobby = targetLobby || this.createLobby();
 
-    const usernameTaken = Array.from(lobby.players.values()).some((existingPlayer) => {
-      return existingPlayer.displayName.trim().toLowerCase() === normalizedUsername.trim().toLowerCase();
-    });
+    let resolvedUsername = normalizedUsername;
+    if (!resolvedUsername) {
+      resolvedUsername = this.generateLobbyAwareUsername(lobby);
+    } else {
+      const usernameTaken = Array.from(lobby.players.values()).some((existingPlayer) => {
+        return existingPlayer.displayName.trim().toLowerCase() === resolvedUsername.trim().toLowerCase();
+      });
 
-    if (usernameTaken) {
-      return { success: false, message: 'That username is already being used in this lobby.' };
+      if (usernameTaken) {
+        return { success: false, message: 'That username is already being used in this lobby.' };
+      }
     }
 
     let player = this.players.get(socketId);
     if (!player) {
-      player = this.createPlayer(socket, normalizedUsername);
+      player = this.createPlayer(socket, resolvedUsername);
       this.connections.delete(socketId);
     } else {
-      player.setDisplayName(normalizedUsername);
+      player.setDisplayName(resolvedUsername);
     }
 
     if (!lobby.addPlayer(player)) {
@@ -80,7 +294,8 @@ class GameManager {
 
     this.io.to(player.socket.id).emit('lobby:joined', {
       lobbyId: lobby.id,
-      playerId: player.id
+      playerId: player.id,
+      username: player.displayName
     });
 
     this.io.to(player.socket.id).emit('lobby:update', lobby.getPublicState());

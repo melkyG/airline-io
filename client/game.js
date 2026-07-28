@@ -693,9 +693,7 @@ function createShopAircraftOptionButton(aircraft) {
   const isSelected = selectedAircraftCatalogId != null && String(selectedAircraftCatalogId) === aircraftCatalogId;
   button.className = `shop-airport-option${isSelected ? ' shop-airport-option--selected' : ''}`;
   button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
-  button.innerHTML =
-    `<span class="shop-airport-option-name">${getAircraftDisplayName(aircraft)}</span>` +
-    `<span class="shop-airport-option-meta">${aircraft.aircraftCatalogId || 'Unknown ID'}</span>`;
+  button.innerHTML = `<span class="shop-airport-option-name">${getAircraftDisplayName(aircraft)}</span>`;
   button.addEventListener('click', () => {
     setSelectedAircraftCatalogId(aircraftCatalogId);
     setShopActiveTab(SHOP_MODAL_TAB.AIRCRAFT);
@@ -1088,152 +1086,10 @@ function sanitizeUsername(rawValue) {
   return cleaned.slice(0, 25);
 }
 
-function generateUsername() {
-  const sillyAdjectives = [
-  'Silly',
-  'Goofy',
-  'Clumsy',
-  'Sleepy',
-  'Wobbly',
-  'Dizzy',
-  'Muddy',
-  'Bouncy',
-  'Stinky',
-  'Smelly',
-  'Rotten',
-  'Abandoned',
-  'Dirty',
-  'Malnourished',
-  'Overencumbered',
-  'Fat',
-  'Oversized',
-  'Brainless',
-  'Confused',
-  'Adopted',
-  'Moldy',
-  'Farting',
-  'Cursed',
-  'Paralyzed',
-  'Crusty',
-  'Greasy',
-  'Soggy',
-  'Crispy',
-  'Sticky',
-  'Sweaty',
-  'Dusty',
-  'Wrinkly',
-  'Cranky',
-  'Spicy',
-  'Grumpy',
-  'Big breasted',
-  'Lost',
-  'Expired',
-  'Suspicious',
-  'Explosive',
-  'Shivering',
-  'Screaming',
-  'Howling',
-  'Leaking',
-  'Toasted',
-  'Burnt',
-  'Radioactive',
-  'Mutated',
-  'Possessed',
-  'Glitchy',
-  'Bootleg',
-  'Tiny',
-  'Boneless',
-  'Hairy',
-  'Slimy',
-  'Drooling',
-  'Snoring'
-];
-
-const sillyNouns = [
-  'Goose',
-  'Noodle',
-  'Pancake',
-  'Chaburtz',
-  'Penguin',
-  'Turnip',
-  'Muffin',
-  'Bean',
-  'Goblin',
-  'Zombie',
-  'Doctor',
-  'Diaper',
-  'Hamster',
-  'Dumpster',
-  'Yeti',
-  'Surgeon',
-  'Naresh',
-  'Monkey',
-  'SumoWrestler',
-  'Clown',
-  'Hitchhiker',
-  'Nooblet',
-  'Bob',
-  'ToiletBowl',
-  'Potato',
-  'Banana Peel',
-  'Pickle',
-  'Meatball',
-  'Chicken',
-  'Microwave',
-  'RubberDucky',
-  'Sock',
-  'Terrorist',
-  'TrashCan',
-  'Taliban',
-  'Prisoner',
-  'Vacuum',
-  'LawnMower',
-  'Tire',
-  'Brick',
-  'Rock',
-  'Mop',
-  'Pigeon',
-  'Seagull',
-  'Gremlin',
-  'Gargoyle',
-  'Skeleton',
-  'Ghost',
-  'Waffle',
-  'Burrito',
-  'HotDog',
-  'Donut',
-  'Pilot',
-  'Cactus',
-  'Mushroom',
-  'Gnome',
-  'Wizard',
-  'Pirate',
-  'Ninja',
-  'Caveman',
-  'Alien',
-  'Robot',
-  'Blob',
-  'Blobfish',
-  'Fossil',
-  'Crayon',
-  'Turd',
-  'Fetus'
-];
-  const adjective = sillyAdjectives[Math.floor(Math.random() * sillyAdjectives.length)];
-  const noun = sillyNouns[Math.floor(Math.random() * sillyNouns.length)];
-  return `${adjective} ${noun}`;
-}
-
 function getUsernameForJoin() {
   const sanitized = sanitizeUsername(usernameInputEl.value);
-  if (sanitized) {
-    usernameInputEl.value = sanitized;
-    return sanitized;
-  }
-
-  const generated = generateUsername();
-  usernameInputEl.value = generated;
-  return generated;
+  usernameInputEl.value = sanitized;
+  return sanitized;
 }
 
 function normalizeLobbySnapshot(payload) {
@@ -1363,7 +1219,11 @@ socket.on('lobby:preview', (payload) => {
   applyLobbySnapshot(payload);
 });
 
-socket.on('lobby:joined', ({ lobbyId, playerId }) => {
+socket.on('lobby:joined', ({ lobbyId, playerId, username }) => {
+  if (typeof username === 'string') {
+    usernameInputEl.value = username;
+  }
+
   gameState.update(() => ({
     session: {
       playerId,
