@@ -10,6 +10,9 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
   currency: 'USD',
   maximumFractionDigits: 0
 });
+const INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 0
+});
 let gameCountdownIntervalId = null;
 let selectedAirportId = null;
 let selectedAircraftCatalogId = null;
@@ -29,6 +32,8 @@ const SHOP_MODAL_OPENED_FROM = Object.freeze({
   HUD: 'hud',
   AIRPORT_MARKER: 'airport-marker'
 });
+
+const AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE = 'Select an aircraft from the list to view purchase actions.';
 
 const ShopModalState = {
   isOpen: false,
@@ -244,6 +249,9 @@ shopAirportsPanelEl.setAttribute('data-panel', SHOP_MODAL_TAB.AIRPORTS);
 const shopAirportSearchContainerEl = document.createElement('div');
 shopAirportSearchContainerEl.className = 'shop-airport-search-container';
 
+const shopAirportDetailsEl = document.createElement('div');
+shopAirportDetailsEl.className = 'shop-airport-details';
+
 const shopAirportSearchLabelEl = document.createElement('label');
 shopAirportSearchLabelEl.className = 'shop-airport-search-label';
 shopAirportSearchLabelEl.setAttribute('for', 'shopAirportSearchInput');
@@ -291,11 +299,12 @@ shopAirportSearchContainerEl.appendChild(shopAirportSearchInputEl);
 shopAirportSearchContainerEl.appendChild(shopAirportResultsTitleEl);
 shopAirportSearchContainerEl.appendChild(shopAirportResultsListEl);
 shopAirportsPanelEl.appendChild(shopAirportSearchContainerEl);
-shopAirportsPanelEl.appendChild(shopAirportTitleEl);
-shopAirportsPanelEl.appendChild(shopAirportOwnerRowEl);
-shopAirportsPanelEl.appendChild(shopAirportPriceRowEl);
-shopAirportsPanelEl.appendChild(shopAirportMessageEl);
-shopAirportsPanelEl.appendChild(shopAirportActionsEl);
+shopAirportDetailsEl.appendChild(shopAirportTitleEl);
+shopAirportDetailsEl.appendChild(shopAirportOwnerRowEl);
+shopAirportDetailsEl.appendChild(shopAirportPriceRowEl);
+shopAirportDetailsEl.appendChild(shopAirportMessageEl);
+shopAirportDetailsEl.appendChild(shopAirportActionsEl);
+shopAirportsPanelEl.appendChild(shopAirportDetailsEl);
 
 const shopAircraftPanelEl = document.createElement('div');
 shopAircraftPanelEl.className = 'shop-modal-panel';
@@ -303,6 +312,9 @@ shopAircraftPanelEl.setAttribute('data-panel', SHOP_MODAL_TAB.AIRCRAFT);
 
 const shopAircraftSearchContainerEl = document.createElement('div');
 shopAircraftSearchContainerEl.className = 'shop-airport-search-container';
+
+const shopAircraftDetailsEl = document.createElement('div');
+shopAircraftDetailsEl.className = 'shop-airport-details';
 
 const shopAircraftSearchLabelEl = document.createElement('label');
 shopAircraftSearchLabelEl.className = 'shop-airport-search-label';
@@ -329,11 +341,6 @@ const shopAircraftTitleEl = document.createElement('h3');
 shopAircraftTitleEl.className = 'airport-interaction-title';
 shopAircraftTitleEl.textContent = 'Select an aircraft';
 
-const shopAircraftManufacturerRowEl = document.createElement('p');
-shopAircraftManufacturerRowEl.className = 'airport-interaction-row';
-shopAircraftManufacturerRowEl.innerHTML = '<span class="airport-interaction-label">Manufacturer:</span> <span class="airport-interaction-value" data-shop-aircraft-manufacturer>-</span>';
-const shopAircraftManufacturerValueEl = shopAircraftManufacturerRowEl.querySelector('[data-shop-aircraft-manufacturer]');
-
 const shopAircraftPriceRowEl = document.createElement('p');
 shopAircraftPriceRowEl.className = 'airport-interaction-row';
 shopAircraftPriceRowEl.innerHTML = '<span class="airport-interaction-label">Price:</span> <span class="airport-interaction-value" data-shop-aircraft-price>-</span>';
@@ -346,7 +353,7 @@ const shopAircraftRangeValueEl = shopAircraftRangeRowEl.querySelector('[data-sho
 
 const shopAircraftMessageEl = document.createElement('p');
 shopAircraftMessageEl.className = 'airport-interaction-row';
-shopAircraftMessageEl.textContent = 'Select an aircraft from the list to view purchase actions.';
+shopAircraftMessageEl.textContent = AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE;
 
 const shopAircraftActionsEl = document.createElement('div');
 shopAircraftActionsEl.className = 'airport-interaction-actions';
@@ -380,12 +387,12 @@ shopAircraftSearchContainerEl.appendChild(shopAircraftSearchInputEl);
 shopAircraftSearchContainerEl.appendChild(shopAircraftResultsTitleEl);
 shopAircraftSearchContainerEl.appendChild(shopAircraftResultsListEl);
 shopAircraftPanelEl.appendChild(shopAircraftSearchContainerEl);
-shopAircraftPanelEl.appendChild(shopAircraftTitleEl);
-shopAircraftPanelEl.appendChild(shopAircraftManufacturerRowEl);
-shopAircraftPanelEl.appendChild(shopAircraftPriceRowEl);
-shopAircraftPanelEl.appendChild(shopAircraftRangeRowEl);
-shopAircraftPanelEl.appendChild(shopAircraftMessageEl);
-shopAircraftPanelEl.appendChild(shopAircraftActionsEl);
+shopAircraftDetailsEl.appendChild(shopAircraftTitleEl);
+shopAircraftDetailsEl.appendChild(shopAircraftPriceRowEl);
+shopAircraftDetailsEl.appendChild(shopAircraftRangeRowEl);
+shopAircraftDetailsEl.appendChild(shopAircraftMessageEl);
+shopAircraftDetailsEl.appendChild(shopAircraftActionsEl);
+shopAircraftPanelEl.appendChild(shopAircraftDetailsEl);
 
 shopModalContentEl.appendChild(shopAirportsPanelEl);
 shopModalContentEl.appendChild(shopAircraftPanelEl);
@@ -641,8 +648,7 @@ function getSelectedAircraftCatalogEntry(state) {
   }
 
   if (!selectedAircraftCatalogId) {
-    setSelectedAircraftCatalogId(String(aircraftCatalog[0].aircraftCatalogId));
-    return aircraftCatalog[0];
+    return null;
   }
 
   const selectedAircraft = aircraftCatalog.find(
@@ -653,8 +659,8 @@ function getSelectedAircraftCatalogEntry(state) {
     return selectedAircraft;
   }
 
-  setSelectedAircraftCatalogId(String(aircraftCatalog[0].aircraftCatalogId));
-  return aircraftCatalog[0];
+  setSelectedAircraftCatalogId(null);
+  return null;
 }
 
 function getFilteredSortedAirports(state, rawSearchValue) {
@@ -841,13 +847,12 @@ function renderAirportInteractionContent({ titleEl, ownerValueEl, priceValueEl, 
 
 function setAircraftInteractionFallbackContent() {
   shopAircraftTitleEl.textContent = 'Select an aircraft';
-  shopAircraftManufacturerValueEl.textContent = '-';
   shopAircraftPriceValueEl.textContent = '-';
   shopAircraftRangeValueEl.textContent = '-';
   shopAircraftBuyButtonEl.disabled = true;
   shopAircraftBuyButtonEl.textContent = 'Buy';
   if (!shopAircraftMessageEl.textContent) {
-    shopAircraftMessageEl.textContent = 'Select an aircraft from the list to view purchase actions.';
+    shopAircraftMessageEl.textContent = AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE;
   }
 }
 
@@ -862,29 +867,34 @@ function refreshShopAircraftInteractionPanel(state) {
 
   const isInGameScreen = state && state.ui && state.ui.screen === 'game';
   if (!isInGameScreen) {
-    setAircraftInteractionFallbackContent();
+    shopAircraftDetailsEl.classList.add('hidden');
     return;
   }
 
   const aircraftCatalog = getAircraftCatalogEntries(state);
   if (aircraftCatalog.length === 0) {
     setSelectedAircraftCatalogId(null);
-    setAircraftInteractionFallbackContent();
+    shopAircraftDetailsEl.classList.add('hidden');
     return;
   }
 
   const selectedAircraft = getSelectedAircraftCatalogEntry(state);
   if (!selectedAircraft) {
-    setAircraftInteractionFallbackContent();
+    shopAircraftDetailsEl.classList.add('hidden');
     return;
   }
 
+  shopAircraftDetailsEl.classList.remove('hidden');
+
   shopAircraftTitleEl.textContent = getAircraftDisplayName(selectedAircraft);
-  shopAircraftManufacturerValueEl.textContent = selectedAircraft.manufacturer || '-';
   shopAircraftPriceValueEl.textContent = formatCurrencyValue(selectedAircraft.purchasePrice);
-  shopAircraftRangeValueEl.textContent = `${Number.isFinite(selectedAircraft.rangeKm) ? selectedAircraft.rangeKm : 0} km`;
+  const rangeKm = Number.isFinite(selectedAircraft.rangeKm) ? selectedAircraft.rangeKm : 0;
+  shopAircraftRangeValueEl.textContent = `${INTEGER_FORMATTER.format(rangeKm)} km`;
   shopAircraftBuyButtonEl.disabled = isAircraftPurchasePending;
   shopAircraftBuyButtonEl.textContent = isAircraftPurchasePending ? 'Buying...' : 'Buy';
+  if (shopAircraftMessageEl.textContent === AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE) {
+    setAircraftSelectionMessage('', 'info');
+  }
 }
 
 function refreshShopAirportInteractionPanel(state) {
@@ -893,13 +903,7 @@ function refreshShopAirportInteractionPanel(state) {
 
   const isInGameScreen = state && state.ui && state.ui.screen === 'game';
   if (!isInGameScreen) {
-    setAirportInteractionFallbackContent({
-      titleEl: shopAirportTitleEl,
-      ownerValueEl: shopAirportOwnerValueEl,
-      priceValueEl: shopAirportPriceValueEl,
-      actionsEl: shopAirportActionsEl,
-      messageEl: shopAirportMessageEl
-    });
+    shopAirportDetailsEl.classList.add('hidden');
     return;
   }
 
@@ -911,27 +915,17 @@ function refreshShopAirportInteractionPanel(state) {
   }
 
   if (!selectedAirportId) {
-    setAirportInteractionFallbackContent({
-      titleEl: shopAirportTitleEl,
-      ownerValueEl: shopAirportOwnerValueEl,
-      priceValueEl: shopAirportPriceValueEl,
-      actionsEl: shopAirportActionsEl,
-      messageEl: shopAirportMessageEl
-    });
+    shopAirportDetailsEl.classList.add('hidden');
     return;
   }
 
   const airport = getAuthoritativeAirportById(state, selectedAirportId);
   if (!airport) {
-    setAirportInteractionFallbackContent({
-      titleEl: shopAirportTitleEl,
-      ownerValueEl: shopAirportOwnerValueEl,
-      priceValueEl: shopAirportPriceValueEl,
-      actionsEl: shopAirportActionsEl,
-      messageEl: shopAirportMessageEl
-    });
+    shopAirportDetailsEl.classList.add('hidden');
     return;
   }
+
+  shopAirportDetailsEl.classList.remove('hidden');
 
   renderAirportInteractionContent({
     titleEl: shopAirportTitleEl,

@@ -469,7 +469,14 @@
 
       mapInstance.once('load', () => {
         mapLoaded = true;
-        applyInitialCameraSetupIfReady();
+        globalScope.requestAnimationFrame(() => {
+          if (!mapInstance) {
+            return;
+          }
+
+          mapInstance.resize();
+          applyInitialCameraSetupIfReady();
+        });
       });
 
       mapInstance.on('move', () => {
@@ -514,6 +521,7 @@
 
       mapContainer.classList.add('map-visible');
       latestGameSnapshot = state.game || null;
+      map.resize();
       applyInitialCameraSetupIfReady();
       syncAirportMarkers(state.game && state.game.airports);
       refreshAirportTooltip();
