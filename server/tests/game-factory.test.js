@@ -40,10 +40,10 @@ test('createGame builds the expected initial authoritative state shape', () => {
   assert.equal(game.players.length, 2);
 
   assert.deepEqual(
-    game.players.map((player) => ({ id: player.id, username: player.username, score: player.score })),
+    game.players.map((player) => ({ id: player.id, username: player.username, isBot: player.isBot, score: player.score })),
     [
-      { id: 'socket-1', username: 'Alice', score: STARTING_SCORE },
-      { id: 'socket-2', username: 'Bob', score: STARTING_SCORE }
+      { id: 'socket-1', username: 'Alice', isBot: false, score: STARTING_SCORE },
+      { id: 'socket-2', username: 'Bob', isBot: false, score: STARTING_SCORE }
     ]
   );
 

@@ -1,6 +1,7 @@
 const socket = io();
 
 const joinButtonEl = document.getElementById('joinButton');
+const botFillButtonEl = document.getElementById('botFillButton');
 const usernameInputEl = document.getElementById('usernameInput');
 const gameTimerEl = document.getElementById('gameTimer');
 const devAddScoreButtonEl = document.getElementById('devAddScoreButton');
@@ -99,6 +100,7 @@ function getEmptyLobbyState() {
     playerCount: 0,
     maxPlayers: 5,
     players: [],
+    botFillInProgress: false,
     countdownSeconds: null
   };
 }
@@ -181,6 +183,7 @@ const gameState = window.createGameState({
     playerId: null,
     joined: false,
     joinPending: false,
+    botFillPending: false,
     currentLobbyId: null,
     currentGameId: null
   },
@@ -830,7 +833,11 @@ function resolveAirportOwnerText(state, airport) {
   }
 
   const ownerPlayer = getAuthoritativePlayerById(state, ownerPlayerId);
-  return ownerPlayer && ownerPlayer.username ? ownerPlayer.username : 'Unknown';
+  if (!ownerPlayer || !ownerPlayer.username) {
+    return 'Unknown';
+  }
+
+  return ownerPlayer.isBot ? `[Bot] ${ownerPlayer.username}` : ownerPlayer.username;
 }
 
 function renderAirportInteractionContent({ titleEl, ownerValueEl, priceValueEl, actionsEl, messageEl }, state, airport) {
@@ -1093,7 +1100,13 @@ function normalizeLobbySnapshot(payload) {
     status: source.status === 'countdown' ? 'countdown' : 'waiting',
     playerCount: Number.isFinite(source.playerCount) ? source.playerCount : 0,
     maxPlayers: Number.isFinite(source.maxPlayers) ? source.maxPlayers : 5,
-    players: Array.isArray(source.players) ? source.players : [],
+    players: Array.isArray(source.players)
+      ? source.players.map((player) => ({
+          ...player,
+          isBot: Boolean(player && player.isBot)
+        }))
+      : [],
+    botFillInProgress: Boolean(source.botFillInProgress),
     countdownSeconds: Number.isFinite(source.countdown) ? source.countdown : null
   };
 }
@@ -1147,6 +1160,24 @@ joinButtonEl.addEventListener('click', () => {
   socket.emit('lobby:leave');
 });
 
+if (botFillButtonEl) {
+  botFillButtonEl.addEventListener('click', () => {
+    const state = gameState.getState();
+    const isConnected = state.connection.status === 'connected';
+
+    if (!isConnected || !state.session.joined || state.session.joinPending || state.session.botFillPending) {
+      return;
+    }
+
+    gameState.update(() => ({
+      session: { botFillPending: true },
+      ui: { errorMessage: null }
+    }));
+
+    socket.emit('lobby:bot-fill');
+  });
+}
+
 usernameInputEl.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -1184,6 +1215,7 @@ socket.on('disconnect', () => {
       playerId: null,
       joined: false,
       joinPending: false,
+      botFillPending: false,
       currentLobbyId: null,
       currentGameId: null
     },
@@ -1223,6 +1255,7 @@ socket.on('lobby:joined', ({ lobbyId, playerId, username }) => {
       playerId,
       joined: true,
       joinPending: false,
+      botFillPending: false,
       currentLobbyId: lobbyId
     }
   }));
@@ -1236,6 +1269,7 @@ socket.on('lobby:left', ({ lobbyId, playerId }) => {
     session: {
       joined: false,
       joinPending: false,
+      botFillPending: false,
       currentLobbyId: null
     },
     lobby: getEmptyLobbyState()
@@ -1244,8 +1278,32 @@ socket.on('lobby:left', ({ lobbyId, playerId }) => {
   console.log(`Left lobby ${lobbyId} as ${playerId}.`);
 });
 
+socket.on('game:left', ({ gameId, playerId }) => {
+  stopGameCountdown();
+  closeShopModal();
+  gameState.update(() => ({
+    session: {
+      joinPending: false,
+      botFillPending: false,
+      currentGameId: null,
+      joined: false,
+      currentLobbyId: null
+    },
+    lobby: getEmptyLobbyState(),
+    ui: {
+      screen: 'lobby'
+    },
+    game: getEmptyGameState()
+  }));
+
+  console.log(`Left game ${gameId} as ${playerId}.`);
+});
+
 socket.on('lobby:update', (payload) => {
   if (payload && payload.lobbyId) {
+    gameState.update(() => ({
+      session: { botFillPending: false }
+    }));
     applyLobbySnapshot(payload);
   }
 });
@@ -1272,12 +1330,24 @@ socket.on('lobby:countdown-cancelled', ({ lobbyId, message }) => {
 
 socket.on('lobby:error', ({ message }) => {
   gameState.update(() => ({
-    session: { joinPending: false },
+    session: { joinPending: false, botFillPending: false },
     ui: { errorMessage: message || '' }
   }));
 
   if (message) {
     console.error(message);
+  }
+});
+
+socket.on('lobby:bot-fill:result', (result = {}) => {
+  gameState.update(() => ({
+    session: { botFillPending: false }
+  }));
+
+  if (!result.success && result.message) {
+    gameState.update(() => ({
+      ui: { errorMessage: result.message }
+    }));
   }
 });
 
@@ -1287,7 +1357,8 @@ function applyAuthoritativeGamePayload(payload) {
   gameState.update(() => ({
     session: {
       currentGameId: authoritativeGame.id,
-      joinPending: false
+      joinPending: false,
+      botFillPending: false
     },
     ui: { screen: 'game' },
     game: authoritativeGame

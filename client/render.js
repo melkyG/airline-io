@@ -17,6 +17,23 @@
 
     return { text: 'Connecting...', className: 'connected' };
   }
+  
+  function formatDisplayName(name, isBot) {
+    const resolvedName = typeof name === 'string' && name.trim().length > 0 ? name : 'Unknown';
+    return isBot ? `[Bot] ${resolvedName}` : resolvedName;
+  }
+  
+  function getBotLookupByPlayerId(state) {
+    const sourcePlayers = Array.isArray(state && state.game && state.game.players) ? state.game.players : [];
+    return sourcePlayers.reduce((lookup, player) => {
+      if (!player || player.id == null) {
+        return lookup;
+      }
+  
+      lookup.set(String(player.id), Boolean(player.isBot));
+      return lookup;
+    }, new Map());
+  }
 
   function createRenderer(documentRef) {
     const mapRenderer = globalScope.createMapRenderer(documentRef);
@@ -32,6 +49,7 @@
       statusDots: documentRef.getElementById('statusDots'),
       lobbyPlayerList: documentRef.getElementById('lobbyPlayerList'),
       statusMessage: documentRef.getElementById('statusMessage'),
+      botFillButton: documentRef.getElementById('botFillButton'),
       lobbyScreen: documentRef.getElementById('lobbyScreen'),
       gameScreen: documentRef.getElementById('gameScreen'),
       gameStatus: documentRef.getElementById('gameStatus'),
@@ -88,7 +106,7 @@
         const item = documentRef.createElement('li');
         const name = documentRef.createElement('span');
         name.className = 'lobby-player-name';
-        name.textContent = player && player.displayName ? player.displayName : 'Unknown player';
+        name.textContent = formatDisplayName(player && player.displayName ? player.displayName : 'Unknown player', Boolean(player && player.isBot));
 
         const status = documentRef.createElement('span');
         status.className = 'lobby-player-status';
@@ -106,6 +124,32 @@
       const isConnected = state.connection.status === 'connected';
       const isPending = state.session.joinPending;
       const isJoined = state.session.joined;
+      const isBotFillPending = Boolean(state.session.botFillPending);
+      const lobbyPlayers = Array.isArray(state.lobby.players) ? state.lobby.players : [];
+      const localPlayer = lobbyPlayers.find((player) => {
+        if (!player || player.id == null || state.session.playerId == null) {
+          return false;
+        }
+
+        return String(player.id) === String(state.session.playerId);
+      });
+      const realPlayerCount = lobbyPlayers.filter((player) => player && !player.isBot).length;
+      const isLobbyWaiting = state.lobby.status === 'waiting';
+      const isLobbyFull =
+        Number.isFinite(state.lobby.playerCount) &&
+        Number.isFinite(state.lobby.maxPlayers) &&
+        state.lobby.playerCount >= state.lobby.maxPlayers;
+      const canRequestBotFill =
+        isConnected &&
+        isJoined &&
+        !isPending &&
+        !isBotFillPending &&
+        !state.lobby.botFillInProgress &&
+        isLobbyWaiting &&
+        !isLobbyFull &&
+        realPlayerCount > 0 &&
+        !!localPlayer &&
+        !localPlayer.isBot;
 
       let buttonText = isJoined ? 'Leave' : 'Join';
       if (isPending) {
@@ -118,6 +162,11 @@
       elements.joinButton.classList.toggle('join-state', !isJoined);
 
       elements.usernameInput.disabled = isJoined || isPending;
+
+      if (elements.botFillButton) {
+        elements.botFillButton.disabled = !canRequestBotFill;
+        elements.botFillButton.textContent = isBotFillPending || state.lobby.botFillInProgress ? 'Filling...' : 'Bot Fill';
+      }
     }
 
     function renderCountdown(state) {
@@ -163,7 +212,7 @@
       leaderboard.forEach((player) => {
         const item = documentRef.createElement('li');
         item.className = 'leaderboard-row';
-        const username = player && player.username ? player.username : 'Unknown';
+        const username = formatDisplayName(player && player.username ? player.username : 'Unknown', Boolean(player && player.isBot));
         const isLocalPlayer =
           !!player &&
           player.id != null &&
@@ -184,7 +233,9 @@
 
         const spacer = documentRef.createElement('span');
         spacer.className = 'leaderboard-spacer';
-        spacer.setAttribute('aria-hidden', 'true');
+        if (typeof spacer.setAttribute === 'function') {
+          spacer.setAttribute('aria-hidden', 'true');
+        }
 
         const scoreValue = documentRef.createElement('span');
         scoreValue.className = 'leaderboard-score';
@@ -283,7 +334,11 @@
       }
 
       const results = game.results && typeof game.results === 'object' ? game.results : null;
-      const winnerName = results && results.winner && results.winner.username ? results.winner.username : 'Unavailable';
+      const botLookupByPlayerId = getBotLookupByPlayerId(state);
+      const winnerName = formatDisplayName(
+        results && results.winner && results.winner.username ? results.winner.username : 'Unavailable',
+        Boolean(results && results.winner && botLookupByPlayerId.get(String(results.winner.id)))
+      );
 
       if (elements.resultsWinner) {
         elements.resultsWinner.innerHTML = '';
@@ -321,7 +376,8 @@
 
       const standingsFragment = documentRef.createDocumentFragment();
       standings.forEach((entry, index) => {
-        const username = entry && entry.username ? entry.username : 'Unknown';
+        const isBot = Boolean(entry && botLookupByPlayerId.get(String(entry.id)));
+        const username = formatDisplayName(entry && entry.username ? entry.username : 'Unknown', isBot);
         const score = Number.isFinite(entry && entry.score) ? entry.score : 0;
 
         const item = documentRef.createElement('li');

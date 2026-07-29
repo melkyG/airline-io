@@ -168,6 +168,10 @@ body {
   gap: 1rem;
 }
 
+.lobby-panel {
+  position: relative;
+}
+
 .status-line {
   display: flex;
   align-items: center;
@@ -304,6 +308,31 @@ body {
   cursor: wait;
   filter: none;
   transform: none;
+}
+
+.bot-fill-button {
+  position: absolute;
+  left: clamp(1.05rem, 2vw, 1.5rem);
+  bottom: clamp(1rem, 2vw, 1.45rem);
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  padding: 0.34rem 0.68rem;
+  background: rgba(15, 23, 42, 0.78);
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+.bot-fill-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.bot-fill-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
 }
 
 .game-card {

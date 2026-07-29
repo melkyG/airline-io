@@ -39,6 +39,21 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('game:leave', () => {
+    const result = gameManager.leaveGame(socket.id);
+    if (!result.success) {
+      socket.emit('lobby:error', { message: result.message });
+    }
+  });
+
+  socket.on('lobby:bot-fill', () => {
+    const result = gameManager.handleLobbyBotFillRequest(socket.id);
+    socket.emit('lobby:bot-fill:result', result);
+    if (!result.success) {
+      socket.emit('lobby:error', { message: result.message });
+    }
+  });
+
   socket.on('dev:score:add', () => {
     gameManager.handleDeveloperScoreRequest(socket.id, 500);
   });

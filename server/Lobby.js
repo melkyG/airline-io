@@ -4,6 +4,7 @@ class Lobby {
     this.status = 'waiting';
     this.maxPlayers = 5;
     this.players = new Map();
+    this.botFillInProgress = false;
     this.countdownRemaining = null;
     this.countdownInterval = null;
     this.createdAt = Date.now();
@@ -52,6 +53,10 @@ class Lobby {
 
     if (this.countdownInterval) {
       this.cancelCountdown();
+    }
+
+    if (this.manager.cleanupWaitingLobbyWithoutRealPlayers(this)) {
+      return true;
     }
 
     this.broadcastState();
@@ -134,6 +139,7 @@ class Lobby {
       playerCount: this.players.size,
       maxPlayers: this.maxPlayers,
       players: Array.from(this.players.values()).map((player) => player.getPublicState()),
+      botFillInProgress: this.botFillInProgress,
       countdown: this.countdownRemaining
     };
   }

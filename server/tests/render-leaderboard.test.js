@@ -23,7 +23,7 @@ function createMockElement() {
     children: [],
     classList: createClassList(),
     appendChild(node) {
-      if (node && Array.isArray(node.children)) {
+      if (node && node.__isFragment && Array.isArray(node.children)) {
         this.children.push(...node.children);
       } else if (node) {
         this.children.push(node);
@@ -63,6 +63,7 @@ function createMockDocument() {
     },
     createDocumentFragment() {
       return {
+        __isFragment: true,
         children: [],
         appendChild(node) {
           this.children.push(node);
@@ -122,7 +123,14 @@ test('renderer derives leaderboard from game players sorted by descending score'
     waitingAnimation: { step: 0 }
   });
 
-  const rendered = elements.leaderboard.children.map((item) => item.textContent);
+  const rendered = elements.leaderboard.children.map((item) => {
+    const content = Array.isArray(item.children) ? item.children[0] : null;
+    const playerNameEl = content && Array.isArray(content.children) ? content.children[0] : null;
+    const scoreEl = content && Array.isArray(content.children) ? content.children[2] : null;
+    const playerName = playerNameEl && typeof playerNameEl.textContent === 'string' ? playerNameEl.textContent : '';
+    const score = scoreEl && typeof scoreEl.textContent === 'string' ? scoreEl.textContent : '';
+    return `${playerName} — ${score}`;
+  });
 
   assert.equal(rendered.length, 5);
   assert.deepEqual(rendered, [

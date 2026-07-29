@@ -1,13 +1,27 @@
 class Player {
-  constructor(socket, displayName = null) {
-    this.id = socket.id;
-    this.displayName = displayName || `Player ${socket.id.slice(0, 4)}`;
+  constructor(socketOrOptions, displayName = null) {
+    const options =
+      socketOrOptions && typeof socketOrOptions === 'object' && Object.prototype.hasOwnProperty.call(socketOrOptions, 'socket')
+        ? socketOrOptions
+        : {
+            socket: socketOrOptions,
+            displayName,
+            isBot: false
+          };
+
+    const socket = options.socket || null;
+    const providedId = options.id != null ? String(options.id) : null;
+    const fallbackSocketId = socket && socket.id != null ? String(socket.id) : null;
+
+    this.id = providedId || fallbackSocketId || `player-${Date.now().toString(36)}`;
+    this.displayName = options.displayName || `Player ${this.id.slice(0, 4)}`;
     this.joinedAt = Date.now();
-    this.connected = true;
+    this.connected = options.connected == null ? true : Boolean(options.connected);
     this.score = 0;
     this.socket = socket;
     this.lobbyId = null;
     this.gameId = null;
+    this.isBot = Boolean(options.isBot);
   }
 
   setDisplayName(name) {
@@ -18,7 +32,8 @@ class Player {
     return {
       id: this.id,
       displayName: this.displayName,
-      connected: this.connected
+      connected: this.connected,
+      isBot: this.isBot
     };
   }
 }

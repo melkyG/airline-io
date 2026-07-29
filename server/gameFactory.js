@@ -19,6 +19,7 @@ function createGame(lobbyPlayers) {
   const players = Array.from(lobbyPlayers || []).map((player) => ({
     id: player.id,
     username: player.displayName,
+    isBot: Boolean(player && player.isBot),
     capital: STARTING_CAPITAL,
     score: STARTING_SCORE
   }));

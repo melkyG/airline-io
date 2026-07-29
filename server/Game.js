@@ -71,6 +71,11 @@ class Game {
     this.generateResults();
     this.clearExpirationTimeout();
     this.broadcastState();
+
+    if (this.manager && typeof this.manager.handleGameEnded === 'function') {
+      this.manager.handleGameEnded(this.id);
+    }
+
     return true;
   }
 
@@ -609,6 +614,7 @@ class Game {
     return players.map((player) => ({
       id: player.id,
       username: player.username,
+      isBot: Boolean(player && player.isBot),
       score: player.score,
       capital: player.capital
     }));
@@ -660,6 +666,10 @@ class Game {
   }
 
   handlePlayerDisconnect(playerId) {
+    if (this.manager && this.manager.games && !this.manager.games.has(this.id)) {
+      return;
+    }
+
     const player = this.players.get(playerId);
     if (!player) {
       return;

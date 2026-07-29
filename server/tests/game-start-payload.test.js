@@ -44,7 +44,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
       durationMs: 1800000,
       scoreToWin: 1000,
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
+        { id: 'p1', username: 'Alice', isBot: false, capital: 1000000, score: 0 }
       ],
       ownedAircraft: [],
       aircraftCatalog: AIRCRAFT_CATALOG.map((aircraft) => ({
@@ -123,6 +123,7 @@ test('game:started public player payload includes only explicit public fields', 
     {
       id: 'p1',
       username: 'Alice',
+      isBot: false,
       capital: 1000000,
       score: 0
     }
