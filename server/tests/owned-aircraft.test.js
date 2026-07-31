@@ -13,17 +13,32 @@ const {
   validateAircraftCatalogEntry
 } = require('../aircraft/catalog');
 
-test('active aircraft catalog is manually authored with only BOEING_747 active', () => {
+test('active aircraft catalog is manually authored with BOEING_747 and BOEING_737 active', () => {
   assert.equal(Array.isArray(AIRCRAFT_CATALOG), true);
-  assert.equal(AIRCRAFT_CATALOG.length, 1);
-  assert.equal(AIRCRAFT_CATALOG[0].aircraftCatalogId, 'BOEING_747');
-  assert.equal(AIRCRAFT_CATALOG[0].manufacturer, 'Boeing');
-  assert.equal(AIRCRAFT_CATALOG[0].model, '747');
-  assert.equal(AIRCRAFT_CATALOG[0].purchasePrice, 300000);
-  assert.equal(AIRCRAFT_CATALOG[0].rangeKm, 14000);
-  assert.equal('passengerCapacity' in AIRCRAFT_CATALOG[0], false);
-  assert.equal('cruiseSpeedKph' in AIRCRAFT_CATALOG[0], false);
-  assert.deepEqual(Object.keys(AIRCRAFT_CATALOG[0]).sort(), ['aircraftCatalogId', 'manufacturer', 'model', 'purchasePrice', 'rangeKm']);
+  assert.equal(AIRCRAFT_CATALOG.length, 2);
+
+  const catalogById = AIRCRAFT_CATALOG.reduce((lookup, aircraft) => {
+    lookup[aircraft.aircraftCatalogId] = aircraft;
+    return lookup;
+  }, Object.create(null));
+
+  assert.deepEqual(Object.keys(catalogById).sort(), ['BOEING_737', 'BOEING_747']);
+
+  assert.equal(catalogById.BOEING_747.manufacturer, 'Boeing');
+  assert.equal(catalogById.BOEING_747.model, '747');
+  assert.equal(catalogById.BOEING_747.purchasePrice, 300000);
+  assert.equal(catalogById.BOEING_747.rangeKm, 14000);
+
+  assert.equal(catalogById.BOEING_737.manufacturer, 'Boeing');
+  assert.equal(catalogById.BOEING_737.model, '737');
+  assert.equal(catalogById.BOEING_737.purchasePrice, 220000);
+  assert.equal(catalogById.BOEING_737.rangeKm, 6500);
+
+  AIRCRAFT_CATALOG.forEach((entry) => {
+    assert.equal('passengerCapacity' in entry, false);
+    assert.equal('cruiseSpeedKph' in entry, false);
+    assert.deepEqual(Object.keys(entry).sort(), ['aircraftCatalogId', 'manufacturer', 'model', 'purchasePrice', 'rangeKm']);
+  });
 
   assert.equal(Array.isArray(RESERVED_AIRCRAFT_CATALOG), true);
   assert.equal(RESERVED_AIRCRAFT_CATALOG.length, 0);

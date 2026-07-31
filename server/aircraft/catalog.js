@@ -59,10 +59,17 @@ const FULL_AIRCRAFT_CATALOG = Object.freeze([
     model: '747',
     purchasePrice: 300000,
     rangeKm: 14000
+  }),
+  validateAircraftCatalogEntry({
+    aircraftCatalogId: 'BOEING_737',
+    manufacturer: 'Boeing',
+    model: '737',
+    purchasePrice: 220000,
+    rangeKm: 6500
   })
 ]);
 
-const ACTIVE_AIRCRAFT_CATALOG_IDS = Object.freeze(['BOEING_747']);
+const ACTIVE_AIRCRAFT_CATALOG_IDS = Object.freeze(['BOEING_747', 'BOEING_737']);
 const ACTIVE_AIRCRAFT_CATALOG_ID_SET = new Set(ACTIVE_AIRCRAFT_CATALOG_IDS);
 
 const AIRCRAFT_CATALOG = Object.freeze(

@@ -260,11 +260,8 @@ class Game {
     };
   }
 
-  purchaseAircraftFromGame(playerId, aircraftCatalogId) {
+  resolveAircraftPurchaseContext(playerId, aircraftCatalogId) {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
-    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
-      ? this.authoritativeState.ownedAircraft
-      : [];
     const normalizedAircraftCatalogId = String(aircraftCatalogId || '').trim();
 
     const player = players.find((candidate) => candidate.id === playerId);
@@ -287,34 +284,103 @@ class Game {
     }
 
     const currentCapital = Number.isFinite(player.capital) ? player.capital : 0;
-    if (currentCapital < purchasePrice) {
+    const maxPurchasable = Math.max(0, Math.floor(currentCapital / purchasePrice));
+
+    return {
+      success: true,
+      player,
+      aircraftDefinition,
+      purchasePrice,
+      currentCapital,
+      maxPurchasable
+    };
+  }
+
+  getAircraftPurchaseQuote(playerId, aircraftCatalogId) {
+    const context = this.resolveAircraftPurchaseContext(playerId, aircraftCatalogId);
+    if (!context.success) {
+      return context;
+    }
+
+    return {
+      success: true,
+      code: 'OK',
+      playerId: context.player.id,
+      aircraftCatalogId: context.aircraftDefinition.aircraftCatalogId,
+      unitPrice: context.purchasePrice,
+      currentCapital: context.currentCapital,
+      maxPurchasable: context.maxPurchasable
+    };
+  }
+
+  purchaseAircraftFromGame(playerId, aircraftCatalogId, quantity = 1) {
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const context = this.resolveAircraftPurchaseContext(playerId, aircraftCatalogId);
+    if (!context.success) {
+      return context;
+    }
+
+    const {
+      player,
+      aircraftDefinition,
+      purchasePrice,
+      currentCapital,
+      maxPurchasable
+    } = context;
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
       return {
         success: false,
-        code: 'INSUFFICIENT_CAPITAL',
-        message: 'Player does not have enough capital for this purchase.'
+        code: 'INVALID_QUANTITY',
+        message: 'Quantity must be an integer greater than or equal to 1.',
+        maxPurchasable
       };
     }
 
-    const ownedAircraftInstance = createOwnedAircraftInstance({
-      ownerPlayerId: player.id,
-      aircraftCatalogId: aircraftDefinition.aircraftCatalogId,
-      acquisitionPrice: purchasePrice
-    });
+    const totalCost = purchasePrice * quantity;
 
-    player.capital = currentCapital - purchasePrice;
-    ownedAircraft.push(ownedAircraftInstance);
+    if (currentCapital < totalCost) {
+      return {
+        success: false,
+        code: 'INSUFFICIENT_CAPITAL',
+        message: 'Player does not have enough capital for this purchase.',
+        maxPurchasable
+      };
+    }
+
+    const purchasedAircraftInstances = [];
+    for (let index = 0; index < quantity; index += 1) {
+      purchasedAircraftInstances.push(
+        createOwnedAircraftInstance({
+          ownerPlayerId: player.id,
+          aircraftCatalogId: aircraftDefinition.aircraftCatalogId,
+          acquisitionPrice: purchasePrice
+        })
+      );
+    }
+
+    player.capital = currentCapital - totalCost;
+    ownedAircraft.push(...purchasedAircraftInstances);
     this.authoritativeState.ownedAircraft = ownedAircraft;
 
     this.broadcastState();
+
+    const primaryAircraftInstance = purchasedAircraftInstances[0] || null;
 
     return {
       success: true,
       code: 'OK',
       playerId: player.id,
-      aircraftInstanceId: ownedAircraftInstance.aircraftInstanceId,
+      aircraftInstanceId: primaryAircraftInstance ? primaryAircraftInstance.aircraftInstanceId : null,
+      aircraftInstanceIds: purchasedAircraftInstances.map((instance) => instance.aircraftInstanceId),
       aircraftCatalogId: aircraftDefinition.aircraftCatalogId,
-      pricePaid: purchasePrice,
-      remainingCapital: player.capital
+      quantityPurchased: quantity,
+      unitPrice: purchasePrice,
+      pricePaid: totalCost,
+      remainingCapital: player.capital,
+      maxPurchasable: Math.max(0, Math.floor(player.capital / purchasePrice))
     };
   }
 
