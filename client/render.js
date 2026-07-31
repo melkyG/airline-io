@@ -5,6 +5,12 @@
     currency: 'USD',
     maximumFractionDigits: 0
   });
+  const EVENT_LOG_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+  const EVENT_LOG_MAX_VISIBLE = 25;
 
   function getConnectionPresentation(status) {
     if (status === 'connected') {
@@ -35,10 +41,53 @@
     }, new Map());
   }
 
+  function formatEventLogTimestamp(occurredAt) {
+    if (!Number.isFinite(occurredAt)) {
+      return '--:--:--';
+    }
+
+    return EVENT_LOG_TIME_FORMATTER.format(new Date(occurredAt));
+  }
+
+  function formatEventLogEntry(eventPayload) {
+    if (!eventPayload || typeof eventPayload !== 'object') {
+      return 'Unknown event';
+    }
+
+    const eventType = typeof eventPayload.type === 'string' ? eventPayload.type : '';
+    const eventData = eventPayload.data && typeof eventPayload.data === 'object' ? eventPayload.data : null;
+
+    if (eventType === 'aircraft:purchased' || eventType === 'aircraft:purchase:succeeded') {
+      const quantityPurchased = Number.isInteger(eventData && eventData.quantityPurchased)
+        ? eventData.quantityPurchased
+        : 1;
+      const aircraftCatalogId =
+        eventData && typeof eventData.aircraftCatalogId === 'string' && eventData.aircraftCatalogId.trim().length > 0
+          ? eventData.aircraftCatalogId.trim()
+          : 'Aircraft';
+      const pricePaid = Number.isFinite(eventData && eventData.pricePaid) ? eventData.pricePaid : null;
+      const quantityLabel = quantityPurchased === 1 ? 'aircraft' : 'aircraft';
+      const baseMessage = `You purchased ${quantityPurchased} ${quantityLabel} (${aircraftCatalogId})`;
+
+      if (!Number.isFinite(pricePaid)) {
+        return baseMessage;
+      }
+
+      return `${baseMessage} for ${CAPITAL_FORMATTER.format(pricePaid)}.`;
+    }
+
+    if (eventData && typeof eventData.message === 'string' && eventData.message.trim().length > 0) {
+      return eventData.message.trim();
+    }
+
+    return eventType || 'Game event';
+  }
+
   function createRenderer(documentRef) {
     const mapRenderer = globalScope.createMapRenderer(documentRef);
     let renderedResultsKey = null;
     let aircraftSelectHandler = null;
+    let eventLogExpanded = false;
     const elements = {
       mainContent: documentRef.querySelector('.main-content'),
       connectionStatus: documentRef.getElementById('connectionStatus'),
@@ -79,6 +128,37 @@
     if (elements.capitalHud) {
       elements.capitalHud.appendChild(capitalHudContentEl);
       elements.capitalHud.appendChild(capitalHudActionButtonEl);
+    }
+
+    const eventLogHudEl = documentRef.createElement('div');
+    eventLogHudEl.className = 'event-log-hud hidden';
+
+    const eventLogPanelEl = documentRef.createElement('div');
+    eventLogPanelEl.className = 'event-log-panel hidden';
+
+    const eventLogListEl = documentRef.createElement('ul');
+    eventLogListEl.className = 'event-log-list';
+
+    const eventLogToggleButtonEl = documentRef.createElement('button');
+    eventLogToggleButtonEl.type = 'button';
+    eventLogToggleButtonEl.className = 'event-log-toggle';
+    eventLogToggleButtonEl.textContent = 'Event Log';
+    if (typeof eventLogToggleButtonEl.setAttribute === 'function') {
+      eventLogToggleButtonEl.setAttribute('aria-expanded', 'false');
+    }
+
+    if (typeof eventLogToggleButtonEl.addEventListener === 'function') {
+      eventLogToggleButtonEl.addEventListener('click', () => {
+        eventLogExpanded = !eventLogExpanded;
+      });
+    }
+
+    eventLogPanelEl.appendChild(eventLogListEl);
+    eventLogHudEl.appendChild(eventLogPanelEl);
+    eventLogHudEl.appendChild(eventLogToggleButtonEl);
+
+    if (elements.gameScreen) {
+      elements.gameScreen.appendChild(eventLogHudEl);
     }
 
     function renderConnectionStatus(state) {
@@ -303,6 +383,71 @@
       elements.capitalHud.classList.remove('hidden');
     }
 
+    function renderEventLogHud(state) {
+      if (!elements.gameScreen) {
+        return;
+      }
+
+      const isGameScreenVisible = state && state.ui && state.ui.screen === 'game';
+      if (!isGameScreenVisible) {
+        eventLogExpanded = false;
+        eventLogHudEl.classList.toggle('hidden', true);
+        eventLogPanelEl.classList.toggle('hidden', true);
+        if (typeof eventLogToggleButtonEl.setAttribute === 'function') {
+          eventLogToggleButtonEl.setAttribute('aria-expanded', 'false');
+        }
+        eventLogToggleButtonEl.textContent = 'Event Log';
+        eventLogListEl.innerHTML = '';
+        return;
+      }
+
+      eventLogHudEl.classList.toggle('hidden', false);
+
+      const history =
+        state && state.session && Array.isArray(state.session.gameEvents) ? state.session.gameEvents : [];
+      const visibleHistory = history.slice(-EVENT_LOG_MAX_VISIBLE);
+
+      if (eventLogExpanded) {
+        eventLogPanelEl.classList.toggle('hidden', false);
+      } else {
+        eventLogPanelEl.classList.toggle('hidden', true);
+      }
+
+      if (typeof eventLogToggleButtonEl.setAttribute === 'function') {
+        eventLogToggleButtonEl.setAttribute('aria-expanded', eventLogExpanded ? 'true' : 'false');
+      }
+      eventLogToggleButtonEl.textContent = `Event Log (${history.length})`;
+
+      eventLogListEl.innerHTML = '';
+      if (visibleHistory.length === 0) {
+        const emptyItem = documentRef.createElement('li');
+        emptyItem.className = 'event-log-item event-log-item--empty';
+        emptyItem.textContent = 'No events yet.';
+        eventLogListEl.appendChild(emptyItem);
+        return;
+      }
+
+      const eventFragment = documentRef.createDocumentFragment();
+      visibleHistory.forEach((eventPayload) => {
+        const item = documentRef.createElement('li');
+        item.className = 'event-log-item';
+
+        const timestamp = documentRef.createElement('span');
+        timestamp.className = 'event-log-time';
+        timestamp.textContent = formatEventLogTimestamp(eventPayload && eventPayload.occurredAt);
+
+        const message = documentRef.createElement('span');
+        message.className = 'event-log-message';
+        message.textContent = formatEventLogEntry(eventPayload);
+
+        item.appendChild(timestamp);
+        item.appendChild(message);
+        eventFragment.appendChild(item);
+      });
+
+      eventLogListEl.appendChild(eventFragment);
+    }
+
     function getResultsRenderKey(state) {
       const game = state.game || {};
       const gameId = game.id || 'unknown';
@@ -419,6 +564,7 @@
       renderScreens(state);
       renderGameState(state);
       renderLocalCapitalHud(state);
+      renderEventLogHud(state);
       renderResultsOverlay(state);
       mapRenderer.render(state);
     }

@@ -1158,6 +1158,27 @@ class GameManager {
     return game.getAircraftPurchaseQuote(player.id, aircraftCatalogId);
   }
 
+  emitGameEventToPlayer(socketId, eventType, data, options = {}) {
+    if (typeof socketId !== 'string' || socketId.trim().length === 0) {
+      return false;
+    }
+
+    if (typeof eventType !== 'string' || eventType.trim().length === 0) {
+      return false;
+    }
+
+    const payload = {
+      type: eventType,
+      occurredAt: Number.isFinite(options.occurredAt) ? options.occurredAt : Date.now(),
+      gameId: options.gameId || null,
+      actorPlayerId: options.actorPlayerId || null,
+      data: data && typeof data === 'object' ? { ...data } : data
+    };
+
+    this.io.to(socketId).emit('game:event', payload);
+    return true;
+  }
+
   handleAircraftPurchaseSocketRequest(socketId, payload) {
     const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
     const aircraftCatalogId = requestPayload ? requestPayload.aircraftCatalogId : undefined;
@@ -1176,7 +1197,17 @@ class GameManager {
       return this.handleAircraftPurchaseQuoteRequest(socketId, aircraftCatalogId);
     }
 
-    return this.handleAircraftPurchaseRequest(socketId, aircraftCatalogId, quantity);
+    const result = this.handleAircraftPurchaseRequest(socketId, aircraftCatalogId, quantity);
+
+    if (result && result.success) {
+      const player = this.players.get(socketId);
+      this.emitGameEventToPlayer(socketId, 'aircraft:purchase:succeeded', result, {
+        gameId: player && player.gameId ? player.gameId : null,
+        actorPlayerId: player && player.id ? player.id : socketId
+      });
+    }
+
+    return result;
   }
 
   shutdown() {

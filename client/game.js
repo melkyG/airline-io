@@ -39,6 +39,7 @@ const SHOP_MODAL_OPENED_FROM = Object.freeze({
 });
 
 const AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE = 'Select an aircraft from the list to view purchase actions.';
+const MAX_GAME_EVENT_HISTORY = 100;
 
 const ShopModalState = {
   isOpen: false,
@@ -179,6 +180,63 @@ function startGameCountdown() {
   }, 1000);
 }
 
+function normalizeIncomingGameEvent(eventPayload) {
+  if (!eventPayload || typeof eventPayload !== 'object' || Array.isArray(eventPayload)) {
+    return null;
+  }
+
+  const type = typeof eventPayload.type === 'string' ? eventPayload.type.trim() : '';
+  if (!type) {
+    return null;
+  }
+
+  const occurredAt = Number.isFinite(eventPayload.occurredAt) ? eventPayload.occurredAt : Date.now();
+  const normalizedData =
+    eventPayload.data && typeof eventPayload.data === 'object' && !Array.isArray(eventPayload.data)
+      ? { ...eventPayload.data }
+      : eventPayload.data;
+
+  return {
+    type,
+    occurredAt,
+    gameId: eventPayload.gameId == null ? null : String(eventPayload.gameId),
+    actorPlayerId: eventPayload.actorPlayerId == null ? null : String(eventPayload.actorPlayerId),
+    data: normalizedData
+  };
+}
+
+function clearGameEventHistory() {
+  gameState.update(() => ({
+    session: {
+      gameEvents: []
+    }
+  }));
+}
+
+function appendGameEventToHistory(eventPayload) {
+  const normalizedEvent = normalizeIncomingGameEvent(eventPayload);
+  if (!normalizedEvent) {
+    return false;
+  }
+
+  gameState.update((state) => {
+    const existingEvents =
+      state && state.session && Array.isArray(state.session.gameEvents) ? state.session.gameEvents : [];
+    const nextEvents = [...existingEvents, normalizedEvent];
+    if (nextEvents.length > MAX_GAME_EVENT_HISTORY) {
+      nextEvents.splice(0, nextEvents.length - MAX_GAME_EVENT_HISTORY);
+    }
+
+    return {
+      session: {
+        gameEvents: nextEvents
+      }
+    };
+  });
+
+  return true;
+}
+
 const gameState = window.createGameState({
   connection: {
     status: 'connecting'
@@ -189,7 +247,8 @@ const gameState = window.createGameState({
     joinPending: false,
     botFillPending: false,
     currentLobbyId: null,
-    currentGameId: null
+    currentGameId: null,
+    gameEvents: []
   },
   lobby: getEmptyLobbyState(),
   ui: {
@@ -1348,7 +1407,8 @@ socket.on('disconnect', () => {
       joinPending: false,
       botFillPending: false,
       currentLobbyId: null,
-      currentGameId: null
+      currentGameId: null,
+      gameEvents: []
     },
     lobby: getEmptyLobbyState(),
     ui: {
@@ -1422,7 +1482,8 @@ socket.on('game:left', ({ gameId, playerId }) => {
       botFillPending: false,
       currentGameId: null,
       joined: false,
-      currentLobbyId: null
+      currentLobbyId: null,
+      gameEvents: []
     },
     lobby: getEmptyLobbyState(),
     ui: {
@@ -1505,6 +1566,7 @@ function applyAuthoritativeGamePayload(payload) {
 }
 
 socket.on('game:started', (payload) => {
+  clearGameEventHistory();
   applyAuthoritativeGamePayload(payload);
 
   console.log('Game started.');
@@ -1512,6 +1574,10 @@ socket.on('game:started', (payload) => {
 
 socket.on('game:state', (payload) => {
   applyAuthoritativeGamePayload(payload);
+});
+
+socket.on('game:event', (eventPayload) => {
+  appendGameEventToHistory(eventPayload);
 });
 
 socket.on('aircraft:purchase:result', (result = {}) => {
@@ -1579,6 +1645,6 @@ socket.on('aircraft:purchase:result', (result = {}) => {
   }
 
   setShopActiveTab(SHOP_MODAL_TAB.AIRCRAFT);
-  setAircraftSelectionMessage(result.message || 'Aircraft purchased.', 'success');
+  setAircraftSelectionMessage('', 'info');
   refreshShopModal(gameState.getState());
 });

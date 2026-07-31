@@ -396,6 +396,16 @@ test('GameManager.handleAircraftPurchaseSocketRequest passes quantity through an
   assert.equal(successResult.remainingCapital, 400000);
   assert.equal(successResult.maxPurchasable, 1);
 
+  const gameEventEntries = emitted.filter((entry) => entry.eventName === 'game:event');
+  assert.equal(gameEventEntries.length, 1);
+  assert.equal(gameEventEntries[0].roomName, 'socket-1');
+  assert.equal(gameEventEntries[0].payload.type, 'aircraft:purchase:succeeded');
+  assert.equal(gameEventEntries[0].payload.gameId, 'game-1');
+  assert.equal(gameEventEntries[0].payload.actorPlayerId, 'socket-1');
+  assert.equal(gameEventEntries[0].payload.data.success, true);
+  assert.equal(gameEventEntries[0].payload.data.quantityPurchased, 2);
+  assert.equal(gameEventEntries[0].payload.data.pricePaid, 600000);
+
   const failureResult = manager.handleAircraftPurchaseSocketRequest('socket-1', {
     aircraftCatalogId: 'BOEING_747',
     quantity: 1.25
@@ -404,6 +414,7 @@ test('GameManager.handleAircraftPurchaseSocketRequest passes quantity through an
   assert.equal(failureResult.success, false);
   assert.equal(failureResult.code, 'INVALID_QUANTITY');
   assert.equal(failureResult.maxPurchasable, 1);
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 1);
   assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 1);
 });
 
@@ -449,5 +460,6 @@ test('GameManager.handleAircraftPurchaseSocketRequest supports quoteOnly with au
   assert.equal(quoteResult.currentCapital, 650000);
   assert.equal(quoteResult.maxPurchasable, 2);
   assert.equal(JSON.stringify(game.authoritativeState), before);
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 0);
   assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 0);
 });
