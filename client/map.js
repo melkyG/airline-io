@@ -60,6 +60,29 @@
     ];
   }
 
+  function isTouchDeviceLike() {
+    const hasTouchPoints = Number(globalScope.navigator && globalScope.navigator.maxTouchPoints) > 0;
+    const hasTouchEvent = 'ontouchstart' in globalScope;
+    const coarsePointer =
+      typeof globalScope.matchMedia === 'function' && globalScope.matchMedia('(pointer: coarse)').matches;
+
+    return Boolean(hasTouchPoints || hasTouchEvent || coarsePointer);
+  }
+
+  function applyMobileRotationLockToMapLibre(mapInstance) {
+    if (!mapInstance || !isTouchDeviceLike()) {
+      return;
+    }
+
+    if (mapInstance.dragRotate && typeof mapInstance.dragRotate.disable === 'function') {
+      mapInstance.dragRotate.disable();
+    }
+
+    if (mapInstance.touchZoomRotate && typeof mapInstance.touchZoomRotate.disableRotation === 'function') {
+      mapInstance.touchZoomRotate.disableRotation();
+    }
+  }
+
   function createNativeMapRenderer(documentRef) {
     const mapContainer = documentRef.getElementById('mapContainer');
     const markerCollection = [];
@@ -463,9 +486,13 @@
         center: INITIAL_CENTER,
         zoom: INITIAL_ZOOM,
         maxZoom: BASEMAP_MAX_ZOOM,
+        dragRotate: false,
+        pitchWithRotate: false,
         renderWorldCopies: false,
         attributionControl: true
       });
+
+      applyMobileRotationLockToMapLibre(mapInstance);
 
       mapInstance.once('load', () => {
         mapLoaded = true;
@@ -914,6 +941,8 @@
         attribution: BASEMAP_CONFIG.attribution,
         noWrap: true,
         maplibreOptions: {
+          dragRotate: false,
+          pitchWithRotate: false,
           renderWorldCopies: false
         }
       }).addTo(mapInstance);
