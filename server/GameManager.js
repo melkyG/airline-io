@@ -1234,6 +1234,208 @@ class GameManager {
     return result;
   }
 
+  handleRouteCreateRequest(socketId, originAirportId, destinationAirportId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.createRoute(player.id, originAirportId, destinationAirportId);
+  }
+
+  handleRouteCreateSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const originAirportId = requestPayload ? requestPayload.originAirportId : undefined;
+    const destinationAirportId = requestPayload ? requestPayload.destinationAirportId : undefined;
+
+    if (typeof originAirportId !== 'string' || originAirportId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid originAirportId.'
+      };
+    }
+
+    if (typeof destinationAirportId !== 'string' || destinationAirportId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid destinationAirportId.'
+      };
+    }
+
+    return this.handleRouteCreateRequest(socketId, originAirportId, destinationAirportId);
+  }
+
+  handleRouteRemoveRequest(socketId, routeId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.removeRoute(player.id, routeId);
+  }
+
+  handleRouteRemoveSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const routeId = requestPayload ? requestPayload.routeId : undefined;
+
+    if (typeof routeId !== 'string' || routeId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid routeId.'
+      };
+    }
+
+    return this.handleRouteRemoveRequest(socketId, routeId);
+  }
+
+  handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.assignAircraftToRoute(player.id, routeId, aircraftInstanceId);
+  }
+
+  handleRouteAircraftAssignSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const routeId = requestPayload ? requestPayload.routeId : undefined;
+    const aircraftInstanceId = requestPayload ? requestPayload.aircraftInstanceId : undefined;
+
+    if (typeof routeId !== 'string' || routeId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid routeId.'
+      };
+    }
+
+    if (typeof aircraftInstanceId !== 'string' || aircraftInstanceId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid aircraftInstanceId.'
+      };
+    }
+
+    return this.handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId);
+  }
+
+  handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.unassignAircraftFromRoute(player.id, aircraftInstanceId);
+  }
+
+  handleRouteAircraftUnassignSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const aircraftInstanceId = requestPayload ? requestPayload.aircraftInstanceId : undefined;
+
+    if (typeof aircraftInstanceId !== 'string' || aircraftInstanceId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid aircraftInstanceId.'
+      };
+    }
+
+    return this.handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId);
+  }
+
   handleAircraftPurchaseRequest(socketId, aircraftCatalogId, quantity = 1) {
     const player = this.players.get(socketId);
     if (!player || !player.gameId) {

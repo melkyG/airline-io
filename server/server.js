@@ -83,6 +83,26 @@ io.on('connection', (socket) => {
     socket.emit('airport:sell-to-game:result', result);
   });
 
+  socket.on('route:create:request', (payload = {}) => {
+    const result = gameManager.handleRouteCreateSocketRequest(socket.id, payload);
+    socket.emit('route:create:result', result);
+  });
+
+  socket.on('route:remove:request', (payload = {}) => {
+    const result = gameManager.handleRouteRemoveSocketRequest(socket.id, payload);
+    socket.emit('route:remove:result', result);
+  });
+
+  socket.on('route:aircraft:assign:request', (payload = {}) => {
+    const result = gameManager.handleRouteAircraftAssignSocketRequest(socket.id, payload);
+    socket.emit('route:aircraft:assign:result', result);
+  });
+
+  socket.on('route:aircraft:unassign:request', (payload = {}) => {
+    const result = gameManager.handleRouteAircraftUnassignSocketRequest(socket.id, payload);
+    socket.emit('route:aircraft:unassign:result', result);
+  });
+
   socket.on('aircraft:purchase:request', (payload = {}) => {
     const result = gameManager.handleAircraftPurchaseSocketRequest(socket.id, payload);
     socket.emit('aircraft:purchase:result', result);

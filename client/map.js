@@ -8,6 +8,10 @@
   const AIRPORT_TOOLTIP_OFFSET_Y = -10;
   const AIRPORT_LABEL_ZOOM_IATA = 4.6;
   const AIRPORT_LABEL_ZOOM_NAME = 6.1;
+  const ROUTE_LINE_COLOR = '#000000';
+  const ROUTE_LINE_WIDTH = 2;
+  const MAPLIBRE_ROUTE_SOURCE_ID = 'airline-routes-source';
+  const MAPLIBRE_ROUTE_LAYER_ID = 'airline-routes-layer';
   const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -81,6 +85,57 @@
     if (mapInstance.touchZoomRotate && typeof mapInstance.touchZoomRotate.disableRotation === 'function') {
       mapInstance.touchZoomRotate.disableRotation();
     }
+  }
+
+  function createAirportLookupById(airports) {
+    return (Array.isArray(airports) ? airports : []).reduce((lookup, airport) => {
+      if (!airport) {
+        return lookup;
+      }
+
+      const airportId = String(airport.id || airport.iata || '').trim();
+      if (!airportId) {
+        return lookup;
+      }
+
+      lookup.set(airportId, airport);
+      return lookup;
+    }, new Map());
+  }
+
+  function getRenderableRouteSegments(routes, airports) {
+    const airportLookupById = createAirportLookupById(airports);
+    return (Array.isArray(routes) ? routes : []).reduce((segments, route) => {
+      if (!route || !route.routeId) {
+        return segments;
+      }
+
+      const originAirport = airportLookupById.get(String(route.originAirportId || ''));
+      const destinationAirport = airportLookupById.get(String(route.destinationAirportId || ''));
+      if (!originAirport || !destinationAirport) {
+        return segments;
+      }
+
+      const originLat = Number(originAirport.lat);
+      const originLng = Number(originAirport.lng);
+      const destinationLat = Number(destinationAirport.lat);
+      const destinationLng = Number(destinationAirport.lng);
+      if (
+        !Number.isFinite(originLat) ||
+        !Number.isFinite(originLng) ||
+        !Number.isFinite(destinationLat) ||
+        !Number.isFinite(destinationLng)
+      ) {
+        return segments;
+      }
+
+      segments.push({
+        routeId: String(route.routeId),
+        from: [originLng, originLat],
+        to: [destinationLng, destinationLat]
+      });
+      return segments;
+    }, []);
   }
 
   function createNativeMapRenderer(documentRef) {
@@ -335,6 +390,82 @@
       airportMarkersById.clear();
       airportMarkerMetadataById.clear();
       hideAirportTooltip();
+    }
+
+    function setNativeRouteCollection(routeSegments) {
+      routeCollection.length = 0;
+      routeSegments.forEach((routeSegment) => {
+        routeCollection.push(routeSegment);
+      });
+    }
+
+    function getEmptyRouteFeatureCollection() {
+      return {
+        type: 'FeatureCollection',
+        features: []
+      };
+    }
+
+    function clearRouteLines() {
+      setNativeRouteCollection([]);
+      if (!mapInstance || !mapLoaded) {
+        return;
+      }
+
+      const existingSource = mapInstance.getSource(MAPLIBRE_ROUTE_SOURCE_ID);
+      if (existingSource && typeof existingSource.setData === 'function') {
+        existingSource.setData(getEmptyRouteFeatureCollection());
+      }
+    }
+
+    function syncRouteLines(routes, airports) {
+      const routeSegments = getRenderableRouteSegments(routes, airports);
+      setNativeRouteCollection(routeSegments);
+
+      if (!mapInstance || !mapLoaded) {
+        return;
+      }
+
+      const routeFeatureCollection = {
+        type: 'FeatureCollection',
+        features: routeSegments.map((routeSegment) => ({
+          type: 'Feature',
+          properties: {
+            routeId: routeSegment.routeId
+          },
+          geometry: {
+            type: 'LineString',
+            coordinates: [routeSegment.from, routeSegment.to]
+          }
+        }))
+      };
+
+      const existingSource = mapInstance.getSource(MAPLIBRE_ROUTE_SOURCE_ID);
+      if (existingSource && typeof existingSource.setData === 'function') {
+        existingSource.setData(routeFeatureCollection);
+      } else {
+        mapInstance.addSource(MAPLIBRE_ROUTE_SOURCE_ID, {
+          type: 'geojson',
+          data: routeFeatureCollection
+        });
+      }
+
+      if (!mapInstance.getLayer(MAPLIBRE_ROUTE_LAYER_ID)) {
+        mapInstance.addLayer({
+          id: MAPLIBRE_ROUTE_LAYER_ID,
+          type: 'line',
+          source: MAPLIBRE_ROUTE_SOURCE_ID,
+          layout: {
+            'line-cap': 'round',
+            'line-join': 'round'
+          },
+          paint: {
+            'line-color': ROUTE_LINE_COLOR,
+            'line-width': ROUTE_LINE_WIDTH,
+            'line-opacity': 1
+          }
+        });
+      }
     }
 
     function setNativeDraggingClass(isDragging, reason) {
@@ -620,6 +751,7 @@
         clearNativeDraggingState('screen-hidden');
         if (mapInstance) {
           clearAirportMarkers();
+          clearRouteLines();
         }
         return;
       }
@@ -634,6 +766,7 @@
   resizeMapIfNeeded();
       applyInitialCameraSetupIfReady();
       syncAirportMarkers(state.game && state.game.airports);
+      syncRouteLines(state.game && state.game.routes, state.game && state.game.airports);
       refreshAirportTooltip();
     }
 
@@ -883,6 +1016,36 @@
       hideAirportTooltip();
     }
 
+    function clearRouteLines(map) {
+      routeCollection.forEach((routeLineLayer) => {
+        if (routeLineLayer) {
+          map.removeLayer(routeLineLayer);
+        }
+      });
+      routeCollection.length = 0;
+    }
+
+    function syncRouteLines(map, routes, airports) {
+      clearRouteLines(map);
+
+      const routeSegments = getRenderableRouteSegments(routes, airports);
+      routeSegments.forEach((routeSegment) => {
+        const routeLineLayer = globalScope.L.polyline(
+          [
+            [routeSegment.from[1], routeSegment.from[0]],
+            [routeSegment.to[1], routeSegment.to[0]]
+          ],
+          {
+            color: ROUTE_LINE_COLOR,
+            weight: ROUTE_LINE_WIDTH,
+            opacity: 1,
+            interactive: false
+          }
+        ).addTo(map);
+        routeCollection.push(routeLineLayer);
+      });
+    }
+
     function syncAirportMarkers(map, airports) {
       const sourceAirports = Array.isArray(airports) ? airports : [];
       const activeMarkerIds = new Set();
@@ -1053,6 +1216,7 @@
     function render(state) {
       if (!state || !state.ui || state.ui.screen !== 'game') {
         if (mapInstance) {
+          clearRouteLines(mapInstance);
           clearAirportMarkers(mapInstance);
           mapContainer.classList.remove('map-visible');
         }
@@ -1068,6 +1232,7 @@
       latestGameSnapshot = state.game || null;
       invalidateMapSizeIfNeeded(map);
       updateViewportMinZoom(map, { forceFit: !hasFittedWorld });
+      syncRouteLines(map, state.game && state.game.routes, state.game && state.game.airports);
       syncAirportMarkers(map, state.game && state.game.airports);
       refreshAirportTooltip(map);
       hasFittedWorld = true;

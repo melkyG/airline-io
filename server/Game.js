@@ -1,6 +1,8 @@
+const { randomUUID } = require('node:crypto');
 const { AIRPORT_CATALOG } = require('./airports/catalog');
 const { AIRCRAFT_CATALOG, AIRCRAFT_CATALOG_BY_ID } = require('./aircraft/catalog');
-const { createOwnedAircraftInstance } = require('./aircraft/ownership');
+const { createOwnedAircraftInstance, OWNED_AIRCRAFT_STATUS } = require('./aircraft/ownership');
+const { canonicalRouteKey, calculateRouteDistanceKm } = require('./routes');
 
 const AIRPORT_DEFINITIONS_BY_ID = AIRPORT_CATALOG.reduce((lookup, airport) => {
   lookup.set(airport.id, airport);
@@ -25,7 +27,8 @@ class Game {
     this.authoritativeState = {
       ...initialState,
       status: initialState.status,
-      ownedAircraft: Array.isArray(initialState.ownedAircraft) ? initialState.ownedAircraft : []
+      ownedAircraft: Array.isArray(initialState.ownedAircraft) ? initialState.ownedAircraft : [],
+      routes: Array.isArray(initialState.routes) ? initialState.routes : []
     };
     this.endTimeoutId = null;
     this.hasBroadcastStarted = false;
@@ -629,6 +632,135 @@ class Game {
     };
   }
 
+  getOwnedRoutesContainingAirport(playerId, airportId) {
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const normalizedPlayerId = String(playerId || '').trim();
+    const normalizedAirportId = String(airportId || '').trim();
+
+    if (!normalizedPlayerId || !normalizedAirportId) {
+      return [];
+    }
+
+    return routes.filter((route) => {
+      if (!route) {
+        return false;
+      }
+
+      if (String(route.ownerPlayerId || '') !== normalizedPlayerId) {
+        return false;
+      }
+
+      return (
+        String(route.originAirportId || '') === normalizedAirportId ||
+        String(route.destinationAirportId || '') === normalizedAirportId
+      );
+    });
+  }
+
+  removeRoutesWithAircraftCleanup(routesToRemove) {
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const sourceRoutes = Array.isArray(routesToRemove) ? routesToRemove : [];
+    const routeIdToAssignedAircraftIds = new Map();
+    const routeIdsToRemove = [];
+    const routeIdsToRemoveSet = new Set();
+    const aircraftToUnassignById = new Map();
+
+    for (const route of sourceRoutes) {
+      if (!route || !route.routeId) {
+        continue;
+      }
+
+      const normalizedRouteId = String(route.routeId || '').trim();
+      if (!normalizedRouteId || routeIdsToRemoveSet.has(normalizedRouteId)) {
+        continue;
+      }
+
+      const stateRoute = routes.find((candidate) => candidate && String(candidate.routeId) === normalizedRouteId);
+      if (!stateRoute) {
+        continue;
+      }
+
+      const assignedAircraftInstanceIds = Array.isArray(stateRoute.assignedAircraftInstanceIds)
+        ? stateRoute.assignedAircraftInstanceIds
+        : [];
+      const normalizedAssignedAircraftIds = assignedAircraftInstanceIds
+        .map((aircraftId) => String(aircraftId || '').trim())
+        .filter((aircraftId) => aircraftId.length > 0);
+      const listedAircraftIds = new Set(normalizedAssignedAircraftIds);
+
+      for (const aircraftInstanceId of normalizedAssignedAircraftIds) {
+        const aircraft = ownedAircraft.find(
+          (candidate) => candidate && String(candidate.aircraftInstanceId) === aircraftInstanceId
+        );
+        if (!aircraft) {
+          return {
+            success: false,
+            code: 'ASSIGNED_AIRCRAFT_NOT_FOUND',
+            message: 'Route references an aircraft instance that does not exist.',
+            aircraftInstanceId
+          };
+        }
+
+        if (String(aircraft.assignedRouteId || '') !== String(stateRoute.routeId)) {
+          return {
+            success: false,
+            code: 'ASSIGNMENT_MISMATCH',
+            message: 'Route assignment state is inconsistent for one or more aircraft.',
+            aircraftInstanceId
+          };
+        }
+
+        aircraftToUnassignById.set(aircraftInstanceId, aircraft);
+      }
+
+      for (const aircraft of ownedAircraft) {
+        if (!aircraft) {
+          continue;
+        }
+
+        if (String(aircraft.assignedRouteId || '') !== String(stateRoute.routeId)) {
+          continue;
+        }
+
+        const aircraftInstanceId = String(aircraft.aircraftInstanceId || '').trim();
+        if (!listedAircraftIds.has(aircraftInstanceId)) {
+          return {
+            success: false,
+            code: 'ASSIGNMENT_MISMATCH',
+            message: 'Route assignment state is inconsistent for one or more aircraft.',
+            aircraftInstanceId
+          };
+        }
+      }
+
+      routeIdsToRemoveSet.add(normalizedRouteId);
+      routeIdsToRemove.push(normalizedRouteId);
+      routeIdToAssignedAircraftIds.set(normalizedRouteId, normalizedAssignedAircraftIds);
+    }
+
+    aircraftToUnassignById.forEach((aircraft) => {
+      aircraft.status = OWNED_AIRCRAFT_STATUS.AVAILABLE;
+      aircraft.assignedRouteId = null;
+    });
+
+    this.authoritativeState.routes = routes.filter((route) => {
+      if (!route || !route.routeId) {
+        return true;
+      }
+
+      return !routeIdsToRemoveSet.has(String(route.routeId || '').trim());
+    });
+
+    return {
+      success: true,
+      removedRouteIds: routeIdsToRemove,
+      routeIdToAssignedAircraftIds
+    };
+  }
+
   purchaseListedAirport(buyerPlayerId, airportId) {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
     const airports = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
@@ -689,6 +821,12 @@ class Game {
       };
     }
 
+    const sellerRoutesUsingAirport = this.getOwnedRoutesContainingAirport(seller.id, airportDefinition.id);
+    const cleanupResult = this.removeRoutesWithAircraftCleanup(sellerRoutesUsingAirport);
+    if (!cleanupResult.success) {
+      return cleanupResult;
+    }
+
     buyer.capital = buyerCapital - askingPrice;
     const sellerCapital = Number.isFinite(seller.capital) ? seller.capital : 0;
     seller.capital = sellerCapital + askingPrice;
@@ -745,6 +883,12 @@ class Game {
     const refundAmount = calculateAirportSellToGamePrice(basePrice);
     const currentCapital = Number.isFinite(player.capital) ? player.capital : 0;
 
+    const playerRoutesUsingAirport = this.getOwnedRoutesContainingAirport(player.id, airportDefinition.id);
+    const cleanupResult = this.removeRoutesWithAircraftCleanup(playerRoutesUsingAirport);
+    if (!cleanupResult.success) {
+      return cleanupResult;
+    }
+
     player.capital = currentCapital + refundAmount;
     airportState.ownerPlayerId = null;
     airportState.saleListing = null;
@@ -758,6 +902,348 @@ class Game {
       airportId: airportDefinition.id,
       refundAmount,
       updatedCapital: player.capital
+    };
+  }
+
+  createRoute(playerId, originAirportId, destinationAirportId) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const airports = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const normalizedOriginAirportId = String(originAirportId || '').trim();
+    const normalizedDestinationAirportId = String(destinationAirportId || '').trim();
+
+    const player = players.find((candidate) => candidate.id === playerId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player was not found in authoritative game state.'
+      };
+    }
+
+    const originAirportState = airports.find((candidate) => candidate.airportId === normalizedOriginAirportId);
+    const destinationAirportState = airports.find((candidate) => candidate.airportId === normalizedDestinationAirportId);
+    const originAirportDefinition = AIRPORT_DEFINITIONS_BY_ID.get(normalizedOriginAirportId);
+    const destinationAirportDefinition = AIRPORT_DEFINITIONS_BY_ID.get(normalizedDestinationAirportId);
+
+    if (
+      !originAirportState ||
+      !destinationAirportState ||
+      !originAirportDefinition ||
+      !destinationAirportDefinition
+    ) {
+      return {
+        success: false,
+        code: 'AIRPORT_NOT_FOUND',
+        message: 'Airport was not found.'
+      };
+    }
+
+    if (normalizedOriginAirportId === normalizedDestinationAirportId) {
+      return {
+        success: false,
+        code: 'SAME_AIRPORT',
+        message: 'Origin and destination airports must be different.'
+      };
+    }
+
+    if (originAirportState.ownerPlayerId !== player.id || destinationAirportState.ownerPlayerId !== player.id) {
+      return {
+        success: false,
+        code: 'AIRPORT_NOT_OWNED',
+        message: 'Player does not own both airports.'
+      };
+    }
+
+    const routeKey = canonicalRouteKey(normalizedOriginAirportId, normalizedDestinationAirportId);
+    const existingRoute = routes.find((route) => {
+      return route && String(route.ownerPlayerId) === String(player.id) && route.routeKey === routeKey;
+    });
+
+    if (existingRoute) {
+      return {
+        success: false,
+        code: 'ROUTE_ALREADY_EXISTS',
+        message: 'Route already exists for this player.'
+      };
+    }
+
+    const route = {
+      routeId: `route-${randomUUID()}`,
+      ownerPlayerId: player.id,
+      originAirportId: originAirportDefinition.id,
+      destinationAirportId: destinationAirportDefinition.id,
+      routeKey,
+      distanceKm: calculateRouteDistanceKm(originAirportDefinition, destinationAirportDefinition),
+      assignedAircraftInstanceIds: []
+    };
+
+    this.authoritativeState.routes = routes;
+    this.authoritativeState.routes.push(route);
+    this.broadcastState();
+
+    return {
+      success: true,
+      code: 'OK',
+      ...route,
+      assignedAircraftInstanceIds: route.assignedAircraftInstanceIds.slice()
+    };
+  }
+
+  removeRoute(playerId, routeId) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const normalizedRouteId = String(routeId || '').trim();
+
+    const player = players.find((candidate) => candidate.id === playerId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player was not found in authoritative game state.'
+      };
+    }
+
+    const routeIndex = routes.findIndex((route) => route && route.routeId === normalizedRouteId);
+    if (routeIndex < 0) {
+      return {
+        success: false,
+        code: 'ROUTE_NOT_FOUND',
+        message: 'Route was not found.'
+      };
+    }
+
+    const route = routes[routeIndex];
+    if (String(route.ownerPlayerId) !== String(player.id)) {
+      return {
+        success: false,
+        code: 'NOT_ROUTE_OWNER',
+        message: 'Player does not own this route.'
+      };
+    }
+
+    const cleanupResult = this.removeRoutesWithAircraftCleanup([route]);
+    if (!cleanupResult.success) {
+      return cleanupResult;
+    }
+
+    const unassignedAircraftInstanceIds = cleanupResult.routeIdToAssignedAircraftIds.get(route.routeId) || [];
+    this.broadcastState();
+
+    return {
+      success: true,
+      code: 'OK',
+      routeId: route.routeId,
+      ownerPlayerId: route.ownerPlayerId,
+      unassignedAircraftInstanceIds
+    };
+  }
+
+  assignAircraftToRoute(playerId, routeId, aircraftInstanceId) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const normalizedRouteId = String(routeId || '').trim();
+    const normalizedAircraftInstanceId = String(aircraftInstanceId || '').trim();
+
+    const player = players.find((candidate) => candidate.id === playerId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player was not found in authoritative game state.'
+      };
+    }
+
+    const route = routes.find((candidate) => candidate && candidate.routeId === normalizedRouteId);
+    if (!route) {
+      return {
+        success: false,
+        code: 'ROUTE_NOT_FOUND',
+        message: 'Route was not found.'
+      };
+    }
+
+    const aircraft = ownedAircraft.find(
+      (candidate) => candidate && candidate.aircraftInstanceId === normalizedAircraftInstanceId
+    );
+    if (!aircraft) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_NOT_FOUND',
+        message: 'Aircraft instance was not found.'
+      };
+    }
+
+    if (String(route.ownerPlayerId) !== String(player.id)) {
+      return {
+        success: false,
+        code: 'NOT_ROUTE_OWNER',
+        message: 'Player does not own this route.'
+      };
+    }
+
+    if (String(aircraft.ownerPlayerId) !== String(player.id)) {
+      return {
+        success: false,
+        code: 'NOT_AIRCRAFT_OWNER',
+        message: 'Player does not own this aircraft.'
+      };
+    }
+
+    if (aircraft.status !== OWNED_AIRCRAFT_STATUS.AVAILABLE) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_NOT_AVAILABLE',
+        message: 'Aircraft is not available for assignment.'
+      };
+    }
+
+    if (aircraft.assignedRouteId !== null) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_ALREADY_ASSIGNED',
+        message: 'Aircraft is already assigned to a route.'
+      };
+    }
+
+    const aircraftDefinition = AIRCRAFT_CATALOG_BY_ID[String(aircraft.aircraftCatalogId || '')];
+    const aircraftRangeKm = aircraftDefinition ? aircraftDefinition.rangeKm : null;
+    const routeDistanceKm = Number(route.distanceKm);
+    if (
+      !aircraftDefinition ||
+      !Number.isFinite(aircraftRangeKm) ||
+      !Number.isFinite(routeDistanceKm) ||
+      aircraftRangeKm < routeDistanceKm
+    ) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_RANGE_INSUFFICIENT',
+        message: 'Aircraft range is insufficient for this route.'
+      };
+    }
+
+    const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
+      ? route.assignedAircraftInstanceIds
+      : [];
+
+    if (assignedAircraftInstanceIds.includes(aircraft.aircraftInstanceId)) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_ALREADY_ASSIGNED',
+        message: 'Aircraft is already assigned to this route.'
+      };
+    }
+
+    route.assignedAircraftInstanceIds = assignedAircraftInstanceIds;
+    route.assignedAircraftInstanceIds.push(aircraft.aircraftInstanceId);
+    aircraft.status = OWNED_AIRCRAFT_STATUS.ASSIGNED;
+    aircraft.assignedRouteId = route.routeId;
+
+    this.broadcastState();
+
+    return {
+      success: true,
+      code: 'OK',
+      routeId: route.routeId,
+      aircraftInstanceId: aircraft.aircraftInstanceId,
+      aircraftStatus: aircraft.status,
+      assignedRouteId: aircraft.assignedRouteId,
+      assignedAircraftInstanceIds: route.assignedAircraftInstanceIds.slice()
+    };
+  }
+
+  unassignAircraftFromRoute(playerId, aircraftInstanceId) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const normalizedAircraftInstanceId = String(aircraftInstanceId || '').trim();
+
+    const player = players.find((candidate) => candidate.id === playerId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player was not found in authoritative game state.'
+      };
+    }
+
+    const aircraft = ownedAircraft.find(
+      (candidate) => candidate && candidate.aircraftInstanceId === normalizedAircraftInstanceId
+    );
+    if (!aircraft) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_NOT_FOUND',
+        message: 'Aircraft instance was not found.'
+      };
+    }
+
+    if (String(aircraft.ownerPlayerId) !== String(player.id)) {
+      return {
+        success: false,
+        code: 'NOT_AIRCRAFT_OWNER',
+        message: 'Player does not own this aircraft.'
+      };
+    }
+
+    const assignedRouteId = String(aircraft.assignedRouteId || '').trim();
+    if (!assignedRouteId) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_NOT_ASSIGNED',
+        message: 'Aircraft is not assigned to a route.'
+      };
+    }
+
+    const route = routes.find((candidate) => candidate && candidate.routeId === assignedRouteId);
+    if (!route) {
+      return {
+        success: false,
+        code: 'ROUTE_NOT_FOUND',
+        message: 'Assigned route was not found.'
+      };
+    }
+
+    if (String(route.ownerPlayerId) !== String(player.id)) {
+      return {
+        success: false,
+        code: 'NOT_ROUTE_OWNER',
+        message: 'Player does not own the assigned route.'
+      };
+    }
+
+    const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
+      ? route.assignedAircraftInstanceIds
+      : [];
+    const assignmentIndex = assignedAircraftInstanceIds.findIndex((id) => id === aircraft.aircraftInstanceId);
+    if (assignmentIndex < 0) {
+      return {
+        success: false,
+        code: 'ASSIGNMENT_NOT_FOUND',
+        message: 'Aircraft assignment was not found on the route.'
+      };
+    }
+
+    assignedAircraftInstanceIds.splice(assignmentIndex, 1);
+    route.assignedAircraftInstanceIds = assignedAircraftInstanceIds;
+    aircraft.status = OWNED_AIRCRAFT_STATUS.AVAILABLE;
+    aircraft.assignedRouteId = null;
+
+    this.broadcastState();
+
+    return {
+      success: true,
+      code: 'OK',
+      routeId: route.routeId,
+      aircraftInstanceId: aircraft.aircraftInstanceId,
+      aircraftStatus: aircraft.status,
+      assignedRouteId: aircraft.assignedRouteId,
+      assignedAircraftInstanceIds: route.assignedAircraftInstanceIds.slice()
     };
   }
 
@@ -817,6 +1303,17 @@ class Game {
     }));
   }
 
+  createPublicRouteSnapshot() {
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+
+    return routes.map((route) => ({
+      ...route,
+      assignedAircraftInstanceIds: Array.isArray(route.assignedAircraftInstanceIds)
+        ? route.assignedAircraftInstanceIds.slice()
+        : []
+    }));
+  }
+
   createPublicAircraftCatalogSnapshot() {
     return AIRCRAFT_CATALOG.map((aircraft) => ({
       ...aircraft
@@ -830,6 +1327,7 @@ class Game {
         players: this.createPublicPlayerSnapshot(),
         airports: this.createPublicAirportSnapshot(),
         ownedAircraft: this.createPublicOwnedAircraftSnapshot(),
+        routes: this.createPublicRouteSnapshot(),
         aircraftCatalog: this.createPublicAircraftCatalogSnapshot()
       }
     };

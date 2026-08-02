@@ -227,21 +227,9 @@
     };
     const capitalHudContentEl = documentRef.createElement('span');
     capitalHudContentEl.className = 'capital-hud-content';
-    const capitalHudActionButtonEl = documentRef.createElement('button');
-    capitalHudActionButtonEl.type = 'button';
-    capitalHudActionButtonEl.className = 'capital-hud-action-button';
-    capitalHudActionButtonEl.textContent = 'Shop';
-    if (typeof capitalHudActionButtonEl.addEventListener === 'function') {
-      capitalHudActionButtonEl.addEventListener('click', () => {  
-        if (typeof aircraftSelectHandler === 'function') {
-          aircraftSelectHandler();
-        }
-      });
-    }
 
     if (elements.capitalHud) {
       elements.capitalHud.appendChild(capitalHudContentEl);
-      elements.capitalHud.appendChild(capitalHudActionButtonEl);
     }
 
     const eventLogHudEl = documentRef.createElement('div');

@@ -34,7 +34,8 @@ function createGame(lobbyPlayers) {
     scoreToWin: SCORE_TO_WIN,
     players,
     airports: createInitialAirportState(),
-    ownedAircraft: []
+    ownedAircraft: [],
+    routes: []
   };
 }
 

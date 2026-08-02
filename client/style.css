@@ -428,10 +428,6 @@ body {
 }
 
 .main-content.game-active .capital-hud {
-  position: absolute;
-  left: 1rem;
-  bottom: 1rem;
-  z-index: 1000;
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -452,23 +448,6 @@ body {
 
 .capital-hud-content {
   white-space: pre-line;
-}
-
-.capital-hud-action-button {
-  align-self: flex-start;
-  border: 1px solid rgba(125, 211, 252, 0.45);
-  border-radius: 999px;
-  padding: 0.3rem 0.7rem;
-  background: rgba(8, 47, 73, 0.7);
-  color: #e0f2fe;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-}
-
-.capital-hud-action-button:hover {
-  filter: brightness(1.08);
 }
 
 .main-content.game-active .event-log-hud {
@@ -524,6 +503,10 @@ body {
   overflow-y: auto;
   padding: 0.45rem 0.55rem;
   background: transparent;
+}
+
+.event-log-hud.event-log-hud--expanded .event-log-panel {
+  height: min(36vh, 280px);
 }
 
 .event-log-list {
@@ -606,7 +589,7 @@ body {
   overscroll-behavior: none;
 }
 
-.map-box.map-is-dragging ~ .capital-hud,
+.map-box.map-is-dragging ~ .hud-bottom-right-stack,
 .map-box.map-is-dragging ~ .event-log-hud,
 .map-box.map-is-dragging ~ .game-panel,
 .map-box.map-is-dragging ~ .results-overlay {
@@ -781,6 +764,51 @@ body {
 
 .airport-interaction-action-button:hover {
   filter: brightness(1.08);
+}
+.main-content.game-active .hud-bottom-right-stack {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 1600;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.56rem;
+}
+
+.main-content.game-active .hud-icon-column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.52rem;
+}
+
+.hud-icon-button {
+  width: 44px;
+  height: 44px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.7);
+  box-shadow: 0 10px 22px rgba(2, 6, 23, 0.42);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+
+.hud-icon-button:hover {
+  filter: brightness(1.08);
+}
+
+.hud-icon-button:active {
+  transform: scale(0.97);
+}
+
+.hud-icon-button-icon {
+  display: block;
+  width: 24px;
+  height: 24px;
+  color: #f8fafc;
 }
 
 .shop-aircraft-trade-button {
@@ -1028,6 +1056,167 @@ body {
 
 .shop-modal-panel {
   margin: 0;
+}
+.shop-panel-shortcuts {
+  margin-top: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+.shop-panel-routes-shortcut {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  background: rgba(30, 41, 59, 0.62);
+  color: #dbeafe;
+  padding: 0.24rem 0.62rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+.shop-panel-routes-shortcut:hover {
+  filter: brightness(1.08);
+}
+.routes-modal-overlay {
+  z-index: 1450;
+}
+
+.routes-create-modal-overlay {
+  z-index: 1500;
+}
+
+.routes-modal {
+  width: min(90vw, 560px);
+}
+.routes-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.routes-modal-section {
+  border: 1px solid rgba(71, 85, 105, 0.75);
+  border-radius: 10px;
+  padding: 0.7rem 0.75rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+.routes-modal-section-title {
+  margin: 0 0 0.45rem;
+  color: #f8fafc;
+  font-size: 0.9rem;
+}
+
+.routes-create-selectors-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.routes-create-selector-field {
+  position: relative;
+  min-width: 0;
+}
+
+.routes-create-selector-label {
+  display: block;
+  margin: 0;
+  color: #cbd5e1;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.routes-create-selector-input {
+  margin-top: 0.34rem;
+}
+
+.routes-create-selector-results {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.28rem);
+  margin-top: 0;
+  max-height: 220px;
+  border: 1px solid rgba(71, 85, 105, 0.9);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.96);
+  padding: 0.32rem;
+  z-index: 3;
+  box-shadow: 0 10px 18px rgba(2, 6, 23, 0.45);
+}
+
+.routes-modal-create-button {
+  margin-top: 0.45rem;
+}
+
+.routes-modal-open-create-button,
+.routes-modal-create-button {
+  border-color: rgba(56, 189, 248, 0.72);
+  background: rgba(14, 116, 144, 0.78);
+  color: #e0f2fe;
+}
+
+.routes-create-feedback {
+  margin-top: 0.1rem;
+  color: #fca5a5;
+}
+
+.routes-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.routes-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.7rem;
+  border: 1px solid rgba(71, 85, 105, 0.72);
+  border-radius: 9px;
+  padding: 0.48rem 0.56rem;
+  background: rgba(15, 23, 42, 0.56);
+}
+
+.routes-list-main {
+  min-width: 0;
+}
+
+.routes-list-route {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.routes-list-meta {
+  margin: 0.2rem 0 0;
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+.routes-remove-button {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.34rem 0.56rem;
+  font-size: 0.74rem;
+}
+
+.routes-remove-button:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.routes-modal-open-create-button {
+  align-self: flex-start;
+  margin-top: 0.2rem;
+}
+
+.routes-modal-create-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 620px) {
+  .routes-create-selectors-row {
+    grid-template-columns: 1fr;
+    gap: 0.56rem;
+  }
 }
 
 .shop-airport-search-label {
@@ -1622,10 +1811,13 @@ body {
   }
 
   .main-content.game-active .capital-hud {
-    left: 0.75rem;
-    bottom: 0.75rem;
     padding: 0.42rem 0.68rem;
     font-size: 0.86rem;
+  }
+
+  .main-content.game-active .hud-bottom-right-stack {
+    left: 0.75rem;
+    bottom: 0.75rem;
   }
 
   .results-modal {

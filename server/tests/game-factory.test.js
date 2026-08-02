@@ -63,6 +63,8 @@ test('createGame builds the expected initial authoritative state shape', () => {
 
   assert.equal(Array.isArray(game.ownedAircraft), true);
   assert.deepEqual(game.ownedAircraft, []);
+  assert.equal(Array.isArray(game.routes), true);
+  assert.deepEqual(game.routes, []);
 });
 
 test('createGame does not reuse lobby player object references', () => {

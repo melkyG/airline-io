@@ -6,6 +6,7 @@ const usernameInputEl = document.getElementById('usernameInput');
 const gameTimerEl = document.getElementById('gameTimer');
 const devAddScoreButtonEl = document.getElementById('devAddScoreButton');
 const gameScreenEl = document.getElementById('gameScreen');
+const capitalHudEl = document.getElementById('capitalHud');
 const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
@@ -35,6 +36,17 @@ let isAirportSearchResultsOpen = false;
 let shopAircraftSearchQuery = '';
 let isAircraftSearchResultsOpen = false;
 let shouldIgnoreNextOverlayClick = false;
+let selectedRouteOriginAirportId = null;
+let selectedRouteDestinationAirportId = null;
+let routeOriginSearchQuery = '';
+let routeDestinationSearchQuery = '';
+let isRouteOriginDropdownOpen = false;
+let isRouteDestinationDropdownOpen = false;
+let isRoutesModalDomReady = false;
+let isRouteCreatePending = false;
+let routeCreateErrorMessage = '';
+let pendingRouteRemoveRouteId = null;
+let routeRemoveErrorMessage = '';
 
 const SHOP_MODAL_TAB = Object.freeze({
   AIRCRAFT: 'aircraft',
@@ -44,6 +56,12 @@ const SHOP_MODAL_TAB = Object.freeze({
 const SHOP_MODAL_OPENED_FROM = Object.freeze({
   HUD: 'hud',
   AIRPORT_MARKER: 'airport-marker'
+});
+
+const ROUTES_MODAL_OPENED_FROM = Object.freeze({
+  HUD: 'hud',
+  SHOP_AIRPORT_PANEL: 'shop-airport-panel',
+  SHOP_AIRCRAFT_PANEL: 'shop-aircraft-panel'
 });
 
 const AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE = 'Select an aircraft from the list to view purchase actions.';
@@ -56,6 +74,12 @@ const ShopModalState = {
   hasOpenedFromHud: false,
   selectedAircraftCatalogId: null,
   selectedAirportId: null,
+  openedFrom: null
+};
+
+const RoutesModalState = {
+  isOpen: false,
+  isCreateRouteOpen: false,
   openedFrom: null
 };
 
@@ -74,12 +98,40 @@ function openShopModal({ openedFrom = SHOP_MODAL_OPENED_FROM.HUD } = {}) {
   refreshShopModal(gameState.getState());
 }
 
+function openRoutesModal({ openedFrom = ROUTES_MODAL_OPENED_FROM.HUD } = {}) {
+  RoutesModalState.isOpen = true;
+  RoutesModalState.isCreateRouteOpen = false;
+  RoutesModalState.openedFrom = openedFrom;
+  refreshRoutesModal(gameState.getState());
+}
+
+function openCreateRouteModal() {
+  if (!RoutesModalState.isOpen) {
+    return;
+  }
+
+  RoutesModalState.isCreateRouteOpen = true;
+  refreshRoutesModal(gameState.getState());
+}
+
 function closeShopModal() {
   ShopModalState.isOpen = false;
   ShopModalState.openedFrom = null;
   isAirportSearchResultsOpen = false;
   isAircraftSearchResultsOpen = false;
   refreshShopModal(gameState.getState());
+}
+
+function closeRoutesModal() {
+  RoutesModalState.isOpen = false;
+  RoutesModalState.isCreateRouteOpen = false;
+  RoutesModalState.openedFrom = null;
+  refreshRoutesModal(gameState.getState());
+}
+
+function closeCreateRouteModal() {
+  RoutesModalState.isCreateRouteOpen = false;
+  refreshRoutesModal(gameState.getState());
 }
 
 function setShopModalOpenedFrom(openedFrom) {
@@ -130,6 +182,7 @@ function getEmptyGameState() {
     players: [],
     airports: [],
     ownedAircraft: [],
+    routes: [],
     aircraftCatalog: []
   };
 }
@@ -273,8 +326,288 @@ const renderer = window.createRenderer(document);
 gameState.subscribe((state) => {
   renderer.render(state);
   refreshShopModal(state);
+  refreshRoutesHudButton(state);
+  refreshRoutesModal(state);
 });
 renderer.render(gameState.getState());
+
+const hudBottomRightStackEl = document.createElement('div');
+hudBottomRightStackEl.className = 'hud-bottom-right-stack hidden';
+
+const hudIconColumnEl = document.createElement('div');
+hudIconColumnEl.className = 'hud-icon-column';
+
+const shopHudButtonEl = document.createElement('button');
+shopHudButtonEl.type = 'button';
+shopHudButtonEl.className = 'hud-icon-button shop-hud-button';
+shopHudButtonEl.setAttribute('aria-label', 'Open Shop');
+
+const routesHudButtonEl = document.createElement('button');
+routesHudButtonEl.type = 'button';
+routesHudButtonEl.className = 'hud-icon-button route-hud-button';
+routesHudButtonEl.setAttribute('aria-label', 'Open routes modal');
+
+const svgNamespace = 'http://www.w3.org/2000/svg';
+const shopHudButtonIconEl = document.createElementNS(svgNamespace, 'svg');
+shopHudButtonIconEl.classList.add('hud-icon-button-icon', 'shop-hud-button-icon');
+shopHudButtonIconEl.setAttribute('viewBox', '0 0 24 24');
+shopHudButtonIconEl.setAttribute('fill', 'none');
+shopHudButtonIconEl.setAttribute('aria-hidden', 'true');
+shopHudButtonIconEl.setAttribute('focusable', 'false');
+
+const shopRoofEl = document.createElementNS(svgNamespace, 'path');
+shopRoofEl.setAttribute('d', 'M4.5 9 L12 5 L19.5 9');
+shopRoofEl.setAttribute('stroke', 'currentColor');
+shopRoofEl.setAttribute('stroke-width', '2');
+shopRoofEl.setAttribute('stroke-linecap', 'round');
+shopRoofEl.setAttribute('stroke-linejoin', 'round');
+
+const shopBodyEl = document.createElementNS(svgNamespace, 'rect');
+shopBodyEl.setAttribute('x', '5.5');
+shopBodyEl.setAttribute('y', '9.5');
+shopBodyEl.setAttribute('width', '13');
+shopBodyEl.setAttribute('height', '9');
+shopBodyEl.setAttribute('rx', '1.4');
+shopBodyEl.setAttribute('stroke', 'currentColor');
+shopBodyEl.setAttribute('stroke-width', '2');
+
+const shopDoorEl = document.createElementNS(svgNamespace, 'rect');
+shopDoorEl.setAttribute('x', '10.1');
+shopDoorEl.setAttribute('y', '13');
+shopDoorEl.setAttribute('width', '3.8');
+shopDoorEl.setAttribute('height', '5.5');
+shopDoorEl.setAttribute('rx', '0.8');
+shopDoorEl.setAttribute('stroke', 'currentColor');
+shopDoorEl.setAttribute('stroke-width', '1.6');
+
+const shopAwningEl = document.createElementNS(svgNamespace, 'line');
+shopAwningEl.setAttribute('x1', '5.4');
+shopAwningEl.setAttribute('y1', '12');
+shopAwningEl.setAttribute('x2', '18.6');
+shopAwningEl.setAttribute('y2', '12');
+shopAwningEl.setAttribute('stroke', 'currentColor');
+shopAwningEl.setAttribute('stroke-width', '1.6');
+
+shopHudButtonIconEl.appendChild(shopRoofEl);
+shopHudButtonIconEl.appendChild(shopBodyEl);
+shopHudButtonIconEl.appendChild(shopDoorEl);
+shopHudButtonIconEl.appendChild(shopAwningEl);
+
+const routesHudButtonIconEl = document.createElementNS(svgNamespace, 'svg');
+routesHudButtonIconEl.classList.add('hud-icon-button-icon');
+routesHudButtonIconEl.setAttribute('viewBox', '0 0 24 24');
+routesHudButtonIconEl.setAttribute('fill', 'none');
+routesHudButtonIconEl.setAttribute('aria-hidden', 'true');
+routesHudButtonIconEl.setAttribute('focusable', 'false');
+
+const routePathEl = document.createElementNS(svgNamespace, 'path');
+routePathEl.setAttribute('d', 'M6 18 C10 18 9 12 12 12 C15 12 14 6 18 6');
+routePathEl.setAttribute('stroke', 'currentColor');
+routePathEl.setAttribute('stroke-width', '2');
+routePathEl.setAttribute('stroke-linecap', 'round');
+routePathEl.setAttribute('stroke-linejoin', 'round');
+
+const topPinOuterEl = document.createElementNS(svgNamespace, 'circle');
+topPinOuterEl.setAttribute('cx', '18');
+topPinOuterEl.setAttribute('cy', '6');
+topPinOuterEl.setAttribute('r', '3');
+topPinOuterEl.setAttribute('fill', 'currentColor');
+
+const topPinInnerEl = document.createElementNS(svgNamespace, 'circle');
+topPinInnerEl.setAttribute('cx', '18');
+topPinInnerEl.setAttribute('cy', '6');
+topPinInnerEl.setAttribute('r', '1.2');
+topPinInnerEl.setAttribute('fill', 'rgba(15, 23, 42, 0.92)');
+
+const bottomPinOuterEl = document.createElementNS(svgNamespace, 'circle');
+bottomPinOuterEl.setAttribute('cx', '6');
+bottomPinOuterEl.setAttribute('cy', '18');
+bottomPinOuterEl.setAttribute('r', '3');
+bottomPinOuterEl.setAttribute('fill', 'currentColor');
+
+const bottomPinInnerEl = document.createElementNS(svgNamespace, 'circle');
+bottomPinInnerEl.setAttribute('cx', '6');
+bottomPinInnerEl.setAttribute('cy', '18');
+bottomPinInnerEl.setAttribute('r', '1.2');
+bottomPinInnerEl.setAttribute('fill', 'rgba(15, 23, 42, 0.92)');
+
+routesHudButtonIconEl.appendChild(routePathEl);
+routesHudButtonIconEl.appendChild(topPinOuterEl);
+routesHudButtonIconEl.appendChild(topPinInnerEl);
+routesHudButtonIconEl.appendChild(bottomPinOuterEl);
+routesHudButtonIconEl.appendChild(bottomPinInnerEl);
+
+shopHudButtonEl.appendChild(shopHudButtonIconEl);
+routesHudButtonEl.appendChild(routesHudButtonIconEl);
+hudIconColumnEl.appendChild(shopHudButtonEl);
+hudIconColumnEl.appendChild(routesHudButtonEl);
+hudBottomRightStackEl.appendChild(hudIconColumnEl);
+if (capitalHudEl) {
+  hudBottomRightStackEl.appendChild(capitalHudEl);
+}
+
+const routesModalOverlayEl = document.createElement('div');
+routesModalOverlayEl.className = 'shop-modal-overlay routes-modal-overlay hidden';
+routesModalOverlayEl.setAttribute('aria-hidden', 'true');
+
+const routesModalDialogEl = document.createElement('div');
+routesModalDialogEl.className = 'shop-modal routes-modal';
+routesModalDialogEl.setAttribute('role', 'dialog');
+routesModalDialogEl.setAttribute('aria-modal', 'true');
+
+const routesModalCloseButtonEl = document.createElement('button');
+routesModalCloseButtonEl.type = 'button';
+routesModalCloseButtonEl.className = 'shop-modal-close';
+routesModalCloseButtonEl.setAttribute('aria-label', 'Close routes modal');
+routesModalCloseButtonEl.textContent = 'x';
+
+const routesModalTitleEl = document.createElement('h3');
+routesModalTitleEl.className = 'shop-modal-title';
+routesModalTitleEl.textContent = 'Routes';
+
+const routesModalContentEl = document.createElement('div');
+routesModalContentEl.className = 'shop-modal-content routes-modal-content';
+
+const routesOpenCreateModalButtonEl = document.createElement('button');
+routesOpenCreateModalButtonEl.type = 'button';
+routesOpenCreateModalButtonEl.className = 'airport-interaction-action-button shop-aircraft-trade-button shop-aircraft-buy-button routes-modal-open-create-button';
+routesOpenCreateModalButtonEl.textContent = 'Create Route';
+
+const routesCreationSectionEl = document.createElement('section');
+routesCreationSectionEl.className = 'routes-modal-section';
+
+const routesSelectorsRowEl = document.createElement('div');
+routesSelectorsRowEl.className = 'routes-create-selectors-row';
+
+const routesOriginSelectorFieldEl = document.createElement('div');
+routesOriginSelectorFieldEl.className = 'routes-create-selector-field';
+
+const routesOriginSelectorLabelEl = document.createElement('label');
+routesOriginSelectorLabelEl.className = 'routes-create-selector-label';
+routesOriginSelectorLabelEl.setAttribute('for', 'routeOriginSearchInput');
+routesOriginSelectorLabelEl.textContent = 'From';
+
+const routesOriginSearchInputEl = document.createElement('input');
+routesOriginSearchInputEl.id = 'routeOriginSearchInput';
+routesOriginSearchInputEl.type = 'text';
+routesOriginSearchInputEl.className = 'shop-airport-search-input routes-create-selector-input';
+routesOriginSearchInputEl.placeholder = 'Search owned airport...';
+routesOriginSearchInputEl.setAttribute('autocomplete', 'off');
+routesOriginSearchInputEl.setAttribute('aria-expanded', 'false');
+
+const routesOriginResultsListEl = document.createElement('div');
+routesOriginResultsListEl.className = 'shop-airport-results-list routes-create-selector-results hidden';
+
+const routesDestinationSelectorFieldEl = document.createElement('div');
+routesDestinationSelectorFieldEl.className = 'routes-create-selector-field';
+
+const routesDestinationSelectorLabelEl = document.createElement('label');
+routesDestinationSelectorLabelEl.className = 'routes-create-selector-label';
+routesDestinationSelectorLabelEl.setAttribute('for', 'routeDestinationSearchInput');
+routesDestinationSelectorLabelEl.textContent = 'To';
+
+const routesDestinationSearchInputEl = document.createElement('input');
+routesDestinationSearchInputEl.id = 'routeDestinationSearchInput';
+routesDestinationSearchInputEl.type = 'text';
+routesDestinationSearchInputEl.className = 'shop-airport-search-input routes-create-selector-input';
+routesDestinationSearchInputEl.placeholder = 'Search owned airport...';
+routesDestinationSearchInputEl.setAttribute('autocomplete', 'off');
+routesDestinationSearchInputEl.setAttribute('aria-expanded', 'false');
+
+const routesDestinationResultsListEl = document.createElement('div');
+routesDestinationResultsListEl.className = 'shop-airport-results-list routes-create-selector-results hidden';
+
+const routesDistanceRowEl = document.createElement('p');
+routesDistanceRowEl.className = 'airport-interaction-row';
+routesDistanceRowEl.innerHTML = '<span class="airport-interaction-label">Distance:</span> <span class="airport-interaction-value" data-route-distance-value>-</span>';
+const routesDistanceValueEl = routesDistanceRowEl.querySelector('[data-route-distance-value]');
+
+const routesCreateFeedbackEl = document.createElement('p');
+routesCreateFeedbackEl.className = 'airport-interaction-row routes-create-feedback hidden';
+routesCreateFeedbackEl.setAttribute('role', 'status');
+
+const routesCreateButtonEl = document.createElement('button');
+routesCreateButtonEl.type = 'button';
+routesCreateButtonEl.className = 'airport-interaction-action-button shop-aircraft-trade-button shop-aircraft-buy-button routes-modal-create-button';
+routesCreateButtonEl.textContent = 'Create Route';
+routesCreateButtonEl.disabled = true;
+
+routesOriginSelectorFieldEl.appendChild(routesOriginSelectorLabelEl);
+routesOriginSelectorFieldEl.appendChild(routesOriginSearchInputEl);
+routesOriginSelectorFieldEl.appendChild(routesOriginResultsListEl);
+
+routesDestinationSelectorFieldEl.appendChild(routesDestinationSelectorLabelEl);
+routesDestinationSelectorFieldEl.appendChild(routesDestinationSearchInputEl);
+routesDestinationSelectorFieldEl.appendChild(routesDestinationResultsListEl);
+
+routesSelectorsRowEl.appendChild(routesOriginSelectorFieldEl);
+routesSelectorsRowEl.appendChild(routesDestinationSelectorFieldEl);
+
+routesCreationSectionEl.appendChild(routesSelectorsRowEl);
+routesCreationSectionEl.appendChild(routesDistanceRowEl);
+routesCreationSectionEl.appendChild(routesCreateFeedbackEl);
+routesCreationSectionEl.appendChild(routesCreateButtonEl);
+
+const routesListSectionEl = document.createElement('section');
+routesListSectionEl.className = 'routes-modal-section';
+
+const routesListTitleEl = document.createElement('h4');
+routesListTitleEl.className = 'routes-modal-section-title';
+routesListTitleEl.textContent = 'Your Routes';
+
+const routesListFeedbackEl = document.createElement('p');
+routesListFeedbackEl.className = 'airport-interaction-row routes-list-feedback hidden';
+
+const routesListContainerEl = document.createElement('div');
+routesListContainerEl.className = 'routes-list-container';
+
+routesListSectionEl.appendChild(routesListTitleEl);
+routesListSectionEl.appendChild(routesListFeedbackEl);
+routesListSectionEl.appendChild(routesListContainerEl);
+
+routesModalContentEl.appendChild(routesListSectionEl);
+routesModalContentEl.appendChild(routesOpenCreateModalButtonEl);
+
+routesModalDialogEl.appendChild(routesModalCloseButtonEl);
+routesModalDialogEl.appendChild(routesModalTitleEl);
+routesModalDialogEl.appendChild(routesModalContentEl);
+routesModalOverlayEl.appendChild(routesModalDialogEl);
+
+const createRouteModalOverlayEl = document.createElement('div');
+createRouteModalOverlayEl.className = 'shop-modal-overlay routes-create-modal-overlay hidden';
+createRouteModalOverlayEl.setAttribute('aria-hidden', 'true');
+
+const createRouteModalDialogEl = document.createElement('div');
+createRouteModalDialogEl.className = 'shop-modal routes-modal routes-create-modal';
+createRouteModalDialogEl.setAttribute('role', 'dialog');
+createRouteModalDialogEl.setAttribute('aria-modal', 'true');
+
+const createRouteModalCloseButtonEl = document.createElement('button');
+createRouteModalCloseButtonEl.type = 'button';
+createRouteModalCloseButtonEl.className = 'shop-modal-close';
+createRouteModalCloseButtonEl.setAttribute('aria-label', 'Close create route modal');
+createRouteModalCloseButtonEl.textContent = 'x';
+
+const createRouteModalTitleEl = document.createElement('h3');
+createRouteModalTitleEl.className = 'shop-modal-title';
+createRouteModalTitleEl.textContent = 'Create Route';
+
+const createRouteModalContentEl = document.createElement('div');
+createRouteModalContentEl.className = 'shop-modal-content routes-modal-content';
+createRouteModalContentEl.appendChild(routesCreationSectionEl);
+
+createRouteModalDialogEl.appendChild(createRouteModalCloseButtonEl);
+createRouteModalDialogEl.appendChild(createRouteModalTitleEl);
+createRouteModalDialogEl.appendChild(createRouteModalContentEl);
+createRouteModalOverlayEl.appendChild(createRouteModalDialogEl);
+
+if (gameScreenEl) {
+  gameScreenEl.appendChild(hudBottomRightStackEl);
+  gameScreenEl.appendChild(routesModalOverlayEl);
+  gameScreenEl.appendChild(createRouteModalOverlayEl);
+}
+
+isRoutesModalDomReady = Boolean(gameScreenEl);
 
 const shopModalOverlayEl = document.createElement('div');
 shopModalOverlayEl.className = 'shop-modal-overlay hidden';
@@ -980,6 +1313,380 @@ function refreshShopModal(state = gameState.getState()) {
   shopModalOverlayEl.setAttribute('aria-hidden', 'true');
 }
 
+function refreshRoutesHudButton(state = gameState.getState()) {
+  const isInActiveGame =
+    state &&
+    state.ui &&
+    state.ui.screen === 'game' &&
+    state.game &&
+    state.game.status === 'active';
+
+  hudBottomRightStackEl.classList.toggle('hidden', !isInActiveGame);
+
+  if (!isInActiveGame && RoutesModalState.isOpen) {
+    RoutesModalState.isOpen = false;
+    RoutesModalState.isCreateRouteOpen = false;
+    RoutesModalState.openedFrom = null;
+  }
+}
+
+function refreshRoutesModal(state = gameState.getState()) {
+  if (!isRoutesModalDomReady) {
+    return;
+  }
+
+  const normalizedState = state && typeof state === 'object' ? state : null;
+  const isInGameScreen = normalizedState && normalizedState.ui && normalizedState.ui.screen === 'game';
+  const isInActiveGame =
+    isInGameScreen &&
+    normalizedState &&
+    normalizedState.game &&
+    normalizedState.game.status === 'active';
+  const shouldShowRoutesModal = Boolean(isInGameScreen && RoutesModalState.isOpen);
+
+  routesModalOverlayEl.classList.toggle('hidden', !shouldShowRoutesModal);
+  routesModalOverlayEl.setAttribute('aria-hidden', shouldShowRoutesModal ? 'false' : 'true');
+
+  if (!shouldShowRoutesModal && RoutesModalState.isCreateRouteOpen) {
+    RoutesModalState.isCreateRouteOpen = false;
+  }
+
+  if (!shouldShowRoutesModal) {
+    return;
+  }
+
+  const airportLookupById = getAirportLookupById(normalizedState);
+  const localPlayerRoutes = getLocalPlayerRoutes(normalizedState);
+  const sortedLocalPlayerRoutes = localPlayerRoutes.slice().sort((leftRoute, rightRoute) => {
+    const leftOrigin = String((leftRoute && leftRoute.originAirportId) || '');
+    const leftDestination = String((leftRoute && leftRoute.destinationAirportId) || '');
+    const rightOrigin = String((rightRoute && rightRoute.originAirportId) || '');
+    const rightDestination = String((rightRoute && rightRoute.destinationAirportId) || '');
+    const leftKey = `${leftOrigin}:${leftDestination}`;
+    const rightKey = `${rightOrigin}:${rightDestination}`;
+    return leftKey.localeCompare(rightKey);
+  });
+
+  routesListContainerEl.innerHTML = '';
+  if (routeRemoveErrorMessage) {
+    routesListFeedbackEl.textContent = routeRemoveErrorMessage;
+    routesListFeedbackEl.classList.remove('hidden');
+  } else {
+    routesListFeedbackEl.textContent = '';
+    routesListFeedbackEl.classList.add('hidden');
+  }
+
+  if (sortedLocalPlayerRoutes.length === 0) {
+    const emptyListEl = document.createElement('p');
+    emptyListEl.className = 'shop-airport-results-empty';
+    emptyListEl.textContent = 'No routes yet. Create one to get started.';
+    routesListContainerEl.appendChild(emptyListEl);
+  } else {
+    const listEl = document.createElement('div');
+    listEl.className = 'routes-list';
+
+    sortedLocalPlayerRoutes.forEach((route) => {
+      if (!route) {
+        return;
+      }
+
+      const routeId = String(route.routeId || '');
+      if (!routeId) {
+        return;
+      }
+
+      const originAirport = airportLookupById.get(String(route.originAirportId || '')) || null;
+      const destinationAirport = airportLookupById.get(String(route.destinationAirportId || '')) || null;
+      const originName = originAirport ? getAirportDisplayName(originAirport) : String(route.originAirportId || 'Unknown');
+      const destinationName = destinationAirport
+        ? getAirportDisplayName(destinationAirport)
+        : String(route.destinationAirportId || 'Unknown');
+      const distanceText = Number.isFinite(route.distanceKm)
+        ? `${INTEGER_FORMATTER.format(route.distanceKm)} km`
+        : '-';
+
+      const routeItemEl = document.createElement('div');
+      routeItemEl.className = 'routes-list-item';
+
+      const routeMainEl = document.createElement('div');
+      routeMainEl.className = 'routes-list-main';
+
+      const routeTitleEl = document.createElement('p');
+      routeTitleEl.className = 'routes-list-route';
+      routeTitleEl.textContent = `${originName} -> ${destinationName}`;
+
+      const routeMetaEl = document.createElement('p');
+      routeMetaEl.className = 'routes-list-meta';
+      routeMetaEl.textContent = `Distance: ${distanceText}`;
+
+      routeMainEl.appendChild(routeTitleEl);
+      routeMainEl.appendChild(routeMetaEl);
+
+      const removeButtonEl = document.createElement('button');
+      removeButtonEl.type = 'button';
+      removeButtonEl.className = 'airport-interaction-action-button shop-aircraft-sell-button routes-remove-button';
+
+      const isPendingForRoute = pendingRouteRemoveRouteId && String(pendingRouteRemoveRouteId) === routeId;
+      removeButtonEl.textContent = isPendingForRoute ? 'Removing...' : 'Remove';
+      removeButtonEl.disabled = !isInActiveGame || (pendingRouteRemoveRouteId != null);
+      removeButtonEl.addEventListener('click', () => {
+        if (!isInActiveGame || pendingRouteRemoveRouteId != null) {
+          return;
+        }
+
+        pendingRouteRemoveRouteId = routeId;
+        routeRemoveErrorMessage = '';
+        refreshRoutesModal(gameState.getState());
+        emitRouteRemoveRequest(routeId);
+      });
+
+      routeItemEl.appendChild(routeMainEl);
+      routeItemEl.appendChild(removeButtonEl);
+      listEl.appendChild(routeItemEl);
+    });
+
+    if (!listEl.childNodes.length) {
+      const emptyListEl = document.createElement('p');
+      emptyListEl.className = 'shop-airport-results-empty';
+      emptyListEl.textContent = 'No routes yet. Create one to get started.';
+      routesListContainerEl.appendChild(emptyListEl);
+    } else {
+      routesListContainerEl.appendChild(listEl);
+    }
+  }
+
+  const shouldShowCreateRouteModal = Boolean(shouldShowRoutesModal && RoutesModalState.isCreateRouteOpen);
+
+  createRouteModalOverlayEl.classList.toggle('hidden', !shouldShowCreateRouteModal);
+  createRouteModalOverlayEl.setAttribute('aria-hidden', shouldShowCreateRouteModal ? 'false' : 'true');
+
+  if (!shouldShowCreateRouteModal) {
+    isRouteOriginDropdownOpen = false;
+    isRouteDestinationDropdownOpen = false;
+    return;
+  }
+
+  const ownedAirports = getOwnedAirportsForLocalPlayer(normalizedState);
+  const localPlayerId = normalizedState && normalizedState.session ? normalizedState.session.playerId : null;
+  const authoritativeRoutes = Array.isArray(normalizedState && normalizedState.game && normalizedState.game.routes)
+    ? normalizedState.game.routes
+    : [];
+  const ownedAirportById = new Map(
+    ownedAirports
+      .map((airport) => {
+        if (!airport) {
+          return null;
+        }
+
+        const airportId = String(airport.id || airport.iata || '');
+        if (!airportId) {
+          return null;
+        }
+
+        return [airportId, airport];
+      })
+      .filter(Boolean)
+  );
+
+  if (selectedRouteOriginAirportId && !ownedAirportById.has(String(selectedRouteOriginAirportId))) {
+    selectedRouteOriginAirportId = null;
+    routeOriginSearchQuery = '';
+  }
+
+  if (selectedRouteDestinationAirportId && !ownedAirportById.has(String(selectedRouteDestinationAirportId))) {
+    selectedRouteDestinationAirportId = null;
+    routeDestinationSearchQuery = '';
+  }
+
+  if (
+    selectedRouteOriginAirportId &&
+    selectedRouteDestinationAirportId &&
+    String(selectedRouteOriginAirportId) === String(selectedRouteDestinationAirportId)
+  ) {
+    selectedRouteDestinationAirportId = null;
+    routeDestinationSearchQuery = '';
+  }
+
+  if (
+    selectedRouteOriginAirportId &&
+    selectedRouteDestinationAirportId &&
+    !isRouteSelectorAirportChoiceValid({
+      routes: authoritativeRoutes,
+      ownedAirports,
+      localPlayerId,
+      candidateAirportId: selectedRouteDestinationAirportId,
+      oppositeSelectedAirportId: selectedRouteOriginAirportId,
+      selectedFromId: selectedRouteOriginAirportId,
+      selectedToId: selectedRouteDestinationAirportId
+    })
+  ) {
+    selectedRouteDestinationAirportId = null;
+    routeDestinationSearchQuery = '';
+  }
+
+  const selectedOriginAirport = selectedRouteOriginAirportId
+    ? ownedAirportById.get(String(selectedRouteOriginAirportId)) || null
+    : null;
+  const selectedDestinationAirport = selectedRouteDestinationAirportId
+    ? ownedAirportById.get(String(selectedRouteDestinationAirportId)) || null
+    : null;
+
+  const informationalDistanceKm = calculateRouteDistanceKmPreview(selectedOriginAirport, selectedDestinationAirport);
+  routesDistanceValueEl.textContent = Number.isFinite(informationalDistanceKm)
+    ? `${INTEGER_FORMATTER.format(informationalDistanceKm)} km`
+    : '-';
+
+  const canCreateRoute = isRouteCreateEligible({
+    isInActiveGame,
+    originAirportId: selectedRouteOriginAirportId,
+    destinationAirportId: selectedRouteDestinationAirportId,
+    isPending: isRouteCreatePending
+  });
+  routesCreateButtonEl.disabled = !canCreateRoute;
+  routesCreateButtonEl.textContent = isRouteCreatePending ? 'Creating...' : 'Create Route';
+
+  if (routeCreateErrorMessage) {
+    routesCreateFeedbackEl.textContent = routeCreateErrorMessage;
+    routesCreateFeedbackEl.classList.remove('hidden');
+  } else {
+    routesCreateFeedbackEl.textContent = '';
+    routesCreateFeedbackEl.classList.add('hidden');
+  }
+
+  if (!isRouteOriginDropdownOpen) {
+    routeOriginSearchQuery = selectedOriginAirport ? getAirportDisplayName(selectedOriginAirport) : '';
+  }
+
+  if (!isRouteDestinationDropdownOpen) {
+    routeDestinationSearchQuery = selectedDestinationAirport ? getAirportDisplayName(selectedDestinationAirport) : '';
+  }
+
+  routesOriginSearchInputEl.value = routeOriginSearchQuery;
+  routesDestinationSearchInputEl.value = routeDestinationSearchQuery;
+
+  const renderRouteAirportDropdown = ({
+    resultsListEl,
+    filteredAirports,
+    selectedAirportId,
+    isOpen,
+    onSelect,
+    emptyMessage
+  }) => {
+    resultsListEl.innerHTML = '';
+    resultsListEl.classList.toggle('hidden', !isOpen);
+
+    if (!isOpen) {
+      return;
+    }
+
+    if (filteredAirports.length === 0) {
+      const emptyEl = document.createElement('p');
+      emptyEl.className = 'shop-airport-results-empty';
+      emptyEl.textContent = emptyMessage;
+      resultsListEl.appendChild(emptyEl);
+      return;
+    }
+
+    filteredAirports.forEach((airport) => {
+      const airportId = String((airport && (airport.id || airport.iata)) || '');
+      if (!airportId) {
+        return;
+      }
+
+      const optionButtonEl = document.createElement('button');
+      optionButtonEl.type = 'button';
+      optionButtonEl.className = 'shop-airport-option';
+      if (selectedAirportId && String(selectedAirportId) === airportId) {
+        optionButtonEl.classList.add('shop-airport-option--selected');
+      }
+
+      const optionNameEl = document.createElement('span');
+      optionNameEl.className = 'shop-airport-option-name';
+      optionNameEl.textContent = getAirportDisplayName(airport);
+
+      const optionMetaEl = document.createElement('span');
+      optionMetaEl.className = 'shop-airport-option-meta';
+      optionMetaEl.textContent = [airport && airport.city, airport && airport.country].filter(Boolean).join(', ') || 'Location unknown';
+
+      optionButtonEl.appendChild(optionNameEl);
+      optionButtonEl.appendChild(optionMetaEl);
+      optionButtonEl.addEventListener('click', () => {
+        onSelect(airport);
+      });
+
+      resultsListEl.appendChild(optionButtonEl);
+    });
+  };
+
+  const originAvailableAirports = ownedAirports.filter((airport) => {
+    const airportId = String((airport && (airport.id || airport.iata)) || '').trim();
+    return isRouteSelectorAirportChoiceValid({
+      routes: authoritativeRoutes,
+      ownedAirports,
+      localPlayerId,
+      candidateAirportId: airportId,
+      oppositeSelectedAirportId: selectedRouteDestinationAirportId,
+      selectedFromId: airportId,
+      selectedToId: selectedRouteDestinationAirportId
+    });
+  });
+
+  const destinationAvailableAirports = ownedAirports.filter((airport) => {
+    const airportId = String((airport && (airport.id || airport.iata)) || '').trim();
+    return isRouteSelectorAirportChoiceValid({
+      routes: authoritativeRoutes,
+      ownedAirports,
+      localPlayerId,
+      candidateAirportId: airportId,
+      oppositeSelectedAirportId: selectedRouteOriginAirportId,
+      selectedFromId: selectedRouteOriginAirportId,
+      selectedToId: airportId
+    });
+  });
+
+  const filteredOriginAirports = getFilteredOwnedAirportsForRouteSelector(originAvailableAirports, routeOriginSearchQuery);
+  const filteredDestinationAirports = getFilteredOwnedAirportsForRouteSelector(destinationAvailableAirports, routeDestinationSearchQuery);
+
+  const emptyMessage = ownedAirports.length === 0
+    ? 'You do not own any airports yet.'
+    : 'No owned airports match this search.';
+
+  renderRouteAirportDropdown({
+    resultsListEl: routesOriginResultsListEl,
+    filteredAirports: filteredOriginAirports,
+    selectedAirportId: selectedRouteOriginAirportId,
+    isOpen: isRouteOriginDropdownOpen,
+    emptyMessage,
+    onSelect: (airport) => {
+      const airportId = String((airport && (airport.id || airport.iata)) || '');
+      selectedRouteOriginAirportId = airportId || null;
+      routeOriginSearchQuery = airport ? getAirportDisplayName(airport) : '';
+      isRouteOriginDropdownOpen = false;
+      routeCreateErrorMessage = '';
+      refreshRoutesModal(gameState.getState());
+    }
+  });
+
+  renderRouteAirportDropdown({
+    resultsListEl: routesDestinationResultsListEl,
+    filteredAirports: filteredDestinationAirports,
+    selectedAirportId: selectedRouteDestinationAirportId,
+    isOpen: isRouteDestinationDropdownOpen,
+    emptyMessage,
+    onSelect: (airport) => {
+      const airportId = String((airport && (airport.id || airport.iata)) || '');
+      selectedRouteDestinationAirportId = airportId || null;
+      routeDestinationSearchQuery = airport ? getAirportDisplayName(airport) : '';
+      isRouteDestinationDropdownOpen = false;
+      routeCreateErrorMessage = '';
+      refreshRoutesModal(gameState.getState());
+    }
+  });
+
+  routesOriginSearchInputEl.setAttribute('aria-expanded', isRouteOriginDropdownOpen ? 'true' : 'false');
+  routesDestinationSearchInputEl.setAttribute('aria-expanded', isRouteDestinationDropdownOpen ? 'true' : 'false');
+}
+
 function emitAirportPurchaseUnownedRequest(airportId) {
   socket.emit('airport:purchase:request', { airportId });
 }
@@ -994,6 +1701,17 @@ function emitAirportCancelListingRequest(airportId) {
 
 function emitAirportSellToGameRequest(airportId) {
   socket.emit('airport:sell-to-game:request', { airportId });
+}
+
+function emitRouteCreateRequest(originAirportId, destinationAirportId) {
+  socket.emit('route:create:request', {
+    originAirportId,
+    destinationAirportId
+  });
+}
+
+function emitRouteRemoveRequest(routeId) {
+  socket.emit('route:remove:request', { routeId });
 }
 
 function emitAirportListRequestWithPrompt(airportId) {
@@ -1115,6 +1833,238 @@ function getAirportSearchDocument(airport) {
     .filter(Boolean)
     .join(' ')
     .toLocaleLowerCase();
+}
+
+function getOwnedAirportsForLocalPlayer(state) {
+  const localPlayerId = state && state.session ? state.session.playerId : null;
+  if (localPlayerId == null) {
+    return [];
+  }
+
+  const airports = getAuthoritativeAirports(state);
+  return airports
+    .filter((airport) => {
+      if (!airport || airport.ownerPlayerId == null) {
+        return false;
+      }
+
+      return String(airport.ownerPlayerId) === String(localPlayerId);
+    })
+    .sort(compareAirportsAlphabetically);
+}
+
+function getFilteredOwnedAirportsForRouteSelector(ownedAirports, rawSearchValue) {
+  const normalizedSearch = String(rawSearchValue || '').trim().toLocaleLowerCase();
+  if (!normalizedSearch) {
+    return ownedAirports;
+  }
+
+  return ownedAirports.filter((airport) => getAirportSearchDocument(airport).includes(normalizedSearch));
+}
+
+function getCanonicalRouteKeyForSelector(leftAirportId, rightAirportId) {
+  const normalizedLeftAirportId = String(leftAirportId || '').trim();
+  const normalizedRightAirportId = String(rightAirportId || '').trim();
+
+  if (!normalizedLeftAirportId || !normalizedRightAirportId) {
+    return '';
+  }
+
+  return [normalizedLeftAirportId, normalizedRightAirportId].sort((leftId, rightId) => {
+    return leftId.localeCompare(rightId);
+  }).join('::');
+}
+
+function isRouteSelectorAirportChoiceValid({
+  routes,
+  ownedAirports,
+  localPlayerId,
+  candidateAirportId,
+  oppositeSelectedAirportId,
+  selectedFromId = null,
+  selectedToId = null
+}) {
+  const normalizedCandidateAirportId = String(candidateAirportId || '').trim();
+  const normalizedOppositeAirportId = String(oppositeSelectedAirportId || '').trim();
+  const normalizedLocalPlayerId = String(localPlayerId || '').trim();
+
+  if (!normalizedCandidateAirportId) {
+    return false;
+  }
+
+  const ownedAirportIds = new Set(
+    (Array.isArray(ownedAirports) ? ownedAirports : [])
+      .map((airport) => String((airport && (airport.id || airport.iata)) || '').trim())
+      .filter((airportId) => airportId.length > 0)
+  );
+
+  if (!ownedAirportIds.has(normalizedCandidateAirportId)) {
+    return false;
+  }
+
+  if (!normalizedOppositeAirportId) {
+    return true;
+  }
+
+  if (normalizedCandidateAirportId === normalizedOppositeAirportId) {
+    return false;
+  }
+
+  if (!normalizedLocalPlayerId) {
+    return true;
+  }
+
+  const existingRouteKeys = new Set(
+    (Array.isArray(routes) ? routes : [])
+      .filter((route) => {
+        if (!route || route.ownerPlayerId == null) {
+          return false;
+        }
+
+        return String(route.ownerPlayerId) === normalizedLocalPlayerId;
+      })
+      .map((route) => {
+        const routeKey = String(route.routeKey || '').trim();
+        if (routeKey) {
+          return routeKey;
+        }
+
+        return getCanonicalRouteKeyForSelector(route.originAirportId, route.destinationAirportId);
+      })
+      .filter((routeKey) => routeKey.length > 0)
+  );
+
+  const candidateRouteKey = getCanonicalRouteKeyForSelector(normalizedCandidateAirportId, normalizedOppositeAirportId);
+  if (!candidateRouteKey) {
+    return true;
+  }
+
+  const isDuplicate = existingRouteKeys.has(candidateRouteKey);
+  const shouldDebugRouteFilter = Boolean(window && window.__AIRLINE_ROUTE_FILTER_DEBUG__);
+  if (shouldDebugRouteFilter) {
+    const routesForLocalPlayer = (Array.isArray(routes) ? routes : [])
+      .filter((route) => route && String(route.ownerPlayerId || '') === normalizedLocalPlayerId)
+      .map((route) => ({
+        routeId: route.routeId,
+        ownerPlayerId: route.ownerPlayerId,
+        routeKey: route.routeKey,
+        originAirportId: route.originAirportId,
+        destinationAirportId: route.destinationAirportId
+      }));
+
+    console.log('[RouteFilterDebug]', {
+      localPlayerId: normalizedLocalPlayerId,
+      selectedFromId: selectedFromId == null ? null : String(selectedFromId),
+      selectedToId: selectedToId == null ? null : String(selectedToId),
+      existingRoutes: routesForLocalPlayer,
+      candidateAirportId: normalizedCandidateAirportId,
+      candidateRouteKey,
+      existingRouteKeys: Array.from(existingRouteKeys.values()),
+      isDuplicate
+    });
+  }
+
+  return !isDuplicate;
+}
+
+function getAirportLookupById(state) {
+  const airports = getAuthoritativeAirports(state);
+  return airports.reduce((lookup, airport) => {
+    if (!airport) {
+      return lookup;
+    }
+
+    const airportId = String(airport.id || airport.iata || '').trim();
+    if (!airportId) {
+      return lookup;
+    }
+
+    lookup.set(airportId, airport);
+    return lookup;
+  }, new Map());
+}
+
+function getLocalPlayerRoutes(state) {
+  const localPlayerId = state && state.session ? state.session.playerId : null;
+  if (localPlayerId == null) {
+    return [];
+  }
+
+  const routes = Array.isArray(state && state.game && state.game.routes) ? state.game.routes : [];
+  return routes.filter((route) => {
+    if (!route || route.ownerPlayerId == null) {
+      return false;
+    }
+
+    return String(route.ownerPlayerId) === String(localPlayerId);
+  });
+}
+
+function calculateRouteDistanceKmPreview(originAirport, destinationAirport) {
+  if (!originAirport || !destinationAirport) {
+    return null;
+  }
+
+  const originLat = Number(originAirport.lat);
+  const originLng = Number(originAirport.lng);
+  const destinationLat = Number(destinationAirport.lat);
+  const destinationLng = Number(destinationAirport.lng);
+
+  if (
+    !Number.isFinite(originLat) ||
+    !Number.isFinite(originLng) ||
+    !Number.isFinite(destinationLat) ||
+    !Number.isFinite(destinationLng)
+  ) {
+    return null;
+  }
+
+  const earthRadiusKm = 6371;
+  const toRadians = (degrees) => (degrees * Math.PI) / 180;
+
+  const latDelta = toRadians(destinationLat - originLat);
+  const lngDelta = toRadians(destinationLng - originLng);
+  const originLatRadians = toRadians(originLat);
+  const destinationLatRadians = toRadians(destinationLat);
+
+  const sinHalfLat = Math.sin(latDelta / 2);
+  const sinHalfLng = Math.sin(lngDelta / 2);
+  const haversineTerm =
+    sinHalfLat * sinHalfLat +
+    Math.cos(originLatRadians) * Math.cos(destinationLatRadians) * sinHalfLng * sinHalfLng;
+  const angularDistance = 2 * Math.atan2(Math.sqrt(haversineTerm), Math.sqrt(Math.max(0, 1 - haversineTerm)));
+  return Math.round(earthRadiusKm * angularDistance);
+}
+
+function isRouteCreateEligible({ isInActiveGame, originAirportId, destinationAirportId, isPending }) {
+  if (!isInActiveGame || isPending) {
+    return false;
+  }
+
+  if (!originAirportId || !destinationAirportId) {
+    return false;
+  }
+
+  return String(originAirportId) !== String(destinationAirportId);
+}
+
+function getRouteCreateResultMessage(result) {
+  const code = result && typeof result.code === 'string' ? result.code.trim() : '';
+  const message = result && typeof result.message === 'string' ? result.message.trim() : '';
+
+  if (message && code) {
+    return `${message} [${code}]`;
+  }
+
+  if (message) {
+    return message;
+  }
+
+  if (code) {
+    return code;
+  }
+
+  return 'Unable to create route.';
 }
 
 function compareAircraftAlphabetically(leftAircraft, rightAircraft) {
@@ -1571,6 +2521,112 @@ shopModalCloseButtonEl.addEventListener('click', () => {
   closeShopModal();
 });
 
+routesHudButtonEl.addEventListener('click', () => {
+  openRoutesModal({ openedFrom: ROUTES_MODAL_OPENED_FROM.HUD });
+});
+
+shopHudButtonEl.addEventListener('click', () => {
+  openShopFromHud();
+});
+
+routesModalCloseButtonEl.addEventListener('click', () => {
+  closeRoutesModal();
+});
+
+routesOpenCreateModalButtonEl.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  openCreateRouteModal();
+});
+
+routesOriginSearchInputEl.addEventListener('focus', () => {
+  isRouteOriginDropdownOpen = true;
+  refreshRoutesModal(gameState.getState());
+});
+
+routesOriginSearchInputEl.addEventListener('input', () => {
+  routeOriginSearchQuery = routesOriginSearchInputEl.value;
+  if (selectedRouteOriginAirportId) {
+    selectedRouteOriginAirportId = null;
+  }
+
+  routeCreateErrorMessage = '';
+  isRouteOriginDropdownOpen = true;
+  refreshRoutesModal(gameState.getState());
+});
+
+routesDestinationSearchInputEl.addEventListener('focus', () => {
+  isRouteDestinationDropdownOpen = true;
+  refreshRoutesModal(gameState.getState());
+});
+
+routesDestinationSearchInputEl.addEventListener('input', () => {
+  routeDestinationSearchQuery = routesDestinationSearchInputEl.value;
+  if (selectedRouteDestinationAirportId) {
+    selectedRouteDestinationAirportId = null;
+  }
+
+  routeCreateErrorMessage = '';
+  isRouteDestinationDropdownOpen = true;
+  refreshRoutesModal(gameState.getState());
+});
+
+routesCreateButtonEl.addEventListener('click', () => {
+  if (isRouteCreatePending) {
+    return;
+  }
+
+  const state = gameState.getState();
+  const isInActiveGame =
+    state &&
+    state.ui &&
+    state.ui.screen === 'game' &&
+    state.game &&
+    state.game.status === 'active';
+
+  const canCreateRoute = isRouteCreateEligible({
+    isInActiveGame,
+    originAirportId: selectedRouteOriginAirportId,
+    destinationAirportId: selectedRouteDestinationAirportId,
+    isPending: isRouteCreatePending
+  });
+
+  if (!canCreateRoute) {
+    refreshRoutesModal(state);
+    return;
+  }
+
+  isRouteCreatePending = true;
+  routeCreateErrorMessage = '';
+  refreshRoutesModal(state);
+  emitRouteCreateRequest(selectedRouteOriginAirportId, selectedRouteDestinationAirportId);
+});
+
+routesModalOverlayEl.addEventListener('click', (event) => {
+  if (event.target !== routesModalOverlayEl) {
+    return;
+  }
+
+  closeRoutesModal();
+});
+
+createRouteModalCloseButtonEl.addEventListener('click', () => {
+  closeCreateRouteModal();
+});
+
+createRouteModalOverlayEl.addEventListener('click', (event) => {
+  if (event.target !== createRouteModalOverlayEl) {
+    return;
+  }
+
+  event.stopPropagation();
+  closeCreateRouteModal();
+});
+
+createRouteModalDialogEl.addEventListener('click', (event) => {
+  event.stopPropagation();
+});
+
 shopModalOverlayEl.addEventListener('click', (event) => {
   if (shouldIgnoreNextOverlayClick) {
     shouldIgnoreNextOverlayClick = false;
@@ -1629,35 +2685,73 @@ shopAircraftSearchInputEl.addEventListener('keydown', (event) => {
 });
 
 document.addEventListener('mousedown', (event) => {
-  if (!isAirportSearchResultsOpen && !isAircraftSearchResultsOpen) {
+  const isAnyShopSearchOpen = isAirportSearchResultsOpen || isAircraftSearchResultsOpen;
+  const isAnyRouteSearchOpen = isRouteOriginDropdownOpen || isRouteDestinationDropdownOpen;
+
+  if (!isAnyShopSearchOpen && !isAnyRouteSearchOpen) {
     return;
   }
 
-  const isInsideAirportSearch = shopAirportSearchContainerEl.contains(event.target);
-  const isInsideAircraftSearch = shopAircraftSearchContainerEl.contains(event.target);
+  let shouldRefreshRoutes = false;
 
-  if (isInsideAirportSearch || isInsideAircraftSearch) {
-    return;
+  if (isAnyShopSearchOpen) {
+    const isInsideAirportSearch = shopAirportSearchContainerEl.contains(event.target);
+    const isInsideAircraftSearch = shopAircraftSearchContainerEl.contains(event.target);
+
+    if (!isInsideAirportSearch && !isInsideAircraftSearch) {
+      if (shopModalDialogEl.contains(event.target)) {
+        shouldIgnoreNextOverlayClick = true;
+      }
+
+      if (isAirportSearchResultsOpen) {
+        closeAirportSearchResults();
+      }
+
+      if (isAircraftSearchResultsOpen) {
+        closeAircraftSearchResults();
+      }
+
+      refreshShopAirportInteractionPanel(gameState.getState());
+      refreshShopAircraftInteractionPanel(gameState.getState());
+    }
   }
 
-  if (shopModalDialogEl.contains(event.target)) {
-    shouldIgnoreNextOverlayClick = true;
+  if (isAnyRouteSearchOpen) {
+    const isInsideOriginSelector = routesOriginSelectorFieldEl.contains(event.target);
+    const isInsideDestinationSelector = routesDestinationSelectorFieldEl.contains(event.target);
+
+    if (!isInsideOriginSelector && !isInsideDestinationSelector) {
+      if (isRouteOriginDropdownOpen) {
+        isRouteOriginDropdownOpen = false;
+        shouldRefreshRoutes = true;
+      }
+
+      if (isRouteDestinationDropdownOpen) {
+        isRouteDestinationDropdownOpen = false;
+        shouldRefreshRoutes = true;
+      }
+    }
   }
 
-  if (isAirportSearchResultsOpen) {
-    closeAirportSearchResults();
+  if (shouldRefreshRoutes) {
+    refreshRoutesModal(gameState.getState());
   }
-
-  if (isAircraftSearchResultsOpen) {
-    closeAircraftSearchResults();
-  }
-
-  refreshShopAirportInteractionPanel(gameState.getState());
-  refreshShopAircraftInteractionPanel(gameState.getState());
 });
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') {
+    return;
+  }
+
+  if (!createRouteModalOverlayEl.classList.contains('hidden')) {
+    event.preventDefault();
+    closeCreateRouteModal();
+    return;
+  }
+
+  if (!routesModalOverlayEl.classList.contains('hidden')) {
+    event.preventDefault();
+    closeRoutesModal();
     return;
   }
 
@@ -1808,6 +2902,11 @@ socket.on('connect', () => {
 
 socket.on('disconnect', () => {
   stopGameCountdown();
+  closeRoutesModal();
+  isRouteCreatePending = false;
+  routeCreateErrorMessage = '';
+  pendingRouteRemoveRouteId = null;
+  routeRemoveErrorMessage = '';
   isAircraftPurchasePending = false;
   isAircraftQuotePending = false;
   pendingAircraftQuoteCatalogId = null;
@@ -1889,6 +2988,11 @@ socket.on('lobby:left', ({ lobbyId, playerId }) => {
 socket.on('game:left', ({ gameId, playerId }) => {
   stopGameCountdown();
   closeShopModal();
+  closeRoutesModal();
+  isRouteCreatePending = false;
+  routeCreateErrorMessage = '';
+  pendingRouteRemoveRouteId = null;
+  routeRemoveErrorMessage = '';
   isAircraftPurchasePending = false;
   isAircraftQuotePending = false;
   pendingAircraftQuoteCatalogId = null;
@@ -2001,6 +3105,46 @@ socket.on('game:state', (payload) => {
 
 socket.on('game:event', (eventPayload) => {
   appendGameEventToHistory(eventPayload);
+});
+
+socket.on('route:create:result', (result = {}) => {
+  if (!isRouteCreatePending) {
+    return;
+  }
+
+  isRouteCreatePending = false;
+
+  if (!result.success) {
+    routeCreateErrorMessage = getRouteCreateResultMessage(result);
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  routeCreateErrorMessage = '';
+  selectedRouteOriginAirportId = null;
+  selectedRouteDestinationAirportId = null;
+  routeOriginSearchQuery = '';
+  routeDestinationSearchQuery = '';
+  isRouteOriginDropdownOpen = false;
+  isRouteDestinationDropdownOpen = false;
+  closeCreateRouteModal();
+});
+
+socket.on('route:remove:result', (result = {}) => {
+  if (pendingRouteRemoveRouteId == null) {
+    return;
+  }
+
+  pendingRouteRemoveRouteId = null;
+
+  if (!result.success) {
+    routeRemoveErrorMessage = getRouteCreateResultMessage(result);
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  routeRemoveErrorMessage = '';
+  refreshRoutesModal(gameState.getState());
 });
 
 socket.on('aircraft:purchase:result', (result = {}) => {

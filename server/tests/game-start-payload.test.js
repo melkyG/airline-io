@@ -16,6 +16,16 @@ test('game:started public payload includes authoritative game wrapper', () => {
       { id: 'p1', username: 'Alice', capital: 1000000, score: 0, internalOnlyField: 'secret' }
     ],
     ownedAircraft: [],
+    routes: [
+      {
+        routeId: 'route-1',
+        ownerPlayerId: 'p1',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        distanceKm: 550,
+        assignedAircraftInstanceIds: ['acft-1', 'acft-2']
+      }
+    ],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null }
     ]
@@ -47,6 +57,16 @@ test('game:started public payload includes authoritative game wrapper', () => {
         { id: 'p1', username: 'Alice', isBot: false, capital: 1000000, score: 0 }
       ],
       ownedAircraft: [],
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          distanceKm: 550,
+          assignedAircraftInstanceIds: ['acft-1', 'acft-2']
+        }
+      ],
       aircraftCatalog: AIRCRAFT_CATALOG.map((aircraft) => ({
         ...aircraft
       })),
@@ -73,12 +93,20 @@ test('game:started public payload includes authoritative game wrapper', () => {
   payload.game.players[0].capital = 1;
   payload.game.players[0].score = 999;
   payload.game.airports[0].ownerPlayerId = 'p1';
+  payload.game.routes[0].assignedAircraftInstanceIds.push('acft-3');
   assert.notEqual(payload.game.players[0], game.authoritativeState.players[0]);
   assert.equal(game.authoritativeState.players[0].username, 'Alice');
   assert.equal(game.authoritativeState.players[0].capital, 1000000);
   assert.equal(game.authoritativeState.players[0].score, 0);
   assert.equal('internalOnlyField' in payload.game.players[0], false);
   assert.equal(game.authoritativeState.airports[0].ownerPlayerId, null);
+  assert.notEqual(payload.game.routes[0], game.authoritativeState.routes[0]);
+  assert.notEqual(
+    payload.game.routes[0].assignedAircraftInstanceIds,
+    game.authoritativeState.routes[0].assignedAircraftInstanceIds
+  );
+  assert.deepEqual(game.authoritativeState.routes[0].assignedAircraftInstanceIds, ['acft-1', 'acft-2']);
+  assert.equal('routeId' in payload.game.routes[0], true);
   assert.equal('startedAt' in payload.game, true);
   assert.equal('endsAt' in payload.game, true);
   assert.equal('durationMs' in payload.game, true);
@@ -104,6 +132,7 @@ test('game:started public player payload includes only explicit public fields', 
       }
     ],
     ownedAircraft: [],
+    routes: [],
     airports: []
   };
 
@@ -146,6 +175,7 @@ test('game:started public payload includes airport definition plus game-owned mu
       { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
     ],
     ownedAircraft: [],
+    routes: [],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null }
     ]
@@ -181,6 +211,7 @@ test('game:started public payload includes airport definition plus game-owned mu
     }
   ]);
   assert.deepEqual(game.authoritativeState.airports, [{ airportId: 'YYZ', ownerPlayerId: null, saleListing: null }]);
+  assert.deepEqual(game.authoritativeState.routes, []);
 });
 
 test('unknown airport IDs in game state are skipped with warning during public payload construction', () => {
@@ -196,6 +227,7 @@ test('unknown airport IDs in game state are skipped with warning during public p
       { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
     ],
     ownedAircraft: [],
+    routes: [],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null },
       { airportId: 'UNKNOWN', ownerPlayerId: null, saleListing: null }
@@ -245,6 +277,7 @@ test('airport saleListing is projected as a new object when present', () => {
       { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
     ],
     ownedAircraft: [],
+    routes: [],
     airports: [
       {
         airportId: 'YYZ',

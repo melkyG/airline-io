@@ -950,6 +950,111 @@ test('purchaseListedAirport buys a listed airport from another player and broadc
   assert.equal(emitted[0].eventName, 'game:state');
 });
 
+test('purchaseListedAirport removes seller routes using sold airport and unassigns their aircraft in one broadcast', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'p2', username: 'Bob', capital: 400000, score: 0 }
+      ],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'p1',
+          saleListing: { sellerPlayerId: 'p1', askingPrice: 350000 }
+        },
+        {
+          airportId: 'JFK',
+          ownerPlayerId: 'p1',
+          saleListing: null
+        }
+      ],
+      routes: [
+        {
+          routeId: 'route-yyz-jfk',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK:YYZ',
+          distanceKm: 550,
+          assignedAircraftInstanceIds: ['acft-1']
+        }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-yyz-jfk'
+        }
+      ]
+    }),
+    manager
+  );
+
+  const result = game.purchaseListedAirport('p2', 'YYZ');
+
+  assert.equal(result.success, true);
+  assert.equal(result.code, 'OK');
+  assert.equal(game.authoritativeState.players[0].capital, 1350000);
+  assert.equal(game.authoritativeState.players[1].capital, 50000);
+  assert.equal(game.authoritativeState.airports[0].ownerPlayerId, 'p2');
+  assert.equal(game.authoritativeState.airports[0].saleListing, null);
+  assert.equal(game.authoritativeState.routes.length, 0);
+  assert.equal(game.authoritativeState.ownedAircraft[0].status, 'available');
+  assert.equal(game.authoritativeState.ownedAircraft[0].assignedRouteId, null);
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].eventName, 'game:state');
+});
+
+test('purchaseListedAirport is atomic when route cleanup validation fails', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'p2', username: 'Bob', capital: 400000, score: 0 }
+      ],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'p1',
+          saleListing: { sellerPlayerId: 'p1', askingPrice: 350000 }
+        },
+        {
+          airportId: 'JFK',
+          ownerPlayerId: 'p1',
+          saleListing: null
+        }
+      ],
+      routes: [
+        {
+          routeId: 'route-yyz-jfk',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK:YYZ',
+          distanceKm: 550,
+          assignedAircraftInstanceIds: ['acft-missing']
+        }
+      ],
+      ownedAircraft: []
+    }),
+    manager
+  );
+  const before = JSON.stringify(game.authoritativeState);
+
+  const result = game.purchaseListedAirport('p2', 'YYZ');
+
+  assert.equal(result.success, false);
+  assert.equal(result.code, 'ASSIGNED_AIRCRAFT_NOT_FOUND');
+  assert.equal(JSON.stringify(game.authoritativeState), before);
+  assert.equal(emitted.length, 0);
+});
+
 test('purchaseListedAirport validates in order and does not mutate or broadcast on failure', () => {
   const failureCases = [
     {
@@ -1171,6 +1276,118 @@ test('sellAirportToGame refunds 80 percent of basePrice, clears ownership/listin
   assert.equal(game.authoritativeState.airports[0].saleListing, null);
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].eventName, 'game:state');
+});
+
+test('sellAirportToGame removes owner routes using sold airport and unassigns their aircraft in one broadcast', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+      ],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'p1',
+          saleListing: null
+        },
+        {
+          airportId: 'JFK',
+          ownerPlayerId: 'p1',
+          saleListing: null
+        }
+      ],
+      routes: [
+        {
+          routeId: 'route-yyz-jfk',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK:YYZ',
+          distanceKm: 550,
+          assignedAircraftInstanceIds: ['acft-1']
+        }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-yyz-jfk'
+        }
+      ]
+    }),
+    manager
+  );
+
+  const result = game.sellAirportToGame('p1', 'YYZ');
+
+  assert.equal(result.success, true);
+  assert.equal(result.code, 'OK');
+  assert.equal(game.authoritativeState.players[0].capital, 1240000);
+  assert.equal(game.authoritativeState.airports[0].ownerPlayerId, null);
+  assert.equal(game.authoritativeState.routes.length, 0);
+  assert.equal(game.authoritativeState.ownedAircraft[0].status, 'available');
+  assert.equal(game.authoritativeState.ownedAircraft[0].assignedRouteId, null);
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].eventName, 'game:state');
+});
+
+test('sellAirportToGame is atomic when route cleanup validation fails', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+      ],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'p1',
+          saleListing: null
+        },
+        {
+          airportId: 'JFK',
+          ownerPlayerId: 'p1',
+          saleListing: null
+        }
+      ],
+      routes: [
+        {
+          routeId: 'route-yyz-jfk',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK:YYZ',
+          distanceKm: 550,
+          assignedAircraftInstanceIds: ['acft-1']
+        }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-other'
+        }
+      ]
+    }),
+    manager
+  );
+  const before = JSON.stringify(game.authoritativeState);
+
+  const result = game.sellAirportToGame('p1', 'YYZ');
+
+  assert.equal(result.success, false);
+  assert.equal(result.code, 'ASSIGNMENT_MISMATCH');
+  assert.equal(JSON.stringify(game.authoritativeState), before);
+  assert.equal(emitted.length, 0);
 });
 
 test('sellAirportToGame validates in order and does not mutate or broadcast on failure', () => {
