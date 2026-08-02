@@ -218,6 +218,63 @@ test('GameManager.handleAirportPurchaseSocketRequest handles malformed payloads 
   assert.equal(emitted.length, 0);
 });
 
+test('GameManager.handleAirportPurchaseSocketRequest emits canonical asset transaction only after successful purchase', () => {
+  const emitted = [];
+  const io = {
+    to(roomName) {
+      return {
+        emit(eventName, payload) {
+          emitted.push({ roomName, eventName, payload });
+        }
+      };
+    }
+  };
+
+  const manager = new GameManager(io);
+  manager.players.set('socket-1', {
+    id: 'socket-1',
+    gameId: 'game-1'
+  });
+  manager.playerGameIds.set('socket-1', 'game-1');
+
+  const game = new Game(
+    createInitialState({
+      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 }],
+      airports: [{ airportId: 'YYZ', ownerPlayerId: null, saleListing: null }]
+    }),
+    { io }
+  );
+  game.players.set('socket-1', { id: 'socket-1' });
+  manager.games.set('game-1', game);
+
+  const successResult = manager.handleAirportPurchaseSocketRequest('socket-1', { airportId: 'YYZ' });
+  assert.equal(successResult.success, true);
+  assert.equal(successResult.code, 'OK');
+  assert.equal(successResult.pricePaid, 300000);
+  assert.equal(successResult.remainingCapital, 700000);
+
+  const gameEventEntries = emitted.filter((entry) => entry.eventName === 'game:event');
+  assert.equal(gameEventEntries.length, 1);
+  assert.equal(gameEventEntries[0].roomName, 'socket-1');
+  assert.equal(gameEventEntries[0].payload.type, 'asset:transaction');
+  assert.equal(gameEventEntries[0].payload.gameId, 'game-1');
+  assert.equal(gameEventEntries[0].payload.actorPlayerId, 'socket-1');
+  assert.deepEqual(gameEventEntries[0].payload.data, {
+    action: 'purchased-from-game',
+    assetType: 'airport',
+    assetId: 'YYZ',
+    assetName: 'Toronto Pearson International Airport',
+    quantity: 1,
+    totalAmount: 300000
+  });
+
+  const failedResult = manager.handleAirportPurchaseSocketRequest('socket-1', { airportId: 'YYZ' });
+  assert.equal(failedResult.success, false);
+  assert.equal(failedResult.code, 'AIRPORT_ALREADY_OWNED');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 1);
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 1);
+});
+
 test('listAirportForSale creates a listing for an owned unlisted airport and broadcasts game:state', () => {
   const { manager, emitted } = createManagerWithEmitCapture();
   const game = new Game(
@@ -553,6 +610,305 @@ test('GameManager airport listing socket request handlers fail gracefully for ma
 
   assert.equal(JSON.stringify(game.authoritativeState), before);
   assert.equal(emitted.length, 0);
+});
+
+test('GameManager.handleAirportListingSocketRequest emits canonical asset listing only after successful listing creation', () => {
+  const emitted = [];
+  const io = {
+    to(roomName) {
+      return {
+        emit(eventName, payload) {
+          emitted.push({ roomName, eventName, payload });
+        }
+      };
+    }
+  };
+
+  const manager = new GameManager(io);
+  manager.players.set('socket-1', {
+    id: 'socket-1',
+    gameId: 'game-1'
+  });
+  manager.playerGameIds.set('socket-1', 'game-1');
+
+  const game = new Game(
+    createInitialState({
+      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 }],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'socket-1',
+          saleListing: null
+        }
+      ]
+    }),
+    { io }
+  );
+  game.players.set('socket-1', { id: 'socket-1' });
+  manager.games.set('game-1', game);
+
+  const successResult = manager.handleAirportListingSocketRequest('socket-1', {
+    airportId: 'YYZ',
+    askingPrice: 420000
+  });
+
+  assert.equal(successResult.success, true);
+  assert.equal(successResult.code, 'OK');
+  assert.deepEqual(successResult.saleListing, {
+    sellerPlayerId: 'socket-1',
+    askingPrice: 420000
+  });
+
+  const gameEventEntries = emitted.filter((entry) => entry.eventName === 'game:event');
+  assert.equal(gameEventEntries.length, 1);
+  assert.equal(gameEventEntries[0].roomName, 'socket-1');
+  assert.equal(gameEventEntries[0].payload.type, 'asset:listing');
+  assert.equal(gameEventEntries[0].payload.gameId, 'game-1');
+  assert.equal(gameEventEntries[0].payload.actorPlayerId, 'socket-1');
+  assert.deepEqual(gameEventEntries[0].payload.data, {
+    action: 'listed',
+    assetType: 'airport',
+    assetId: 'YYZ',
+    assetName: 'Toronto Pearson International Airport',
+    askingPrice: 420000
+  });
+
+  const failedResult = manager.handleAirportListingSocketRequest('socket-1', {
+    airportId: 'YYZ',
+    askingPrice: 430000
+  });
+  assert.equal(failedResult.success, false);
+  assert.equal(failedResult.code, 'AIRPORT_ALREADY_LISTED');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 1);
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 1);
+});
+
+test('GameManager.handleAirportListingCancelSocketRequest does not emit game:event on successful cancellation', () => {
+  const emitted = [];
+  const io = {
+    to(roomName) {
+      return {
+        emit(eventName, payload) {
+          emitted.push({ roomName, eventName, payload });
+        }
+      };
+    }
+  };
+
+  const manager = new GameManager(io);
+  manager.players.set('socket-1', {
+    id: 'socket-1',
+    gameId: 'game-1'
+  });
+  manager.playerGameIds.set('socket-1', 'game-1');
+
+  const game = new Game(
+    createInitialState({
+      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 }],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'socket-1',
+          saleListing: { sellerPlayerId: 'socket-1', askingPrice: 420000 }
+        }
+      ]
+    }),
+    { io }
+  );
+  game.players.set('socket-1', { id: 'socket-1' });
+  manager.games.set('game-1', game);
+
+  const result = manager.handleAirportListingCancelSocketRequest('socket-1', { airportId: 'YYZ' });
+
+  assert.equal(result.success, true);
+  assert.equal(result.code, 'OK');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 1);
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 0);
+});
+
+test('GameManager.handleAirportListedPurchaseSocketRequest emits buyer and seller canonical asset transactions on successful listed purchase', () => {
+  const emitted = [];
+  const io = {
+    to(roomName) {
+      return {
+        emit(eventName, payload) {
+          emitted.push({ roomName, eventName, payload });
+        }
+      };
+    }
+  };
+
+  const manager = new GameManager(io);
+  manager.players.set('socket-1', {
+    id: 'socket-1',
+    gameId: 'game-1'
+  });
+  manager.players.set('socket-2', {
+    id: 'socket-2',
+    gameId: 'game-1'
+  });
+  manager.playerGameIds.set('socket-1', 'game-1');
+  manager.playerGameIds.set('socket-2', 'game-1');
+
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'socket-2', username: 'Bob', capital: 500000, score: 0 }
+      ],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'socket-1',
+          saleListing: { sellerPlayerId: 'socket-1', askingPrice: 350000 }
+        }
+      ]
+    }),
+    { io }
+  );
+  game.players.set('socket-1', { id: 'socket-1' });
+  game.players.set('socket-2', { id: 'socket-2' });
+  manager.games.set('game-1', game);
+
+  const result = manager.handleAirportListedPurchaseSocketRequest('socket-2', { airportId: 'YYZ' });
+
+  assert.equal(result.success, true);
+  assert.equal(result.code, 'OK');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 1);
+
+  const gameEventEntries = emitted.filter((entry) => entry.eventName === 'game:event');
+  assert.equal(gameEventEntries.length, 2);
+
+  const buyerEvent = gameEventEntries.find((entry) => entry.roomName === 'socket-2');
+  const sellerEvent = gameEventEntries.find((entry) => entry.roomName === 'socket-1');
+
+  assert.ok(buyerEvent);
+  assert.equal(buyerEvent.payload.type, 'asset:transaction');
+  assert.equal(buyerEvent.payload.gameId, 'game-1');
+  assert.equal(buyerEvent.payload.actorPlayerId, 'socket-2');
+  assert.deepEqual(buyerEvent.payload.data, {
+    action: 'purchased-from-player',
+    assetType: 'airport',
+    assetId: 'YYZ',
+    assetName: 'Toronto Pearson International Airport',
+    quantity: 1,
+    totalAmount: 350000,
+    counterpartyPlayerId: 'socket-1',
+    counterpartyName: 'Alice'
+  });
+
+  assert.ok(sellerEvent);
+  assert.equal(sellerEvent.payload.type, 'asset:transaction');
+  assert.equal(sellerEvent.payload.gameId, 'game-1');
+  assert.equal(sellerEvent.payload.actorPlayerId, 'socket-1');
+  assert.deepEqual(sellerEvent.payload.data, {
+    action: 'sold-to-player',
+    assetType: 'airport',
+    assetId: 'YYZ',
+    assetName: 'Toronto Pearson International Airport',
+    quantity: 1,
+    totalAmount: 350000,
+    counterpartyPlayerId: 'socket-2',
+    counterpartyName: 'Bob'
+  });
+});
+
+test('GameManager.handleAirportListedPurchaseSocketRequest emits only buyer event when seller is not connected', () => {
+  const emitted = [];
+  const io = {
+    to(roomName) {
+      return {
+        emit(eventName, payload) {
+          emitted.push({ roomName, eventName, payload });
+        }
+      };
+    }
+  };
+
+  const manager = new GameManager(io);
+  manager.players.set('socket-2', {
+    id: 'socket-2',
+    gameId: 'game-1'
+  });
+  manager.playerGameIds.set('socket-2', 'game-1');
+
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'socket-2', username: 'Bob', capital: 500000, score: 0 }
+      ],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'socket-1',
+          saleListing: { sellerPlayerId: 'socket-1', askingPrice: 350000 }
+        }
+      ]
+    }),
+    { io }
+  );
+  game.players.set('socket-2', { id: 'socket-2' });
+  manager.games.set('game-1', game);
+
+  const result = manager.handleAirportListedPurchaseSocketRequest('socket-2', { airportId: 'YYZ' });
+
+  assert.equal(result.success, true);
+  assert.equal(result.code, 'OK');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 1);
+
+  const gameEventEntries = emitted.filter((entry) => entry.eventName === 'game:event');
+  assert.equal(gameEventEntries.length, 1);
+  assert.equal(gameEventEntries[0].roomName, 'socket-2');
+  assert.equal(gameEventEntries[0].payload.type, 'asset:transaction');
+  assert.equal(gameEventEntries[0].payload.data.action, 'purchased-from-player');
+  assert.equal(gameEventEntries[0].payload.data.counterpartyName, 'Alice');
+});
+
+test('GameManager.handleAirportListedPurchaseSocketRequest does not emit game:event on failed listed purchase', () => {
+  const emitted = [];
+  const io = {
+    to(roomName) {
+      return {
+        emit(eventName, payload) {
+          emitted.push({ roomName, eventName, payload });
+        }
+      };
+    }
+  };
+
+  const manager = new GameManager(io);
+  manager.players.set('socket-2', {
+    id: 'socket-2',
+    gameId: 'game-1'
+  });
+  manager.playerGameIds.set('socket-2', 'game-1');
+
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'socket-2', username: 'Bob', capital: 200000, score: 0 }
+      ],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'socket-1',
+          saleListing: { sellerPlayerId: 'socket-1', askingPrice: 350000 }
+        }
+      ]
+    }),
+    { io }
+  );
+  game.players.set('socket-2', { id: 'socket-2' });
+  manager.games.set('game-1', game);
+
+  const result = manager.handleAirportListedPurchaseSocketRequest('socket-2', { airportId: 'YYZ' });
+
+  assert.equal(result.success, false);
+  assert.equal(result.code, 'INSUFFICIENT_CAPITAL');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 0);
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 0);
 });
 
 test('purchaseListedAirport buys a listed airport from another player and broadcasts game:state', () => {
@@ -966,4 +1322,70 @@ test('GameManager.handleAirportSellToGameSocketRequest handles malformed payload
 
   assert.equal(JSON.stringify(game.authoritativeState), before);
   assert.equal(emitted.length, 0);
+});
+
+test('GameManager.handleAirportSellToGameSocketRequest emits canonical asset transaction only after successful sale', () => {
+  const emitted = [];
+  const io = {
+    to(roomName) {
+      return {
+        emit(eventName, payload) {
+          emitted.push({ roomName, eventName, payload });
+        }
+      };
+    }
+  };
+
+  const manager = new GameManager(io);
+  manager.players.set('socket-1', {
+    id: 'socket-1',
+    gameId: 'game-1'
+  });
+  manager.playerGameIds.set('socket-1', 'game-1');
+
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+      ],
+      airports: [
+        {
+          airportId: 'YYZ',
+          ownerPlayerId: 'socket-1',
+          saleListing: { sellerPlayerId: 'socket-1', askingPrice: 450000 }
+        }
+      ]
+    }),
+    { io }
+  );
+  game.players.set('socket-1', { id: 'socket-1' });
+  manager.games.set('game-1', game);
+
+  const saleResult = manager.handleAirportSellToGameSocketRequest('socket-1', { airportId: 'YYZ' });
+  assert.equal(saleResult.success, true);
+  assert.equal(saleResult.code, 'OK');
+  assert.equal(saleResult.refundAmount, 240000);
+  assert.equal(saleResult.updatedCapital, 1240000);
+
+  const gameEventEntries = emitted.filter((entry) => entry.eventName === 'game:event');
+  assert.equal(gameEventEntries.length, 1);
+  assert.equal(gameEventEntries[0].roomName, 'socket-1');
+  assert.equal(gameEventEntries[0].payload.type, 'asset:transaction');
+  assert.equal(gameEventEntries[0].payload.gameId, 'game-1');
+  assert.equal(gameEventEntries[0].payload.actorPlayerId, 'socket-1');
+  assert.deepEqual(gameEventEntries[0].payload.data, {
+    action: 'sold-to-game',
+    assetType: 'airport',
+    assetId: 'YYZ',
+    assetName: 'Toronto Pearson International Airport',
+    quantity: 1,
+    totalAmount: 240000
+  });
+
+  const failedSaleResult = manager.handleAirportSellToGameSocketRequest('socket-1', { airportId: 'YYZ' });
+  assert.equal(failedSaleResult.success, false);
+  assert.equal(failedSaleResult.code, 'NOT_AIRPORT_OWNER');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 1);
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 1);
 });

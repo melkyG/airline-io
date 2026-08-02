@@ -399,12 +399,17 @@ test('GameManager.handleAircraftPurchaseSocketRequest passes quantity through an
   const gameEventEntries = emitted.filter((entry) => entry.eventName === 'game:event');
   assert.equal(gameEventEntries.length, 1);
   assert.equal(gameEventEntries[0].roomName, 'socket-1');
-  assert.equal(gameEventEntries[0].payload.type, 'aircraft:purchase:succeeded');
+  assert.equal(gameEventEntries[0].payload.type, 'asset:transaction');
   assert.equal(gameEventEntries[0].payload.gameId, 'game-1');
   assert.equal(gameEventEntries[0].payload.actorPlayerId, 'socket-1');
-  assert.equal(gameEventEntries[0].payload.data.success, true);
-  assert.equal(gameEventEntries[0].payload.data.quantityPurchased, 2);
-  assert.equal(gameEventEntries[0].payload.data.pricePaid, 600000);
+  assert.deepEqual(gameEventEntries[0].payload.data, {
+    action: 'purchased-from-game',
+    assetType: 'aircraft',
+    assetId: 'BOEING_747',
+    assetName: 'Boeing 747',
+    quantity: 2,
+    totalAmount: 600000
+  });
 
   const failureResult = manager.handleAircraftPurchaseSocketRequest('socket-1', {
     aircraftCatalogId: 'BOEING_747',
@@ -462,4 +467,290 @@ test('GameManager.handleAircraftPurchaseSocketRequest supports quoteOnly with au
   assert.equal(JSON.stringify(game.authoritativeState), before);
   assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 0);
   assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 0);
+});
+
+test('getAircraftSellQuote returns authoritative model quote from owned instances with 80 percent rounded buyback', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-p1-a',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 100000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-p1-b',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 999999,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-p1-other-model',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 300000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-p2-same-model',
+          ownerPlayerId: 'p2',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'available',
+          assignedRouteId: null
+        }
+      ]
+    }),
+    manager
+  );
+
+  const before = JSON.stringify(game.authoritativeState);
+  const result = game.getAircraftSellQuote('p1', 'BOEING_747');
+
+  assert.deepEqual(result, {
+    success: true,
+    code: 'OK',
+    aircraftCatalogId: 'BOEING_747',
+    ownedQuantity: 2,
+    maxSellable: 2,
+    unitSellPrice: 240000
+  });
+  assert.equal(JSON.stringify(game.authoritativeState), before);
+  assert.equal(emitted.length, 0);
+});
+
+test('getAircraftSellQuote returns validation failures from authoritative purchase context and does not mutate', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(createInitialState(), manager);
+  const before = JSON.stringify(game.authoritativeState);
+
+  const missingPlayer = game.getAircraftSellQuote('missing-player', 'BOEING_747');
+  assert.equal(missingPlayer.success, false);
+  assert.equal(missingPlayer.code, 'PLAYER_NOT_FOUND');
+
+  const missingAircraft = game.getAircraftSellQuote('p1', 'UNKNOWN');
+  assert.equal(missingAircraft.success, false);
+  assert.equal(missingAircraft.code, 'AIRCRAFT_NOT_FOUND');
+
+  assert.equal(JSON.stringify(game.authoritativeState), before);
+  assert.equal(emitted.length, 0);
+});
+
+test('sellAircraftToGame sells deterministically by model and owner, refunds once, and broadcasts game:state', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [
+        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
+        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 450000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-2',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 200000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-3',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-4',
+          ownerPlayerId: 'p2',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-5',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 350000,
+          status: 'available',
+          assignedRouteId: null
+        }
+      ]
+    }),
+    manager
+  );
+
+  const result = game.sellAircraftToGame('p1', 'BOEING_747', 2);
+
+  assert.equal(result.success, true);
+  assert.equal(result.code, 'OK');
+  assert.equal(result.aircraftCatalogId, 'BOEING_747');
+  assert.equal(result.quantitySold, 2);
+  assert.equal(result.unitSellPrice, 240000);
+  assert.equal(result.totalRefund, 480000);
+  assert.equal(result.ownedQuantity, 1);
+  assert.equal(result.maxSellable, 1);
+  assert.equal(result.updatedCapital, 1480000);
+  assert.equal(game.authoritativeState.players.find((player) => player.id === 'p1').capital, 1480000);
+  assert.deepEqual(
+    game.authoritativeState.ownedAircraft.map((aircraft) => aircraft.aircraftInstanceId),
+    ['acft-2', 'acft-4', 'acft-5']
+  );
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].eventName, 'game:state');
+});
+
+test('sellAircraftToGame is atomic on failures (invalid quantity or oversell) with no mutation or broadcast', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'available',
+          assignedRouteId: null
+        }
+      ]
+    }),
+    manager
+  );
+
+  const before = JSON.stringify(game.authoritativeState);
+
+  const invalidQuantity = game.sellAircraftToGame('p1', 'BOEING_747', 0);
+  assert.equal(invalidQuantity.success, false);
+  assert.equal(invalidQuantity.code, 'INVALID_QUANTITY');
+  assert.equal(JSON.stringify(game.authoritativeState), before);
+
+  const oversell = game.sellAircraftToGame('p1', 'BOEING_747', 2);
+  assert.equal(oversell.success, false);
+  assert.equal(oversell.code, 'INSUFFICIENT_OWNED_QUANTITY');
+  assert.equal(oversell.ownedQuantity, 1);
+  assert.equal(oversell.maxSellable, 1);
+  assert.equal(oversell.unitSellPrice, 240000);
+  assert.equal(JSON.stringify(game.authoritativeState), before);
+  assert.equal(emitted.length, 0);
+});
+
+test('GameManager.handleAircraftSellSocketRequest supports quoteOnly and sale modes', () => {
+  const emitted = [];
+  const io = {
+    to(roomName) {
+      return {
+        emit(eventName, payload) {
+          emitted.push({ roomName, eventName, payload });
+        }
+      };
+    }
+  };
+
+  const manager = new GameManager(io);
+  manager.players.set('socket-1', {
+    id: 'socket-1',
+    gameId: 'game-1'
+  });
+  manager.playerGameIds.set('socket-1', 'game-1');
+
+  const game = new Game(
+    createInitialState({
+      players: [{ id: 'socket-1', username: 'Alice', capital: 650000, score: 0 }],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-test-1',
+          ownerPlayerId: 'socket-1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'available',
+          assignedRouteId: null
+        }
+      ]
+    }),
+    { io }
+  );
+  game.players.set('socket-1', { id: 'socket-1' });
+  manager.games.set('game-1', game);
+
+  const before = JSON.stringify(game.authoritativeState);
+  const quoteResult = manager.handleAircraftSellSocketRequest('socket-1', {
+    aircraftCatalogId: 'BOEING_747',
+    quoteOnly: true
+  });
+
+  assert.equal(quoteResult.success, true);
+  assert.equal(quoteResult.code, 'OK');
+  assert.equal(quoteResult.aircraftCatalogId, 'BOEING_747');
+  assert.equal(quoteResult.ownedQuantity, 1);
+  assert.equal(quoteResult.maxSellable, 1);
+  assert.equal(quoteResult.unitSellPrice, 240000);
+  assert.equal(JSON.stringify(game.authoritativeState), before);
+  assert.equal(emitted.length, 0);
+
+  const saleResult = manager.handleAircraftSellSocketRequest('socket-1', {
+    aircraftCatalogId: 'BOEING_747',
+    quantity: 1
+  });
+  assert.equal(saleResult.success, true);
+  assert.equal(saleResult.code, 'OK');
+  assert.equal(saleResult.aircraftCatalogId, 'BOEING_747');
+  assert.equal(saleResult.quantitySold, 1);
+  assert.equal(saleResult.unitSellPrice, 240000);
+  assert.equal(saleResult.totalRefund, 240000);
+  assert.equal(saleResult.ownedQuantity, 0);
+  assert.equal(saleResult.maxSellable, 0);
+  assert.equal(saleResult.updatedCapital, 890000);
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 1);
+  const gameEventEntries = emitted.filter((entry) => entry.eventName === 'game:event');
+  assert.equal(gameEventEntries.length, 1);
+  assert.equal(gameEventEntries[0].roomName, 'socket-1');
+  assert.equal(gameEventEntries[0].payload.type, 'asset:transaction');
+  assert.equal(gameEventEntries[0].payload.gameId, 'game-1');
+  assert.equal(gameEventEntries[0].payload.actorPlayerId, 'socket-1');
+  assert.deepEqual(gameEventEntries[0].payload.data, {
+    action: 'sold-to-game',
+    assetType: 'aircraft',
+    assetId: 'BOEING_747',
+    assetName: 'Boeing 747',
+    quantity: 1,
+    totalAmount: 240000
+  });
+
+  const failedSaleResult = manager.handleAircraftSellSocketRequest('socket-1', {
+    aircraftCatalogId: 'BOEING_747',
+    quantity: 1
+  });
+  assert.equal(failedSaleResult.success, false);
+  assert.equal(failedSaleResult.code, 'INSUFFICIENT_OWNED_QUANTITY');
+  assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 1);
+
+  const invalidPayloadResult = manager.handleAircraftSellSocketRequest('socket-1', {
+    aircraftCatalogId: 42,
+    quoteOnly: true
+  });
+  assert.equal(invalidPayloadResult.success, false);
+  assert.equal(invalidPayloadResult.code, 'AIRCRAFT_NOT_FOUND');
 });

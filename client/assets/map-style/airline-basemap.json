@@ -9,7 +9,8 @@
     {
       "id": "background",
       "paint": {
-        "background-color": "rgb(242,243,240)"
+        "background-color": "rgb(242,243,240)",
+        "background-opacity": 1
       },
       "type": "background"
     },
@@ -157,7 +158,8 @@
       },
       "paint": {
         "fill-antialias": true,
-        "fill-color": "#d7e8f2"
+        "fill-color": "#c3e4fb",
+        "fill-opacity": 1
       },
       "source": "openmaptiles",
       "source-layer": "water",

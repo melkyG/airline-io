@@ -49,6 +49,111 @@
     return EVENT_LOG_TIME_FORMATTER.format(new Date(occurredAt));
   }
 
+  function formatAssetIdForDisplay(assetId) {
+    if (typeof assetId !== 'string') {
+      return '';
+    }
+
+    const trimmedId = assetId.trim();
+    if (!trimmedId) {
+      return '';
+    }
+
+    const words = trimmedId
+      .replace(/[_-]+/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((segment) => {
+        if (/^\d+$/.test(segment)) {
+          return segment;
+        }
+
+        const lower = segment.toLowerCase();
+        return `${lower.charAt(0).toUpperCase()}${lower.slice(1)}`;
+      });
+
+    return words.join(' ');
+  }
+
+  function resolveAssetTransactionName(eventData) {
+    if (eventData && typeof eventData.assetName === 'string' && eventData.assetName.trim().length > 0) {
+      return eventData.assetName.trim();
+    }
+
+    if (eventData && typeof eventData.assetId === 'string' && eventData.assetId.trim().length > 0) {
+      const fromAssetId = formatAssetIdForDisplay(eventData.assetId);
+      if (fromAssetId) {
+        return fromAssetId;
+      }
+    }
+
+    return 'Asset';
+  }
+
+  function formatAssetTransactionLogEntry({
+    action,
+    assetType,
+    assetName,
+    quantity,
+    totalAmount,
+    counterpartyName
+  }) {
+    const normalizedQuantity = Number.isInteger(quantity) && quantity >= 1 ? quantity : 1;
+    const normalizedAssetType = assetType === 'airport' ? 'airport' : (assetType === 'aircraft' ? 'aircraft' : 'asset');
+    const resolvedAssetName =
+      typeof assetName === 'string' && assetName.trim().length > 0 ? assetName.trim() : 'Asset';
+
+    if (action === 'purchased-from-player') {
+      const sellerName = typeof counterpartyName === 'string' && counterpartyName.trim().length > 0
+        ? counterpartyName.trim()
+        : 'another player';
+
+      if (!Number.isFinite(totalAmount)) {
+        return `Purchased ${resolvedAssetName} from ${sellerName}.`;
+      }
+
+      return `Purchased ${resolvedAssetName} from ${sellerName} for ${CAPITAL_FORMATTER.format(totalAmount)}.`;
+    }
+
+    if (action === 'sold-to-player') {
+      const buyerName = typeof counterpartyName === 'string' && counterpartyName.trim().length > 0
+        ? counterpartyName.trim()
+        : 'another player';
+
+      if (!Number.isFinite(totalAmount)) {
+        return `You sold ${resolvedAssetName} to ${buyerName}.`;
+      }
+
+      return `You sold ${resolvedAssetName} to ${buyerName} for ${CAPITAL_FORMATTER.format(totalAmount)}.`;
+    }
+
+    const actionVerb = action === 'sold-to-game' ? 'sold' : 'purchased';
+
+    const baseMessage = normalizedAssetType === 'airport'
+      ? `You ${actionVerb} ${resolvedAssetName}`
+      : `You ${actionVerb} ${normalizedQuantity} ${resolvedAssetName} ${normalizedAssetType}`;
+    if (!Number.isFinite(totalAmount)) {
+      return `${baseMessage}.`;
+    }
+
+    return `${baseMessage} for ${CAPITAL_FORMATTER.format(totalAmount)}.`;
+  }
+
+  function formatAssetListingLogEntry({ action, assetType, assetName, assetId, askingPrice }) {
+    const resolvedAssetName =
+      typeof assetName === 'string' && assetName.trim().length > 0
+        ? assetName.trim()
+        : resolveAssetTransactionName({ assetId });
+
+    const normalizedAction = action === 'listed' ? 'listed' : 'listed';
+    if (!Number.isFinite(askingPrice)) {
+      const fallbackAssetType = assetType === 'airport' ? 'airport' : (assetType === 'aircraft' ? 'aircraft' : 'asset');
+      return `You ${normalizedAction} ${resolvedAssetName} ${fallbackAssetType}.`;
+    }
+
+    return `You ${normalizedAction} ${resolvedAssetName} for ${CAPITAL_FORMATTER.format(askingPrice)}.`;
+  }
+
   function formatEventLogEntry(eventPayload) {
     if (!eventPayload || typeof eventPayload !== 'object') {
       return 'Unknown event';
@@ -57,23 +162,25 @@
     const eventType = typeof eventPayload.type === 'string' ? eventPayload.type : '';
     const eventData = eventPayload.data && typeof eventPayload.data === 'object' ? eventPayload.data : null;
 
-    if (eventType === 'aircraft:purchased' || eventType === 'aircraft:purchase:succeeded') {
-      const quantityPurchased = Number.isInteger(eventData && eventData.quantityPurchased)
-        ? eventData.quantityPurchased
-        : 1;
-      const aircraftCatalogId =
-        eventData && typeof eventData.aircraftCatalogId === 'string' && eventData.aircraftCatalogId.trim().length > 0
-          ? eventData.aircraftCatalogId.trim()
-          : 'Aircraft';
-      const pricePaid = Number.isFinite(eventData && eventData.pricePaid) ? eventData.pricePaid : null;
-      const quantityLabel = quantityPurchased === 1 ? 'aircraft' : 'aircraft';
-      const baseMessage = `You purchased ${quantityPurchased} ${quantityLabel} (${aircraftCatalogId})`;
+    if (eventType === 'asset:transaction') {
+      return formatAssetTransactionLogEntry({
+        action: eventData && eventData.action,
+        assetType: eventData && eventData.assetType,
+        assetName: resolveAssetTransactionName(eventData),
+        quantity: eventData && eventData.quantity,
+        totalAmount: eventData && eventData.totalAmount,
+        counterpartyName: eventData && eventData.counterpartyName
+      });
+    }
 
-      if (!Number.isFinite(pricePaid)) {
-        return baseMessage;
-      }
-
-      return `${baseMessage} for ${CAPITAL_FORMATTER.format(pricePaid)}.`;
+    if (eventType === 'asset:listing') {
+      return formatAssetListingLogEntry({
+        action: eventData && eventData.action,
+        assetType: eventData && eventData.assetType,
+        assetName: resolveAssetTransactionName(eventData),
+        assetId: eventData && eventData.assetId,
+        askingPrice: eventData && eventData.askingPrice
+      });
     }
 
     if (eventData && typeof eventData.message === 'string' && eventData.message.trim().length > 0) {
@@ -88,6 +195,13 @@
     let renderedResultsKey = null;
     let aircraftSelectHandler = null;
     let eventLogExpanded = false;
+    let lastRenderedState = null;
+    let lastRenderedEventCount = 0;
+    let previousEventLogExpanded = false;
+    const scheduleAfterRender =
+      typeof globalScope.requestAnimationFrame === 'function'
+        ? globalScope.requestAnimationFrame.bind(globalScope)
+        : (callback) => setTimeout(callback, 0);
     const elements = {
       mainContent: documentRef.querySelector('.main-content'),
       connectionStatus: documentRef.getElementById('connectionStatus'),
@@ -150,12 +264,15 @@
     if (typeof eventLogToggleButtonEl.addEventListener === 'function') {
       eventLogToggleButtonEl.addEventListener('click', () => {
         eventLogExpanded = !eventLogExpanded;
+        if (lastRenderedState) {
+          renderEventLogHud(lastRenderedState);
+        }
       });
     }
 
+    eventLogHudEl.appendChild(eventLogToggleButtonEl);
     eventLogPanelEl.appendChild(eventLogListEl);
     eventLogHudEl.appendChild(eventLogPanelEl);
-    eventLogHudEl.appendChild(eventLogToggleButtonEl);
 
     if (elements.gameScreen) {
       elements.gameScreen.appendChild(eventLogHudEl);
@@ -391,7 +508,10 @@
       const isGameScreenVisible = state && state.ui && state.ui.screen === 'game';
       if (!isGameScreenVisible) {
         eventLogExpanded = false;
+        previousEventLogExpanded = false;
+        lastRenderedEventCount = 0;
         eventLogHudEl.classList.toggle('hidden', true);
+        eventLogHudEl.classList.toggle('event-log-hud--expanded', false);
         eventLogPanelEl.classList.toggle('hidden', true);
         if (typeof eventLogToggleButtonEl.setAttribute === 'function') {
           eventLogToggleButtonEl.setAttribute('aria-expanded', 'false');
@@ -406,17 +526,21 @@
       const history =
         state && state.session && Array.isArray(state.session.gameEvents) ? state.session.gameEvents : [];
       const visibleHistory = history.slice(-EVENT_LOG_MAX_VISIBLE);
+      const shouldScrollToLatest =
+        eventLogExpanded &&
+        (history.length > lastRenderedEventCount || (!previousEventLogExpanded && eventLogExpanded));
 
       if (eventLogExpanded) {
         eventLogPanelEl.classList.toggle('hidden', false);
       } else {
         eventLogPanelEl.classList.toggle('hidden', true);
       }
+      eventLogHudEl.classList.toggle('event-log-hud--expanded', eventLogExpanded);
 
       if (typeof eventLogToggleButtonEl.setAttribute === 'function') {
         eventLogToggleButtonEl.setAttribute('aria-expanded', eventLogExpanded ? 'true' : 'false');
       }
-      eventLogToggleButtonEl.textContent = `Event Log (${history.length})`;
+      eventLogToggleButtonEl.textContent = 'Events';
 
       eventLogListEl.innerHTML = '';
       if (visibleHistory.length === 0) {
@@ -424,6 +548,8 @@
         emptyItem.className = 'event-log-item event-log-item--empty';
         emptyItem.textContent = 'No events yet.';
         eventLogListEl.appendChild(emptyItem);
+        lastRenderedEventCount = history.length;
+        previousEventLogExpanded = eventLogExpanded;
         return;
       }
 
@@ -446,6 +572,15 @@
       });
 
       eventLogListEl.appendChild(eventFragment);
+
+      if (shouldScrollToLatest) {
+        scheduleAfterRender(() => {
+          eventLogPanelEl.scrollTop = eventLogPanelEl.scrollHeight;
+        });
+      }
+
+      lastRenderedEventCount = history.length;
+      previousEventLogExpanded = eventLogExpanded;
     }
 
     function getResultsRenderKey(state) {
@@ -555,6 +690,7 @@
     }
 
     function render(state) {
+      lastRenderedState = state;
       renderConnectionStatus(state);
       renderLobbyPreview(state);
       renderPlayerList(state);

@@ -75,7 +75,7 @@ class Lobby {
     }
 
     this.status = 'countdown';
-    this.countdownRemaining = 5;
+    this.countdownRemaining = 1;
     this.broadcastState();
     this.broadcastCountdown(this.countdownRemaining);
 

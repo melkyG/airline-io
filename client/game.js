@@ -20,8 +20,16 @@ let selectedAircraftCatalogId = null;
 let isAircraftPurchasePending = false;
 let isAircraftQuotePending = false;
 let pendingAircraftQuoteCatalogId = null;
+let isAircraftSellPending = false;
+let isAircraftSellQuotePending = false;
+let pendingAircraftSellQuoteCatalogId = null;
 let aircraftMaxPurchasable = 0;
 let aircraftPurchaseQuantity = 0;
+let aircraftSellQuantity = 0;
+let aircraftOwnedQuantity = 0;
+let aircraftMaxSellable = 0;
+let aircraftUnitSellPrice = 0;
+let lastSelectedAircraftEconomicsFingerprint = null;
 let shopAirportSearchQuery = '';
 let isAirportSearchResultsOpen = false;
 let shopAircraftSearchQuery = '';
@@ -350,7 +358,8 @@ const shopAirportOwnerValueEl = shopAirportOwnerRowEl.querySelector('[data-shop-
 
 const shopAirportPriceRowEl = document.createElement('p');
 shopAirportPriceRowEl.className = 'airport-interaction-row';
-shopAirportPriceRowEl.innerHTML = '<span class="airport-interaction-label">Price:</span> <span class="airport-interaction-value" data-shop-airport-price>-</span>';
+shopAirportPriceRowEl.innerHTML = '<span class="airport-interaction-label" data-shop-airport-price-label>Price:</span> <span class="airport-interaction-value" data-shop-airport-price>-</span>';
+const shopAirportPriceLabelEl = shopAirportPriceRowEl.querySelector('[data-shop-airport-price-label]');
 const shopAirportPriceValueEl = shopAirportPriceRowEl.querySelector('[data-shop-airport-price]');
 
 const shopAirportMessageEl = document.createElement('p');
@@ -417,31 +426,55 @@ shopAircraftRangeRowEl.className = 'airport-interaction-row';
 shopAircraftRangeRowEl.innerHTML = '<span class="airport-interaction-label">Range:</span> <span class="airport-interaction-value" data-shop-aircraft-range>-</span>';
 const shopAircraftRangeValueEl = shopAircraftRangeRowEl.querySelector('[data-shop-aircraft-range]');
 
+const shopAircraftTradeDividerEl = document.createElement('div');
+shopAircraftTradeDividerEl.className = 'aircraft-trade-divider';
+
 const shopAircraftMessageEl = document.createElement('p');
 shopAircraftMessageEl.className = 'airport-interaction-row';
 shopAircraftMessageEl.textContent = AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE;
 
-const shopAircraftActionsEl = document.createElement('div');
-shopAircraftActionsEl.className = 'airport-interaction-actions';
+const shopAircraftTradeLayoutEl = document.createElement('div');
+shopAircraftTradeLayoutEl.className = 'aircraft-trade-layout';
 
-const shopAircraftQuantityControlEl = document.createElement('div');
-shopAircraftQuantityControlEl.className = 'aircraft-quantity-control';
+const shopAircraftBuySectionEl = document.createElement('section');
+shopAircraftBuySectionEl.className = 'aircraft-trade-section';
+
+const shopAircraftBuyTotalRowEl = document.createElement('p');
+shopAircraftBuyTotalRowEl.className = 'airport-interaction-row aircraft-trade-total-row';
+shopAircraftBuyTotalRowEl.innerHTML = '<span class="airport-interaction-label">Buy Total:</span> <span class="airport-interaction-value aircraft-trade-total-value" data-shop-aircraft-buy-total>-</span>';
+const shopAircraftBuyTotalValueEl = shopAircraftBuyTotalRowEl.querySelector('[data-shop-aircraft-buy-total]');
+
+const shopAircraftBuyControlsEl = document.createElement('div');
+shopAircraftBuyControlsEl.className = 'aircraft-trade-controls';
+
+const shopAircraftBuyQuantityColumnEl = document.createElement('div');
+shopAircraftBuyQuantityColumnEl.className = 'aircraft-trade-quantity-column';
 
 const shopAircraftQuantityInputEl = document.createElement('input');
 shopAircraftQuantityInputEl.type = 'number';
 shopAircraftQuantityInputEl.step = '1';
 shopAircraftQuantityInputEl.min = '0';
-shopAircraftQuantityInputEl.className = 'aircraft-quantity-input';
+shopAircraftQuantityInputEl.className = 'aircraft-quantity-input aircraft-trade-quantity-input';
 shopAircraftQuantityInputEl.setAttribute('aria-label', 'Aircraft purchase quantity');
 
-const shopAircraftMaxLabelEl = document.createElement('p');
-shopAircraftMaxLabelEl.className = 'aircraft-quantity-max-label';
+const shopAircraftMaxLabelEl = document.createElement('button');
+shopAircraftMaxLabelEl.type = 'button';
+shopAircraftMaxLabelEl.className = 'aircraft-quantity-max-label aircraft-trade-footnote-label';
 shopAircraftMaxLabelEl.textContent = 'Max 0';
+shopAircraftMaxLabelEl.addEventListener('click', () => {
+  if (isAircraftPurchasePending || isAircraftQuotePending) {
+    return;
+  }
+
+  const normalizedMax = Number.isInteger(aircraftMaxPurchasable) && aircraftMaxPurchasable > 0
+    ? aircraftMaxPurchasable
+    : 1;
+  aircraftPurchaseQuantity = normalizeAircraftPurchaseQuantity(normalizedMax);
+  refreshShopAircraftInteractionPanel(gameState.getState());
+});
 
 function handleAircraftQuantityInputChanged() {
-  const rawValue = Number(shopAircraftQuantityInputEl.value);
-  const parsedValue = Number.isFinite(rawValue) ? rawValue : NaN;
-  const normalizedQuantity = normalizeAircraftPurchaseQuantity(parsedValue, aircraftMaxPurchasable);
+  const normalizedQuantity = normalizeAircraftPurchaseQuantity(shopAircraftQuantityInputEl.value);
   aircraftPurchaseQuantity = normalizedQuantity;
   refreshShopAircraftInteractionPanel(gameState.getState());
 }
@@ -449,12 +482,9 @@ function handleAircraftQuantityInputChanged() {
 shopAircraftQuantityInputEl.addEventListener('input', handleAircraftQuantityInputChanged);
 shopAircraftQuantityInputEl.addEventListener('change', handleAircraftQuantityInputChanged);
 
-shopAircraftQuantityControlEl.appendChild(shopAircraftQuantityInputEl);
-shopAircraftQuantityControlEl.appendChild(shopAircraftMaxLabelEl);
-
 const shopAircraftBuyButtonEl = document.createElement('button');
 shopAircraftBuyButtonEl.type = 'button';
-shopAircraftBuyButtonEl.className = 'airport-interaction-action-button';
+shopAircraftBuyButtonEl.className = 'airport-interaction-action-button shop-aircraft-buy-button shop-aircraft-trade-button';
 shopAircraftBuyButtonEl.textContent = 'Buy';
 shopAircraftBuyButtonEl.addEventListener('click', () => {
   if (isAircraftPurchasePending || isAircraftQuotePending) {
@@ -466,10 +496,12 @@ shopAircraftBuyButtonEl.addEventListener('click', () => {
     return;
   }
 
-  const normalizedQuantity = normalizeAircraftPurchaseQuantity(aircraftPurchaseQuantity, aircraftMaxPurchasable);
+  const normalizedQuantity = normalizeAircraftPurchaseQuantity(aircraftPurchaseQuantity);
   aircraftPurchaseQuantity = normalizedQuantity;
 
-  if (normalizedQuantity < 1) {
+  const canAffordQuantity = normalizedQuantity >= 1 && normalizedQuantity <= aircraftMaxPurchasable;
+
+  if (!canAffordQuantity) {
     setAircraftSelectionMessage('Insufficient capital for this aircraft.', 'error');
     refreshShopAircraftInteractionPanel(gameState.getState());
     return;
@@ -484,8 +516,101 @@ shopAircraftBuyButtonEl.addEventListener('click', () => {
   });
 });
 
-shopAircraftActionsEl.appendChild(shopAircraftQuantityControlEl);
-shopAircraftActionsEl.appendChild(shopAircraftBuyButtonEl);
+shopAircraftBuyQuantityColumnEl.appendChild(shopAircraftQuantityInputEl);
+shopAircraftBuyQuantityColumnEl.appendChild(shopAircraftMaxLabelEl);
+shopAircraftBuyControlsEl.appendChild(shopAircraftBuyButtonEl);
+shopAircraftBuyControlsEl.appendChild(shopAircraftBuyQuantityColumnEl);
+
+shopAircraftBuySectionEl.appendChild(shopAircraftBuyTotalRowEl);
+shopAircraftBuySectionEl.appendChild(shopAircraftBuyControlsEl);
+
+const shopAircraftSellSectionEl = document.createElement('section');
+shopAircraftSellSectionEl.className = 'aircraft-trade-section';
+
+const shopAircraftSellTotalRowEl = document.createElement('p');
+shopAircraftSellTotalRowEl.className = 'airport-interaction-row aircraft-trade-total-row';
+shopAircraftSellTotalRowEl.innerHTML = '<span class="airport-interaction-label">Sell Total:</span> <span class="airport-interaction-value aircraft-trade-total-value" data-shop-aircraft-sell-total>-</span>';
+const shopAircraftSellTotalValueEl = shopAircraftSellTotalRowEl.querySelector('[data-shop-aircraft-sell-total]');
+
+const shopAircraftSellControlsEl = document.createElement('div');
+shopAircraftSellControlsEl.className = 'aircraft-trade-controls';
+
+const shopAircraftSellQuantityColumnEl = document.createElement('div');
+shopAircraftSellQuantityColumnEl.className = 'aircraft-trade-quantity-column';
+
+const shopAircraftSellQuantityInputEl = document.createElement('input');
+shopAircraftSellQuantityInputEl.type = 'number';
+shopAircraftSellQuantityInputEl.step = '1';
+shopAircraftSellQuantityInputEl.min = '0';
+shopAircraftSellQuantityInputEl.className = 'aircraft-quantity-input aircraft-trade-quantity-input';
+shopAircraftSellQuantityInputEl.setAttribute('aria-label', 'Aircraft sell quantity');
+
+function handleAircraftSellQuantityInputChanged() {
+  const rawValue = Number(shopAircraftSellQuantityInputEl.value);
+  const parsedValue = Number.isFinite(rawValue) && Number.isInteger(rawValue) ? rawValue : NaN;
+  aircraftSellQuantity = normalizeAircraftSellQuantity(parsedValue, aircraftMaxSellable);
+  refreshShopAircraftInteractionPanel(gameState.getState());
+}
+
+shopAircraftSellQuantityInputEl.addEventListener('input', handleAircraftSellQuantityInputChanged);
+shopAircraftSellQuantityInputEl.addEventListener('change', handleAircraftSellQuantityInputChanged);
+
+const shopAircraftSellButtonEl = document.createElement('button');
+shopAircraftSellButtonEl.type = 'button';
+shopAircraftSellButtonEl.className = 'airport-interaction-action-button shop-aircraft-sell-button shop-aircraft-trade-button';
+shopAircraftSellButtonEl.textContent = 'Sell';
+shopAircraftSellButtonEl.addEventListener('click', () => {
+  if (isAircraftSellPending || isAircraftSellQuotePending) {
+    return;
+  }
+
+  const selectedAircraft = getSelectedAircraftCatalogEntry(gameState.getState());
+  if (!selectedAircraft) {
+    return;
+  }
+
+  const normalizedSellQuantity = normalizeAircraftSellQuantity(aircraftSellQuantity, aircraftMaxSellable);
+  aircraftSellQuantity = normalizedSellQuantity;
+
+  if (normalizedSellQuantity < 1) {
+    refreshShopAircraftInteractionPanel(gameState.getState());
+    return;
+  }
+
+  const emitted = emitAircraftSellRequest(selectedAircraft.aircraftCatalogId, normalizedSellQuantity);
+  if (!emitted) {
+    return;
+  }
+
+  refreshShopAircraftInteractionPanel(gameState.getState());
+});
+
+const shopAircraftOwnedLabelEl = document.createElement('button');
+shopAircraftOwnedLabelEl.type = 'button';
+shopAircraftOwnedLabelEl.className = 'aircraft-quantity-max-label aircraft-trade-footnote-label';
+shopAircraftOwnedLabelEl.textContent = 'Owned 0';
+shopAircraftOwnedLabelEl.addEventListener('click', () => {
+  if (isAircraftSellPending || isAircraftSellQuotePending) {
+    return;
+  }
+
+  const normalizedOwnedMax = Number.isInteger(aircraftMaxSellable) && aircraftMaxSellable > 0
+    ? aircraftMaxSellable
+    : 0;
+  aircraftSellQuantity = normalizeAircraftSellQuantity(normalizedOwnedMax, aircraftMaxSellable);
+  refreshShopAircraftInteractionPanel(gameState.getState());
+});
+
+shopAircraftSellQuantityColumnEl.appendChild(shopAircraftSellQuantityInputEl);
+shopAircraftSellQuantityColumnEl.appendChild(shopAircraftOwnedLabelEl);
+shopAircraftSellControlsEl.appendChild(shopAircraftSellButtonEl);
+shopAircraftSellControlsEl.appendChild(shopAircraftSellQuantityColumnEl);
+
+shopAircraftSellSectionEl.appendChild(shopAircraftSellTotalRowEl);
+shopAircraftSellSectionEl.appendChild(shopAircraftSellControlsEl);
+
+shopAircraftTradeLayoutEl.appendChild(shopAircraftBuySectionEl);
+shopAircraftTradeLayoutEl.appendChild(shopAircraftSellSectionEl);
 
 shopAircraftSearchContainerEl.appendChild(shopAircraftSearchLabelEl);
 shopAircraftSearchContainerEl.appendChild(shopAircraftSearchInputEl);
@@ -495,8 +620,9 @@ shopAircraftPanelEl.appendChild(shopAircraftSearchContainerEl);
 shopAircraftDetailsEl.appendChild(shopAircraftTitleEl);
 shopAircraftDetailsEl.appendChild(shopAircraftPriceRowEl);
 shopAircraftDetailsEl.appendChild(shopAircraftRangeRowEl);
+shopAircraftDetailsEl.appendChild(shopAircraftTradeDividerEl);
+shopAircraftDetailsEl.appendChild(shopAircraftTradeLayoutEl);
 shopAircraftDetailsEl.appendChild(shopAircraftMessageEl);
-shopAircraftDetailsEl.appendChild(shopAircraftActionsEl);
 shopAircraftPanelEl.appendChild(shopAircraftDetailsEl);
 
 shopModalContentEl.appendChild(shopAirportsPanelEl);
@@ -553,12 +679,51 @@ function setSelectedAirportId(nextAirportId) {
 }
 
 function setSelectedAircraftCatalogId(nextAircraftCatalogId) {
-  selectedAircraftCatalogId = nextAircraftCatalogId ? String(nextAircraftCatalogId) : null;
+  const normalizedNextAircraftCatalogId = nextAircraftCatalogId ? String(nextAircraftCatalogId) : null;
+  const didSelectionChange = String(selectedAircraftCatalogId || '') !== String(normalizedNextAircraftCatalogId || '');
+
+  selectedAircraftCatalogId = normalizedNextAircraftCatalogId;
+
+  if (didSelectionChange) {
+    // Let the next authoritative purchase quote initialize the default quantity.
+    aircraftPurchaseQuantity = null;
+  }
+
   setShopModalSelectedAircraftCatalogId(selectedAircraftCatalogId);
 }
 
-function normalizeAircraftPurchaseQuantity(value, maxPurchasable) {
-  const normalizedMax = Number.isInteger(maxPurchasable) && maxPurchasable > 0 ? maxPurchasable : 0;
+function normalizeAircraftPurchaseQuantity(value) {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'string') {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) {
+      return null;
+    }
+
+    const parsedFromString = Number(trimmedValue);
+    if (!Number.isFinite(parsedFromString) || !Number.isInteger(parsedFromString)) {
+      return null;
+    }
+
+    value = parsedFromString;
+  }
+
+  if (!Number.isFinite(value) || !Number.isInteger(value)) {
+    return null;
+  }
+
+  if (value < 1) {
+    return 0;
+  }
+
+  return value;
+}
+
+function normalizeAircraftSellQuantity(value, maxSellable) {
+  const normalizedMax = Number.isInteger(maxSellable) && maxSellable > 0 ? maxSellable : 0;
   if (normalizedMax === 0) {
     return 0;
   }
@@ -583,11 +748,125 @@ function applyAuthoritativeAircraftMaxPurchasable(maxPurchasable, { initialize =
   aircraftMaxPurchasable = normalizedMax;
 
   if (initialize) {
+    aircraftPurchaseQuantity = null;
+    return;
+  }
+
+  const normalizedQuantity = normalizeAircraftPurchaseQuantity(aircraftPurchaseQuantity);
+  if (normalizedQuantity == null) {
     aircraftPurchaseQuantity = normalizedMax >= 1 ? 1 : 0;
     return;
   }
 
-  aircraftPurchaseQuantity = normalizeAircraftPurchaseQuantity(aircraftPurchaseQuantity, normalizedMax);
+  aircraftPurchaseQuantity = normalizedQuantity;
+}
+
+function applyAuthoritativeAircraftSellQuote(ownedQuantity, maxSellable, unitSellPrice, { initialize = false } = {}) {
+  const normalizedOwnedQuantity = Number.isInteger(ownedQuantity) && ownedQuantity >= 0 ? ownedQuantity : 0;
+  const normalizedMaxSellable = Number.isInteger(maxSellable) && maxSellable >= 0 ? maxSellable : 0;
+  const normalizedUnitSellPrice = Number.isFinite(unitSellPrice) && unitSellPrice >= 0 ? unitSellPrice : 0;
+
+  aircraftOwnedQuantity = normalizedOwnedQuantity;
+  aircraftMaxSellable = normalizedMaxSellable;
+  aircraftUnitSellPrice = normalizedUnitSellPrice;
+
+  if (initialize) {
+    aircraftSellQuantity = normalizedMaxSellable >= 1 ? 1 : 0;
+    return;
+  }
+
+  aircraftSellQuantity = normalizeAircraftSellQuantity(aircraftSellQuantity, normalizedMaxSellable);
+}
+
+function getSelectedAircraftOwnedQuantityFromAuthoritativeState(state, localPlayerId, aircraftCatalogId) {
+  const ownedAircraft = Array.isArray(state && state.game && state.game.ownedAircraft)
+    ? state.game.ownedAircraft
+    : [];
+  if (!localPlayerId || !aircraftCatalogId) {
+    return 0;
+  }
+
+  return ownedAircraft.reduce((count, ownedAircraftInstance) => {
+    if (!ownedAircraftInstance || ownedAircraftInstance.ownerPlayerId == null) {
+      return count;
+    }
+
+    const instanceAircraftCatalogId = String(ownedAircraftInstance.aircraftCatalogId || '');
+    const instanceOwnerPlayerId = String(ownedAircraftInstance.ownerPlayerId || '');
+    if (
+      instanceAircraftCatalogId !== String(aircraftCatalogId) ||
+      instanceOwnerPlayerId !== String(localPlayerId)
+    ) {
+      return count;
+    }
+
+    return count + 1;
+  }, 0);
+}
+
+function getSelectedAircraftEconomicsFingerprint(state) {
+  const normalizedState = state || gameState.getState();
+  const isInActiveGame =
+    normalizedState &&
+    normalizedState.ui &&
+    normalizedState.ui.screen === 'game' &&
+    normalizedState.session &&
+    normalizedState.session.currentGameId &&
+    normalizedState.game &&
+    normalizedState.game.status === 'active';
+  if (!isInActiveGame) {
+    return null;
+  }
+
+  const selectedAircraft = getSelectedAircraftCatalogEntry(normalizedState);
+  if (!selectedAircraft || !selectedAircraft.aircraftCatalogId) {
+    return null;
+  }
+
+  const localPlayerId = normalizedState && normalizedState.session ? normalizedState.session.playerId : null;
+  const localPlayer = getAuthoritativePlayerById(normalizedState, localPlayerId);
+  const capital = Number.isFinite(localPlayer && localPlayer.capital) ? localPlayer.capital : null;
+  const selectedAircraftCatalogId = String(selectedAircraft.aircraftCatalogId);
+  const selectedOwnedQuantity = getSelectedAircraftOwnedQuantityFromAuthoritativeState(
+    normalizedState,
+    localPlayerId,
+    selectedAircraftCatalogId
+  );
+
+  return `${selectedAircraftCatalogId}|${capital == null ? 'na' : capital}|${selectedOwnedQuantity}`;
+}
+
+function refreshSelectedAircraftEconomicsFromServer({ state = gameState.getState(), force = false } = {}) {
+  const fingerprint = getSelectedAircraftEconomicsFingerprint(state);
+  if (!fingerprint) {
+    lastSelectedAircraftEconomicsFingerprint = null;
+    return false;
+  }
+
+  if (!force && fingerprint === lastSelectedAircraftEconomicsFingerprint) {
+    return false;
+  }
+
+  // Avoid overlapping quote or mutation flows; success handlers will call this again when safe.
+  if (
+    isAircraftPurchasePending ||
+    isAircraftQuotePending ||
+    isAircraftSellPending ||
+    isAircraftSellQuotePending
+  ) {
+    return false;
+  }
+
+  const selectedAircraft = getSelectedAircraftCatalogEntry(state);
+  if (!selectedAircraft || !selectedAircraft.aircraftCatalogId) {
+    lastSelectedAircraftEconomicsFingerprint = null;
+    return false;
+  }
+
+  lastSelectedAircraftEconomicsFingerprint = fingerprint;
+  requestAircraftPurchaseQuote(selectedAircraft.aircraftCatalogId);
+  requestAircraftSellQuote(selectedAircraft.aircraftCatalogId);
+  return true;
 }
 
 function requestAircraftPurchaseQuote(aircraftCatalogId) {
@@ -617,6 +896,56 @@ function requestAircraftPurchaseQuote(aircraftCatalogId) {
     aircraftCatalogId: normalizedAircraftCatalogId,
     quoteOnly: true
   });
+}
+
+function requestAircraftSellQuote(aircraftCatalogId) {
+  const normalizedAircraftCatalogId = String(aircraftCatalogId || '').trim();
+  if (!normalizedAircraftCatalogId) {
+    isAircraftSellQuotePending = false;
+    pendingAircraftSellQuoteCatalogId = null;
+    applyAuthoritativeAircraftSellQuote(0, 0, 0, { initialize: true });
+    return;
+  }
+
+  const state = gameState.getState();
+  const isInGameScreen = state && state.ui && state.ui.screen === 'game';
+  if (!isInGameScreen) {
+    isAircraftSellQuotePending = false;
+    pendingAircraftSellQuoteCatalogId = null;
+    applyAuthoritativeAircraftSellQuote(0, 0, 0, { initialize: true });
+    return;
+  }
+
+  if (isAircraftSellPending || isAircraftSellQuotePending) {
+    return;
+  }
+
+  isAircraftSellQuotePending = true;
+  pendingAircraftSellQuoteCatalogId = normalizedAircraftCatalogId;
+
+  socket.emit('aircraft:sell:request', {
+    aircraftCatalogId: normalizedAircraftCatalogId,
+    quoteOnly: true
+  });
+}
+
+function emitAircraftSellRequest(aircraftCatalogId, quantity) {
+  const normalizedAircraftCatalogId = String(aircraftCatalogId || '').trim();
+  if (!normalizedAircraftCatalogId || isAircraftSellPending || isAircraftSellQuotePending) {
+    return false;
+  }
+
+  const normalizedSellQuantity = normalizeAircraftSellQuantity(quantity, aircraftMaxSellable);
+  if (!Number.isInteger(normalizedSellQuantity) || normalizedSellQuantity < 1) {
+    return false;
+  }
+
+  isAircraftSellPending = true;
+  socket.emit('aircraft:sell:request', {
+    aircraftCatalogId: normalizedAircraftCatalogId,
+    quantity: normalizedSellQuantity
+  });
+  return true;
 }
 
 function refreshShopModal(state = gameState.getState()) {
@@ -681,13 +1010,32 @@ function emitAirportListRequestWithPrompt(airportId) {
   socket.emit('airport:list:request', { airportId, askingPrice });
 }
 
-function createAirportActionButton(label, onClick) {
+function createAirportActionButton(label, onClick, { variant = 'default' } = {}) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'airport-interaction-action-button';
+  const classNames = ['airport-interaction-action-button'];
+  if (variant === 'buy' || variant === 'sell' || variant === 'list') {
+    classNames.push('shop-aircraft-trade-button');
+  }
+
+  if (variant === 'buy') {
+    classNames.push('shop-aircraft-buy-button');
+  } else if (variant === 'sell') {
+    classNames.push('shop-aircraft-sell-button');
+  } else if (variant === 'list') {
+    classNames.push('shop-aircraft-list-button');
+  }
+
+  button.className = classNames.join(' ');
   button.textContent = label;
   button.addEventListener('click', onClick);
   return button;
+}
+
+function isAirportOwnedByLocalPlayer(state, airport) {
+  const localPlayerId = state && state.session ? state.session.playerId : null;
+  const ownerPlayerId = airport && airport.ownerPlayerId;
+  return ownerPlayerId != null && localPlayerId != null && String(ownerPlayerId) === String(localPlayerId);
 }
 
 function setAirportInteractionFallbackContent({ titleEl, ownerValueEl, priceValueEl, actionsEl, messageEl }) {
@@ -874,6 +1222,7 @@ function createShopAircraftOptionButton(aircraft) {
     closeAircraftSearchResults({ clearQuery: true, blurInput: true });
     if (String(previousSelection || '') !== String(aircraftCatalogId || '')) {
       requestAircraftPurchaseQuote(aircraftCatalogId);
+      requestAircraftSellQuote(aircraftCatalogId);
     }
     refreshShopAircraftInteractionPanel(gameState.getState());
   });
@@ -927,16 +1276,15 @@ function renderShopAircraftSelectorList(state) {
 function renderAirportInteractionActions(state, airport, actionsEl) {
   actionsEl.innerHTML = '';
 
-  const localPlayerId = state && state.session ? state.session.playerId : null;
   const ownerPlayerId = airport.ownerPlayerId;
   const hasOwner = ownerPlayerId != null;
-  const isOwnedByLocalPlayer = hasOwner && localPlayerId != null && String(ownerPlayerId) === String(localPlayerId);
+  const isOwnedByLocalPlayer = isAirportOwnedByLocalPlayer(state, airport);
   const hasListing = !!(airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice));
   const airportId = String(airport.id || airport.iata);
 
   if (!hasOwner) {
     actionsEl.appendChild(
-      createAirportActionButton('Purchase', () => emitAirportPurchaseUnownedRequest(airportId))
+      createAirportActionButton('Buy', () => emitAirportPurchaseUnownedRequest(airportId), { variant: 'buy' })
     );
     return;
   }
@@ -944,33 +1292,60 @@ function renderAirportInteractionActions(state, airport, actionsEl) {
   if (isOwnedByLocalPlayer) {
     if (hasListing) {
       actionsEl.appendChild(
-        createAirportActionButton('Cancel Listing', () => emitAirportCancelListingRequest(airportId))
+        createAirportActionButton('Unlist', () => emitAirportCancelListingRequest(airportId), { variant: 'list' })
       );
     } else {
       actionsEl.appendChild(
-        createAirportActionButton('List', () => emitAirportListRequestWithPrompt(airportId))
+        createAirportActionButton('List', () => emitAirportListRequestWithPrompt(airportId), { variant: 'list' })
       );
     }
 
     actionsEl.appendChild(
-      createAirportActionButton('Sell to Game', () => emitAirportSellToGameRequest(airportId))
+      createAirportActionButton('Sell', () => emitAirportSellToGameRequest(airportId), { variant: 'sell' })
     );
     return;
   }
 
   if (hasListing) {
     actionsEl.appendChild(
-      createAirportActionButton('Purchase', () => emitAirportPurchaseListedRequest(airportId))
+      createAirportActionButton('Buy', () => emitAirportPurchaseListedRequest(airportId), { variant: 'buy' })
     );
   }
 }
 
-function renderAirportInteractionPrice(airport, priceValueEl) {
+function renderAirportInteractionPrice(state, airport, priceLabelEl, priceValueEl) {
   priceValueEl.innerHTML = '';
-  const basePrice = formatCurrencyValue(airport.basePrice);
-  const hasListingPrice =
-    airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice);
 
+  const isOwnedByLocalPlayer = isAirportOwnedByLocalPlayer(state, airport);
+  const hasListingPrice =
+    airport && airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice);
+
+  if (isOwnedByLocalPlayer && hasListingPrice) {
+    if (priceLabelEl) {
+      priceLabelEl.textContent = 'Listed Price:';
+    }
+
+    priceValueEl.textContent = formatCurrencyValue(airport.saleListing.askingPrice);
+    return;
+  }
+
+  if (isOwnedByLocalPlayer) {
+    if (priceLabelEl) {
+      priceLabelEl.textContent = 'Sell Price:';
+    }
+
+    const sellToGamePrice = Number.isFinite(airport && airport.sellToGamePrice)
+      ? airport.sellToGamePrice
+      : null;
+    priceValueEl.textContent = sellToGamePrice == null ? '-' : formatCurrencyValue(sellToGamePrice);
+    return;
+  }
+
+  if (priceLabelEl) {
+    priceLabelEl.textContent = 'Price:';
+  }
+
+  const basePrice = formatCurrencyValue(airport.basePrice);
   if (!hasListingPrice) {
     priceValueEl.textContent = basePrice;
     return;
@@ -1008,12 +1383,12 @@ function resolveAirportOwnerText(state, airport) {
   return ownerPlayer.isBot ? `[Bot] ${ownerPlayer.username}` : ownerPlayer.username;
 }
 
-function renderAirportInteractionContent({ titleEl, ownerValueEl, priceValueEl, actionsEl, messageEl }, state, airport) {
+function renderAirportInteractionContent({ titleEl, ownerValueEl, priceLabelEl, priceValueEl, actionsEl, messageEl }, state, airport) {
   const airportCode = airport.iata || airport.id || selectedAirportId;
   const airportName = airport.name || 'Unknown Airport';
   titleEl.textContent = `${airportName} (${airportCode})`;
   ownerValueEl.textContent = resolveAirportOwnerText(state, airport);
-  renderAirportInteractionPrice(airport, priceValueEl);
+  renderAirportInteractionPrice(state, airport, priceLabelEl, priceValueEl);
   renderAirportInteractionActions(state, airport, actionsEl);
   if (messageEl) {
     messageEl.textContent = '';
@@ -1024,11 +1399,21 @@ function setAircraftInteractionFallbackContent() {
   shopAircraftTitleEl.textContent = 'Select an aircraft';
   shopAircraftPriceValueEl.textContent = '-';
   shopAircraftRangeValueEl.textContent = '-';
+  shopAircraftBuyTotalValueEl.textContent = '-';
+  shopAircraftSellTotalValueEl.textContent = '-';
+  shopAircraftBuyTotalValueEl.classList.remove('aircraft-order-total-unaffordable');
   shopAircraftQuantityInputEl.value = '0';
   shopAircraftQuantityInputEl.disabled = true;
+  shopAircraftSellQuantityInputEl.value = '0';
+  shopAircraftSellQuantityInputEl.disabled = true;
   shopAircraftMaxLabelEl.textContent = 'Max 0';
+  shopAircraftMaxLabelEl.disabled = true;
+  shopAircraftOwnedLabelEl.textContent = 'Owned 0';
+  shopAircraftOwnedLabelEl.disabled = true;
   shopAircraftBuyButtonEl.disabled = true;
   shopAircraftBuyButtonEl.textContent = 'Buy';
+  shopAircraftSellButtonEl.disabled = true;
+  shopAircraftSellButtonEl.textContent = 'Sell';
   if (!shopAircraftMessageEl.textContent) {
     shopAircraftMessageEl.textContent = AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE;
   }
@@ -1062,7 +1447,10 @@ function refreshShopAircraftInteractionPanel(state) {
   if (!selectedAircraft) {
     isAircraftQuotePending = false;
     pendingAircraftQuoteCatalogId = null;
+    isAircraftSellQuotePending = false;
+    pendingAircraftSellQuoteCatalogId = null;
     applyAuthoritativeAircraftMaxPurchasable(0, { initialize: true });
+    applyAuthoritativeAircraftSellQuote(0, 0, 0, { initialize: true });
     setAircraftInteractionFallbackContent();
     shopAircraftDetailsEl.classList.add('hidden');
     return;
@@ -1074,17 +1462,41 @@ function refreshShopAircraftInteractionPanel(state) {
   shopAircraftPriceValueEl.textContent = formatCurrencyValue(selectedAircraft.purchasePrice);
   const rangeKm = Number.isFinite(selectedAircraft.rangeKm) ? selectedAircraft.rangeKm : 0;
   shopAircraftRangeValueEl.textContent = `${INTEGER_FORMATTER.format(rangeKm)} km`;
-  const normalizedQuantity = normalizeAircraftPurchaseQuantity(aircraftPurchaseQuantity, aircraftMaxPurchasable);
+  const normalizedQuantity = normalizeAircraftPurchaseQuantity(aircraftPurchaseQuantity);
   aircraftPurchaseQuantity = normalizedQuantity;
-  const canPurchaseAtLeastOne = normalizedQuantity >= 1;
-  const controlsDisabled = isAircraftPurchasePending || isAircraftQuotePending || !canPurchaseAtLeastOne;
+  const enteredQuantity = Number.isInteger(normalizedQuantity) ? normalizedQuantity : 0;
+  const unitPrice = Number.isFinite(selectedAircraft.purchasePrice) ? selectedAircraft.purchasePrice : 0;
+  const buyTotal = unitPrice * enteredQuantity;
+  shopAircraftBuyTotalValueEl.textContent = formatCurrencyValue(buyTotal);
+  const canAffordQuantity = enteredQuantity >= 1 && enteredQuantity <= aircraftMaxPurchasable;
+  const exceedsMaxPurchasable = enteredQuantity > aircraftMaxPurchasable;
+  const isBuyDisabled = isAircraftPurchasePending || isAircraftQuotePending || !canAffordQuantity;
+  shopAircraftBuyTotalValueEl.classList.toggle('aircraft-order-total-unaffordable', exceedsMaxPurchasable);
 
-  shopAircraftQuantityInputEl.value = String(normalizedQuantity);
-  shopAircraftQuantityInputEl.disabled = controlsDisabled;
+  shopAircraftQuantityInputEl.value = normalizedQuantity == null ? '' : String(normalizedQuantity);
+  shopAircraftQuantityInputEl.disabled = isAircraftPurchasePending || isAircraftQuotePending;
   shopAircraftMaxLabelEl.textContent = `Max ${INTEGER_FORMATTER.format(aircraftMaxPurchasable)}`;
+  shopAircraftMaxLabelEl.disabled = isAircraftPurchasePending || isAircraftQuotePending || aircraftMaxPurchasable < 1;
 
-  shopAircraftBuyButtonEl.disabled = controlsDisabled;
+  shopAircraftBuyButtonEl.disabled = isBuyDisabled;
   shopAircraftBuyButtonEl.textContent = isAircraftPurchasePending ? 'Buying...' : 'Buy';
+
+  const normalizedSellQuantity = normalizeAircraftSellQuantity(aircraftSellQuantity, aircraftMaxSellable);
+  aircraftSellQuantity = normalizedSellQuantity;
+  const sellTotal = aircraftUnitSellPrice * normalizedSellQuantity;
+  const canSellQuantity = normalizedSellQuantity >= 1 && normalizedSellQuantity <= aircraftMaxSellable;
+
+  shopAircraftSellTotalValueEl.textContent = formatCurrencyValue(sellTotal);
+  shopAircraftSellQuantityInputEl.value = String(normalizedSellQuantity);
+  shopAircraftSellQuantityInputEl.disabled =
+    isAircraftSellPending || isAircraftSellQuotePending || aircraftMaxSellable === 0;
+  shopAircraftSellButtonEl.disabled =
+    isAircraftSellPending || isAircraftSellQuotePending || !canSellQuantity;
+  shopAircraftSellButtonEl.textContent = isAircraftSellPending ? 'Selling...' : 'Sell';
+  shopAircraftOwnedLabelEl.textContent = `Owned ${INTEGER_FORMATTER.format(aircraftOwnedQuantity)}`;
+  shopAircraftOwnedLabelEl.disabled =
+    isAircraftSellPending || isAircraftSellQuotePending || aircraftMaxSellable < 1;
+
   if (shopAircraftMessageEl.textContent === AIRCRAFT_SELECTION_PLACEHOLDER_MESSAGE) {
     setAircraftSelectionMessage('', 'info');
   }
@@ -1123,6 +1535,7 @@ function refreshShopAirportInteractionPanel(state) {
   renderAirportInteractionContent({
     titleEl: shopAirportTitleEl,
     ownerValueEl: shopAirportOwnerValueEl,
+    priceLabelEl: shopAirportPriceLabelEl,
     priceValueEl: shopAirportPriceValueEl,
     actionsEl: shopAirportActionsEl,
     messageEl: shopAirportMessageEl
@@ -1398,7 +1811,11 @@ socket.on('disconnect', () => {
   isAircraftPurchasePending = false;
   isAircraftQuotePending = false;
   pendingAircraftQuoteCatalogId = null;
+  isAircraftSellPending = false;
+  isAircraftSellQuotePending = false;
+  pendingAircraftSellQuoteCatalogId = null;
   applyAuthoritativeAircraftMaxPurchasable(0, { initialize: true });
+  applyAuthoritativeAircraftSellQuote(0, 0, 0, { initialize: true });
   gameState.update(() => ({
     connection: { status: 'disconnected' },
     session: {
@@ -1475,7 +1892,11 @@ socket.on('game:left', ({ gameId, playerId }) => {
   isAircraftPurchasePending = false;
   isAircraftQuotePending = false;
   pendingAircraftQuoteCatalogId = null;
+  isAircraftSellPending = false;
+  isAircraftSellQuotePending = false;
+  pendingAircraftSellQuoteCatalogId = null;
   applyAuthoritativeAircraftMaxPurchasable(0, { initialize: true });
+  applyAuthoritativeAircraftSellQuote(0, 0, 0, { initialize: true });
   gameState.update(() => ({
     session: {
       joinPending: false,
@@ -1568,12 +1989,14 @@ function applyAuthoritativeGamePayload(payload) {
 socket.on('game:started', (payload) => {
   clearGameEventHistory();
   applyAuthoritativeGamePayload(payload);
+  refreshSelectedAircraftEconomicsFromServer({ state: gameState.getState() });
 
   console.log('Game started.');
 });
 
 socket.on('game:state', (payload) => {
   applyAuthoritativeGamePayload(payload);
+  refreshSelectedAircraftEconomicsFromServer({ state: gameState.getState() });
 });
 
 socket.on('game:event', (eventPayload) => {
@@ -1617,13 +2040,13 @@ socket.on('aircraft:purchase:result', (result = {}) => {
     }
 
     if (!result.success) {
-      applyAuthoritativeAircraftMaxPurchasable(0, { initialize: true });
+      applyAuthoritativeAircraftMaxPurchasable(0, { initialize: false });
       setAircraftSelectionMessage(result.message || 'Unable to load purchase availability.', 'error');
       refreshShopAircraftInteractionPanel(gameState.getState());
       return;
     }
 
-    applyAuthoritativeAircraftMaxPurchasable(result.maxPurchasable, { initialize: true });
+    applyAuthoritativeAircraftMaxPurchasable(result.maxPurchasable, { initialize: false });
     setAircraftSelectionMessage('', 'info');
     refreshShopAircraftInteractionPanel(gameState.getState());
     return;
@@ -1644,7 +2067,71 @@ socket.on('aircraft:purchase:result', (result = {}) => {
     return;
   }
 
+  refreshSelectedAircraftEconomicsFromServer({ force: true });
   setShopActiveTab(SHOP_MODAL_TAB.AIRCRAFT);
   setAircraftSelectionMessage('', 'info');
   refreshShopModal(gameState.getState());
+});
+
+socket.on('aircraft:sell:result', (result = {}) => {
+  const resultAircraftCatalogId = String(result.aircraftCatalogId || '');
+  const expectedQuoteCatalogId = String(pendingAircraftSellQuoteCatalogId || '');
+
+  if (
+    isAircraftSellQuotePending &&
+    !isAircraftSellPending &&
+    resultAircraftCatalogId &&
+    expectedQuoteCatalogId &&
+    resultAircraftCatalogId !== expectedQuoteCatalogId
+  ) {
+    return;
+  }
+
+  const isQuoteResponse =
+    isAircraftSellQuotePending &&
+    !isAircraftSellPending &&
+    (
+      (resultAircraftCatalogId && expectedQuoteCatalogId && resultAircraftCatalogId === expectedQuoteCatalogId) ||
+      (!result.success && !resultAircraftCatalogId)
+    );
+
+  if (isQuoteResponse) {
+    isAircraftSellQuotePending = false;
+    pendingAircraftSellQuoteCatalogId = null;
+
+    const selectedAircraft = getSelectedAircraftCatalogEntry(gameState.getState());
+    if (!selectedAircraft || String(selectedAircraft.aircraftCatalogId) !== resultAircraftCatalogId) {
+      refreshShopAircraftInteractionPanel(gameState.getState());
+      return;
+    }
+
+    if (!result.success) {
+      applyAuthoritativeAircraftSellQuote(0, 0, 0, { initialize: false });
+      refreshShopAircraftInteractionPanel(gameState.getState());
+      return;
+    }
+
+    applyAuthoritativeAircraftSellQuote(result.ownedQuantity, result.maxSellable, result.unitSellPrice, {
+      initialize: true
+    });
+    refreshShopAircraftInteractionPanel(gameState.getState());
+    return;
+  }
+
+  if (!isAircraftSellPending) {
+    return;
+  }
+
+  isAircraftSellPending = false;
+
+  if (!result.success) {
+    refreshShopAircraftInteractionPanel(gameState.getState());
+    return;
+  }
+
+  applyAuthoritativeAircraftSellQuote(result.ownedQuantity, result.maxSellable, result.unitSellPrice, {
+    initialize: false
+  });
+  refreshSelectedAircraftEconomicsFromServer({ force: true });
+  refreshShopAircraftInteractionPanel(gameState.getState());
 });

@@ -7,6 +7,15 @@ const AIRPORT_DEFINITIONS_BY_ID = AIRPORT_CATALOG.reduce((lookup, airport) => {
   return lookup;
 }, new Map());
 
+function calculateAirportSellToGamePrice(basePrice) {
+  const normalizedBasePrice = Number.isFinite(basePrice) ? basePrice : 0;
+  if (normalizedBasePrice < 0) {
+    return 0;
+  }
+
+  return Math.round(normalizedBasePrice * 0.8);
+}
+
 class Game {
   constructor(initialState, manager) {
     this.id = initialState.id;
@@ -310,6 +319,117 @@ class Game {
       unitPrice: context.purchasePrice,
       currentCapital: context.currentCapital,
       maxPurchasable: context.maxPurchasable
+    };
+  }
+
+  getAircraftSellQuote(playerId, aircraftCatalogId) {
+    const context = this.resolveAircraftPurchaseContext(playerId, aircraftCatalogId);
+    if (!context.success) {
+      return context;
+    }
+
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const ownedQuantity = ownedAircraft.reduce((count, aircraft) => {
+      if (!aircraft) {
+        return count;
+      }
+
+      const isOwnerMatch = String(aircraft.ownerPlayerId) === String(context.player.id);
+      const isCatalogMatch = String(aircraft.aircraftCatalogId) === String(context.aircraftDefinition.aircraftCatalogId);
+      return isOwnerMatch && isCatalogMatch ? count + 1 : count;
+    }, 0);
+    const unitSellPrice = Math.round(context.purchasePrice * 0.8);
+
+    return {
+      success: true,
+      code: 'OK',
+      aircraftCatalogId: context.aircraftDefinition.aircraftCatalogId,
+      ownedQuantity,
+      maxSellable: ownedQuantity,
+      unitSellPrice
+    };
+  }
+
+  sellAircraftToGame(playerId, aircraftCatalogId, quantity = 1) {
+    const sellQuote = this.getAircraftSellQuote(playerId, aircraftCatalogId);
+    if (!sellQuote.success) {
+      return sellQuote;
+    }
+
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return {
+        success: false,
+        code: 'INVALID_QUANTITY',
+        message: 'Quantity must be an integer greater than or equal to 1.',
+        aircraftCatalogId: sellQuote.aircraftCatalogId,
+        ownedQuantity: sellQuote.ownedQuantity,
+        maxSellable: sellQuote.maxSellable,
+        unitSellPrice: sellQuote.unitSellPrice
+      };
+    }
+
+    if (quantity > sellQuote.ownedQuantity) {
+      return {
+        success: false,
+        code: 'INSUFFICIENT_OWNED_QUANTITY',
+        message: 'Player does not own enough aircraft of this model to sell that quantity.',
+        aircraftCatalogId: sellQuote.aircraftCatalogId,
+        ownedQuantity: sellQuote.ownedQuantity,
+        maxSellable: sellQuote.maxSellable,
+        unitSellPrice: sellQuote.unitSellPrice
+      };
+    }
+
+    const context = this.resolveAircraftPurchaseContext(playerId, aircraftCatalogId);
+    if (!context.success) {
+      return context;
+    }
+
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    let remainingToSell = quantity;
+    const updatedOwnedAircraft = [];
+
+    ownedAircraft.forEach((aircraft) => {
+      if (!aircraft) {
+        updatedOwnedAircraft.push(aircraft);
+        return;
+      }
+
+      const isOwnerMatch = String(aircraft.ownerPlayerId) === String(context.player.id);
+      const isCatalogMatch = String(aircraft.aircraftCatalogId) === String(sellQuote.aircraftCatalogId);
+      const shouldSellThisInstance = remainingToSell > 0 && isOwnerMatch && isCatalogMatch;
+
+      if (shouldSellThisInstance) {
+        remainingToSell -= 1;
+        return;
+      }
+
+      updatedOwnedAircraft.push(aircraft);
+    });
+
+    const totalRefund = sellQuote.unitSellPrice * quantity;
+    const currentCapital = Number.isFinite(context.player.capital) ? context.player.capital : 0;
+    context.player.capital = currentCapital + totalRefund;
+    this.authoritativeState.ownedAircraft = updatedOwnedAircraft;
+
+    const remainingOwnedQuantity = sellQuote.ownedQuantity - quantity;
+
+    this.broadcastState();
+
+    return {
+      success: true,
+      code: 'OK',
+      aircraftCatalogId: sellQuote.aircraftCatalogId,
+      quantitySold: quantity,
+      unitSellPrice: sellQuote.unitSellPrice,
+      totalRefund,
+      ownedQuantity: remainingOwnedQuantity,
+      maxSellable: remainingOwnedQuantity,
+      updatedCapital: context.player.capital
     };
   }
 
@@ -622,7 +742,7 @@ class Game {
     }
 
     const basePrice = Number.isFinite(airportDefinition.basePrice) ? airportDefinition.basePrice : 0;
-    const refundAmount = Math.round(basePrice * 0.8);
+    const refundAmount = calculateAirportSellToGamePrice(basePrice);
     const currentCapital = Number.isFinite(player.capital) ? player.capital : 0;
 
     player.capital = currentCapital + refundAmount;
@@ -663,6 +783,7 @@ class Game {
         lng: definition.lng,
         size: definition.size,
         basePrice: definition.basePrice,
+        sellToGamePrice: calculateAirportSellToGamePrice(definition.basePrice),
         ownerPlayerId: airportState.ownerPlayerId ?? null,
         saleListing:
           airportState.saleListing && typeof airportState.saleListing === 'object'
@@ -742,6 +863,16 @@ class Game {
     }
 
     player.connected = false;
+
+    if (this.status === 'ended' && !player.isBot) {
+      const sourcePlayers = Array.isArray(this.authoritativeState.players)
+        ? this.authoritativeState.players
+        : [];
+      this.authoritativeState.players = sourcePlayers.filter((entry) => {
+        return !!entry && String(entry.id) !== String(playerId);
+      });
+    }
+
     this.broadcastState();
   }
 

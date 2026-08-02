@@ -1,6 +1,6 @@
 (function bootstrapMapModule(globalScope) {
   const CAMERA_BOUNDS = [[-60, -180], [84, 180]];
-  const BASEMAP_MAX_ZOOM = 7.5;
+  const BASEMAP_MAX_ZOOM = 5.85;
   const INITIAL_CENTER = [0, 20];
   const INITIAL_ZOOM = 2;
   const AIRPORT_ICON_SIZE = 48;
@@ -98,6 +98,8 @@
     let mapLoaded = false;
     let hasAppliedInitialCameraSetup = false;
     let hasBoundResizeListener = false;
+    let lastKnownContainerWidth = null;
+    let lastKnownContainerHeight = null;
     let airportSelectHandler = null;
     let activeHoveredAirportId = null;
     let latestGameSnapshot = null;
@@ -335,6 +337,25 @@
       hideAirportTooltip();
     }
 
+    function setNativeDraggingClass(isDragging, reason) {
+      if (!mapContainer) {
+        return;
+      }
+
+      mapContainer.classList.toggle('map-is-dragging', Boolean(isDragging));
+
+      if (isDragging || !reason) {
+        mapContainer.removeAttribute('data-drag-termination');
+        return;
+      }
+
+      mapContainer.setAttribute('data-drag-termination', String(reason));
+    }
+
+    function clearNativeDraggingState(reason) {
+      setNativeDraggingClass(false, reason);
+    }
+
     function createNativeAirportMarkerElement(markerId) {
       const markerElement = documentRef.createElement('div');
       markerElement.className = 'airport-marker-root';
@@ -461,12 +482,33 @@
       return !!mapContainer && mapContainer.clientWidth > 0 && mapContainer.clientHeight > 0;
     }
 
+    function resizeMapIfNeeded({ force = false } = {}) {
+      if (!mapInstance || !canMeasureViewport()) {
+        return false;
+      }
+
+      const currentWidth = mapContainer.clientWidth;
+      const currentHeight = mapContainer.clientHeight;
+      const sizeChanged =
+        lastKnownContainerWidth !== currentWidth ||
+        lastKnownContainerHeight !== currentHeight;
+
+      if (!force && !sizeChanged) {
+        return false;
+      }
+
+      mapInstance.resize();
+      lastKnownContainerWidth = currentWidth;
+      lastKnownContainerHeight = currentHeight;
+      return true;
+    }
+
     function applyInitialCameraSetupIfReady() {
       if (!mapInstance || !mapLoaded || hasAppliedInitialCameraSetup || !canMeasureViewport()) {
         return;
       }
 
-      mapInstance.resize();
+      resizeMapIfNeeded({ force: true });
       mapInstance.fitBounds(initialCameraBounds, {
         duration: 0,
         linear: true,
@@ -492,7 +534,47 @@
         attributionControl: true
       });
 
+      const canvasContainer = typeof mapInstance.getCanvasContainer === 'function'
+        ? mapInstance.getCanvasContainer()
+        : null;
+
+      const handlePointerCancel = () => {
+        clearNativeDraggingState('pointercancel');
+      };
+
+      const handleTouchCancel = () => {
+        clearNativeDraggingState('touchcancel');
+      };
+
+      const handleWindowBlur = () => {
+        clearNativeDraggingState('blur');
+      };
+
       applyMobileRotationLockToMapLibre(mapInstance);
+
+      mapInstance.on('dragstart', () => {
+        setNativeDraggingClass(true);
+      });
+
+      mapInstance.on('dragend', () => {
+        clearNativeDraggingState('dragend');
+      });
+
+      mapInstance.on('remove', () => {
+        clearNativeDraggingState('remove');
+        globalScope.removeEventListener('blur', handleWindowBlur);
+        if (canvasContainer) {
+          canvasContainer.removeEventListener('pointercancel', handlePointerCancel);
+          canvasContainer.removeEventListener('touchcancel', handleTouchCancel);
+        }
+      });
+
+      if (canvasContainer) {
+        canvasContainer.addEventListener('pointercancel', handlePointerCancel);
+        canvasContainer.addEventListener('touchcancel', handleTouchCancel);
+      }
+
+      globalScope.addEventListener('blur', handleWindowBlur);
 
       mapInstance.once('load', () => {
         mapLoaded = true;
@@ -501,7 +583,7 @@
             return;
           }
 
-          mapInstance.resize();
+          resizeMapIfNeeded({ force: true });
           applyInitialCameraSetupIfReady();
         });
       });
@@ -522,7 +604,7 @@
             return;
           }
 
-          mapInstance.resize();
+          resizeMapIfNeeded({ force: true });
         });
         hasBoundResizeListener = true;
       }
@@ -535,6 +617,7 @@
         if (mapContainer) {
           mapContainer.classList.remove('map-visible');
         }
+        clearNativeDraggingState('screen-hidden');
         if (mapInstance) {
           clearAirportMarkers();
         }
@@ -548,7 +631,7 @@
 
       mapContainer.classList.add('map-visible');
       latestGameSnapshot = state.game || null;
-      map.resize();
+  resizeMapIfNeeded();
       applyInitialCameraSetupIfReady();
       syncAirportMarkers(state.game && state.game.airports);
       refreshAirportTooltip();

@@ -61,6 +61,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
           lng: -79.6248,
           size: 'large',
           basePrice: 300000,
+          sellToGamePrice: 240000,
           ownerPlayerId: null,
           saleListing: null
         }
@@ -174,6 +175,7 @@ test('game:started public payload includes airport definition plus game-owned mu
       lng: -79.6248,
       size: 'large',
       basePrice: 300000,
+      sellToGamePrice: 240000,
       ownerPlayerId: null,
       saleListing: null
     }
@@ -221,6 +223,7 @@ test('unknown airport IDs in game state are skipped with warning during public p
     assert.equal(payload.game.airports.length, 1);
     assert.equal(payload.game.airports[0].id, 'YYZ');
     assert.equal(payload.game.airports[0].basePrice, 300000);
+    assert.equal(payload.game.airports[0].sellToGamePrice, 240000);
     assert.equal(payload.game.airports[0].saleListing, null);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /unknown airport ID/i);

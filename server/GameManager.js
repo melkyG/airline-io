@@ -3,6 +3,42 @@ const Player = require('./Player');
 const Lobby = require('./Lobby');
 const Game = require('./Game');
 const { createGame } = require('./gameFactory');
+const { AIRCRAFT_CATALOG_BY_ID } = require('./aircraft/catalog');
+const { FULL_AIRPORT_CATALOG } = require('./airports/catalog');
+
+const AIRPORT_CATALOG_BY_ID = Object.freeze(
+  FULL_AIRPORT_CATALOG.reduce((lookup, airport) => {
+    if (!airport || typeof airport.id !== 'string' || airport.id.trim().length === 0) {
+      return lookup;
+    }
+
+    lookup[airport.id] = airport;
+    return lookup;
+  }, {})
+);
+
+function resolveAirportAssetName(airportId) {
+  const airportDefinition = AIRPORT_CATALOG_BY_ID[String(airportId || '')] || null;
+  if (airportDefinition && typeof airportDefinition.name === 'string' && airportDefinition.name.trim().length > 0) {
+    return airportDefinition.name.trim();
+  }
+
+  return String(airportId || 'Airport');
+}
+
+function resolvePlayerDisplayNameFromGame(game, playerId) {
+  const authoritativePlayers =
+    game && game.authoritativeState && Array.isArray(game.authoritativeState.players)
+      ? game.authoritativeState.players
+      : [];
+
+  const matched = authoritativePlayers.find((player) => player && player.id === playerId);
+  if (matched && typeof matched.username === 'string' && matched.username.trim().length > 0) {
+    return matched.username.trim();
+  }
+
+  return String(playerId || 'Player');
+}
 
 const SILLY_ADJECTIVES = Object.freeze([
   'Silly',
@@ -900,7 +936,26 @@ class GameManager {
       };
     }
 
-    return this.handleAirportPurchaseRequest(socketId, airportId);
+    const result = this.handleAirportPurchaseRequest(socketId, airportId);
+
+    if (result && result.success) {
+      const player = this.players.get(socketId);
+      const assetName = resolveAirportAssetName(result.airportId);
+
+      this.emitGameEventToPlayer(socketId, 'asset:transaction', {
+        action: 'purchased-from-game',
+        assetType: 'airport',
+        assetId: result.airportId,
+        assetName,
+        quantity: 1,
+        totalAmount: result.pricePaid
+      }, {
+        gameId: player && player.gameId ? player.gameId : null,
+        actorPlayerId: player && player.id ? player.id : socketId
+      });
+    }
+
+    return result;
   }
 
   handleAirportListingRequest(socketId, airportId, askingPrice) {
@@ -955,7 +1010,25 @@ class GameManager {
       };
     }
 
-    return this.handleAirportListingRequest(socketId, airportId, askingPrice);
+    const result = this.handleAirportListingRequest(socketId, airportId, askingPrice);
+
+    if (result && result.success) {
+      const player = this.players.get(socketId);
+      const assetName = resolveAirportAssetName(result.airportId);
+
+      this.emitGameEventToPlayer(socketId, 'asset:listing', {
+        action: 'listed',
+        assetType: 'airport',
+        assetId: result.airportId,
+        assetName,
+        askingPrice
+      }, {
+        gameId: player && player.gameId ? player.gameId : null,
+        actorPlayerId: player && player.id ? player.id : socketId
+      });
+    }
+
+    return result;
   }
 
   handleAirportListingCancelRequest(socketId, airportId) {
@@ -1047,7 +1120,53 @@ class GameManager {
       };
     }
 
-    return this.handleAirportListedPurchaseRequest(socketId, airportId);
+    const result = this.handleAirportListedPurchaseRequest(socketId, airportId);
+
+    if (result && result.success) {
+      const buyerPlayer = this.players.get(socketId);
+      const gameId = buyerPlayer && buyerPlayer.gameId ? buyerPlayer.gameId : null;
+      const game = gameId ? this.games.get(gameId) : null;
+      const assetName = resolveAirportAssetName(result.airportId);
+      const buyerName = resolvePlayerDisplayNameFromGame(game, result.buyerPlayerId);
+      const sellerName = resolvePlayerDisplayNameFromGame(game, result.sellerPlayerId);
+
+      this.emitGameEventToPlayer(socketId, 'asset:transaction', {
+        action: 'purchased-from-player',
+        assetType: 'airport',
+        assetId: result.airportId,
+        assetName,
+        quantity: 1,
+        totalAmount: result.pricePaid,
+        counterpartyPlayerId: result.sellerPlayerId,
+        counterpartyName: sellerName
+      }, {
+        gameId,
+        actorPlayerId: result.buyerPlayerId
+      });
+
+      const sellerSocketEntry = Array.from(this.players.entries()).find(([, player]) => {
+        return player && player.id === result.sellerPlayerId && player.gameId === gameId;
+      });
+
+      if (sellerSocketEntry) {
+        const [sellerSocketId] = sellerSocketEntry;
+        this.emitGameEventToPlayer(sellerSocketId, 'asset:transaction', {
+          action: 'sold-to-player',
+          assetType: 'airport',
+          assetId: result.airportId,
+          assetName,
+          quantity: 1,
+          totalAmount: result.pricePaid,
+          counterpartyPlayerId: result.buyerPlayerId,
+          counterpartyName: buyerName
+        }, {
+          gameId,
+          actorPlayerId: result.sellerPlayerId
+        });
+      }
+    }
+
+    return result;
   }
 
   handleAirportSellToGameRequest(socketId, airportId) {
@@ -1093,7 +1212,26 @@ class GameManager {
       };
     }
 
-    return this.handleAirportSellToGameRequest(socketId, airportId);
+    const result = this.handleAirportSellToGameRequest(socketId, airportId);
+
+    if (result && result.success) {
+      const player = this.players.get(socketId);
+      const assetName = resolveAirportAssetName(result.airportId);
+
+      this.emitGameEventToPlayer(socketId, 'asset:transaction', {
+        action: 'sold-to-game',
+        assetType: 'airport',
+        assetId: result.airportId,
+        assetName,
+        quantity: 1,
+        totalAmount: result.refundAmount
+      }, {
+        gameId: player && player.gameId ? player.gameId : null,
+        actorPlayerId: player && player.id ? player.id : socketId
+      });
+    }
+
+    return result;
   }
 
   handleAircraftPurchaseRequest(socketId, aircraftCatalogId, quantity = 1) {
@@ -1158,6 +1296,68 @@ class GameManager {
     return game.getAircraftPurchaseQuote(player.id, aircraftCatalogId);
   }
 
+  handleAircraftSellQuoteRequest(socketId, aircraftCatalogId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.getAircraftSellQuote(player.id, aircraftCatalogId);
+  }
+
+  handleAircraftSellRequest(socketId, aircraftCatalogId, quantity = 1) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.sellAircraftToGame(player.id, aircraftCatalogId, quantity);
+  }
+
   emitGameEventToPlayer(socketId, eventType, data, options = {}) {
     if (typeof socketId !== 'string' || socketId.trim().length === 0) {
       return false;
@@ -1201,7 +1401,62 @@ class GameManager {
 
     if (result && result.success) {
       const player = this.players.get(socketId);
-      this.emitGameEventToPlayer(socketId, 'aircraft:purchase:succeeded', result, {
+      const aircraftDefinition = AIRCRAFT_CATALOG_BY_ID[String(result.aircraftCatalogId || '')] || null;
+      const assetName = aircraftDefinition
+        ? `${aircraftDefinition.manufacturer} ${aircraftDefinition.model}`
+        : String(result.aircraftCatalogId || 'Aircraft');
+
+      this.emitGameEventToPlayer(socketId, 'asset:transaction', {
+        action: 'purchased-from-game',
+        assetType: 'aircraft',
+        assetId: result.aircraftCatalogId,
+        assetName,
+        quantity: result.quantityPurchased,
+        totalAmount: result.pricePaid
+      }, {
+        gameId: player && player.gameId ? player.gameId : null,
+        actorPlayerId: player && player.id ? player.id : socketId
+      });
+    }
+
+    return result;
+  }
+
+  handleAircraftSellSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const aircraftCatalogId = requestPayload ? requestPayload.aircraftCatalogId : undefined;
+    const quantity = requestPayload && requestPayload.quantity !== undefined ? requestPayload.quantity : 1;
+    const quoteOnly = Boolean(requestPayload && requestPayload.quoteOnly === true);
+
+    if (typeof aircraftCatalogId !== 'string' || aircraftCatalogId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'AIRCRAFT_NOT_FOUND',
+        message: 'Aircraft was not found.'
+      };
+    }
+
+    if (quoteOnly) {
+      return this.handleAircraftSellQuoteRequest(socketId, aircraftCatalogId);
+    }
+
+    const result = this.handleAircraftSellRequest(socketId, aircraftCatalogId, quantity);
+
+    if (result && result.success) {
+      const player = this.players.get(socketId);
+      const aircraftDefinition = AIRCRAFT_CATALOG_BY_ID[String(result.aircraftCatalogId || '')] || null;
+      const assetName = aircraftDefinition
+        ? `${aircraftDefinition.manufacturer} ${aircraftDefinition.model}`
+        : String(result.aircraftCatalogId || 'Aircraft');
+
+      this.emitGameEventToPlayer(socketId, 'asset:transaction', {
+        action: 'sold-to-game',
+        assetType: 'aircraft',
+        assetId: result.aircraftCatalogId,
+        assetName,
+        quantity: result.quantitySold,
+        totalAmount: result.totalRefund
+      }, {
         gameId: player && player.gameId ? player.gameId : null,
         actorPlayerId: player && player.id ? player.id : socketId
       });

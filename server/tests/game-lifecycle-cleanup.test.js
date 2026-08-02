@@ -330,6 +330,54 @@ test('ended game survives while at least one connected human remains before rete
   assert.equal(manager.endedGameRetentionTimeoutIds.has(game.id), true);
 });
 
+test('ended game disconnect removes only the departed real player from live players while preserving final results snapshot', () => {
+  const { io, emitted } = createIoCapture();
+  const timerApi = createFakeTimerApi();
+  const manager = new GameManager(io, { timerApi });
+  const { game, humans, bots } = createManagedGame({
+    manager,
+    gameId: 'ended-live-leaderboard-prunes-disconnect',
+    humanCount: 2,
+    connectedHumanCount: 2,
+    botCount: 1,
+    scoreToWin: 100,
+    humanScores: [100, 0]
+  });
+
+  game.initialize();
+  const standingsBeforeDisconnect = game.authoritativeState.results.standings.map((entry) => entry.id);
+
+  manager.handleDisconnect(humans[0].id);
+
+  assert.equal(game.status, 'ended');
+  assert.equal(manager.games.has(game.id), true);
+  assert.equal(manager.getConnectedRealHumansInGame(game), 1);
+  assert.equal(manager.endedGameRetentionTimeoutIds.has(game.id), true);
+
+  assert.deepEqual(
+    game.authoritativeState.players.map((player) => player.id),
+    [humans[1].id, bots[0].id]
+  );
+
+  assert.deepEqual(
+    game.authoritativeState.results.standings.map((entry) => entry.id),
+    standingsBeforeDisconnect
+  );
+
+  const latestGameStateEvent = emitted
+    .filter((entry) => entry.eventName === 'game:state')
+    .at(-1);
+  assert.ok(latestGameStateEvent);
+  assert.deepEqual(
+    latestGameStateEvent.payload.game.players.map((player) => player.id),
+    [humans[1].id, bots[0].id]
+  );
+  assert.deepEqual(
+    latestGameStateEvent.payload.game.results.standings.map((entry) => entry.id),
+    standingsBeforeDisconnect
+  );
+});
+
 test('five-minute retention expiry destroys ended game', () => {
   const { io } = createIoCapture();
   const timerApi = createFakeTimerApi();
