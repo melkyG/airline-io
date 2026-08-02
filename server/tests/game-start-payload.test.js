@@ -64,7 +64,8 @@ test('game:started public payload includes authoritative game wrapper', () => {
           originAirportId: 'YYZ',
           destinationAirportId: 'JFK',
           distanceKm: 550,
-          assignedAircraftInstanceIds: ['acft-1', 'acft-2']
+          assignedAircraftInstanceIds: ['acft-1', 'acft-2'],
+          activeFlightsCount: 2
         }
       ],
       aircraftCatalog: AIRCRAFT_CATALOG.map((aircraft) => ({

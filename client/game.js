@@ -47,6 +47,23 @@ let isRouteCreatePending = false;
 let routeCreateErrorMessage = '';
 let pendingRouteRemoveRouteId = null;
 let routeRemoveErrorMessage = '';
+let selectedRouteAircraftManagementRouteId = null;
+let pendingRouteAircraftAssignAircraftInstanceId = null;
+let pendingRouteAircraftUnassignAircraftInstanceId = null;
+let routeAircraftManagementErrorMessage = '';
+let routeAircraftManagementFeedbackKind = 'error';
+let routeAircraftAssignQuantityByCatalogId = new Map();
+let routeAircraftUnassignQuantityByCatalogId = new Map();
+let routeAircraftAssignQuantityInputByCatalogId = new Map();
+let routeAircraftUnassignQuantityInputByCatalogId = new Map();
+let routeAircraftAssignMaxByCatalogId = new Map();
+let routeAircraftUnassignMaxByCatalogId = new Map();
+let routeAvailableAircraftGroupByCatalogId = new Map();
+let routeAssignedAircraftGroupByCatalogId = new Map();
+let routeAvailableAircraftRowByCatalogId = new Map();
+let routeAssignedAircraftRowByCatalogId = new Map();
+let lastRenderedRouteAircraftManagementRouteId = null;
+let routeAircraftBulkOperation = null;
 
 const SHOP_MODAL_TAB = Object.freeze({
   AIRCRAFT: 'aircraft',
@@ -80,6 +97,7 @@ const ShopModalState = {
 const RoutesModalState = {
   isOpen: false,
   isCreateRouteOpen: false,
+  isAircraftManagementOpen: false,
   openedFrom: null
 };
 
@@ -101,6 +119,17 @@ function openShopModal({ openedFrom = SHOP_MODAL_OPENED_FROM.HUD } = {}) {
 function openRoutesModal({ openedFrom = ROUTES_MODAL_OPENED_FROM.HUD } = {}) {
   RoutesModalState.isOpen = true;
   RoutesModalState.isCreateRouteOpen = false;
+  RoutesModalState.isAircraftManagementOpen = false;
+  selectedRouteAircraftManagementRouteId = null;
+  routeAircraftAssignQuantityByCatalogId = new Map();
+  routeAircraftUnassignQuantityByCatalogId = new Map();
+  routeAircraftAssignQuantityInputByCatalogId = new Map();
+  routeAircraftUnassignQuantityInputByCatalogId = new Map();
+  routeAircraftAssignMaxByCatalogId = new Map();
+  routeAircraftUnassignMaxByCatalogId = new Map();
+  resetRouteAircraftManagementRowCaches();
+  routeAircraftBulkOperation = null;
+  routeAircraftManagementFeedbackKind = 'error';
   RoutesModalState.openedFrom = openedFrom;
   refreshRoutesModal(gameState.getState());
 }
@@ -110,7 +139,35 @@ function openCreateRouteModal() {
     return;
   }
 
+  RoutesModalState.isAircraftManagementOpen = false;
+  selectedRouteAircraftManagementRouteId = null;
   RoutesModalState.isCreateRouteOpen = true;
+  refreshRoutesModal(gameState.getState());
+}
+
+function openRouteAircraftManagementModal(routeId) {
+  if (!RoutesModalState.isOpen) {
+    return;
+  }
+
+  const normalizedRouteId = String(routeId || '').trim();
+  if (!normalizedRouteId) {
+    return;
+  }
+
+  selectedRouteAircraftManagementRouteId = normalizedRouteId;
+  RoutesModalState.isCreateRouteOpen = false;
+  RoutesModalState.isAircraftManagementOpen = true;
+  routeAircraftAssignQuantityByCatalogId = new Map();
+  routeAircraftUnassignQuantityByCatalogId = new Map();
+  routeAircraftAssignQuantityInputByCatalogId = new Map();
+  routeAircraftUnassignQuantityInputByCatalogId = new Map();
+  routeAircraftAssignMaxByCatalogId = new Map();
+  routeAircraftUnassignMaxByCatalogId = new Map();
+  resetRouteAircraftManagementRowCaches();
+  routeAircraftBulkOperation = null;
+  routeAircraftManagementFeedbackKind = 'error';
+  routeAircraftManagementErrorMessage = '';
   refreshRoutesModal(gameState.getState());
 }
 
@@ -125,6 +182,20 @@ function closeShopModal() {
 function closeRoutesModal() {
   RoutesModalState.isOpen = false;
   RoutesModalState.isCreateRouteOpen = false;
+  RoutesModalState.isAircraftManagementOpen = false;
+  selectedRouteAircraftManagementRouteId = null;
+  pendingRouteAircraftAssignAircraftInstanceId = null;
+  pendingRouteAircraftUnassignAircraftInstanceId = null;
+  routeAircraftManagementErrorMessage = '';
+  routeAircraftManagementFeedbackKind = 'error';
+  routeAircraftAssignQuantityByCatalogId = new Map();
+  routeAircraftUnassignQuantityByCatalogId = new Map();
+  routeAircraftAssignQuantityInputByCatalogId = new Map();
+  routeAircraftUnassignQuantityInputByCatalogId = new Map();
+  routeAircraftAssignMaxByCatalogId = new Map();
+  routeAircraftUnassignMaxByCatalogId = new Map();
+  resetRouteAircraftManagementRowCaches();
+  routeAircraftBulkOperation = null;
   RoutesModalState.openedFrom = null;
   refreshRoutesModal(gameState.getState());
 }
@@ -132,6 +203,31 @@ function closeRoutesModal() {
 function closeCreateRouteModal() {
   RoutesModalState.isCreateRouteOpen = false;
   refreshRoutesModal(gameState.getState());
+}
+
+function closeRouteAircraftManagementModal() {
+  RoutesModalState.isAircraftManagementOpen = false;
+  pendingRouteAircraftAssignAircraftInstanceId = null;
+  pendingRouteAircraftUnassignAircraftInstanceId = null;
+  routeAircraftManagementErrorMessage = '';
+  routeAircraftManagementFeedbackKind = 'error';
+  routeAircraftAssignQuantityByCatalogId = new Map();
+  routeAircraftUnassignQuantityByCatalogId = new Map();
+  routeAircraftAssignQuantityInputByCatalogId = new Map();
+  routeAircraftUnassignQuantityInputByCatalogId = new Map();
+  routeAircraftAssignMaxByCatalogId = new Map();
+  routeAircraftUnassignMaxByCatalogId = new Map();
+  routeAircraftBulkOperation = null;
+  resetRouteAircraftManagementRowCaches();
+  refreshRoutesModal(gameState.getState());
+}
+
+function resetRouteAircraftManagementRowCaches() {
+  routeAvailableAircraftGroupByCatalogId = new Map();
+  routeAssignedAircraftGroupByCatalogId = new Map();
+  routeAvailableAircraftRowByCatalogId = new Map();
+  routeAssignedAircraftRowByCatalogId = new Map();
+  lastRenderedRouteAircraftManagementRouteId = null;
 }
 
 function setShopModalOpenedFrom(openedFrom) {
@@ -601,10 +697,75 @@ createRouteModalDialogEl.appendChild(createRouteModalTitleEl);
 createRouteModalDialogEl.appendChild(createRouteModalContentEl);
 createRouteModalOverlayEl.appendChild(createRouteModalDialogEl);
 
+const routeAircraftManagementModalOverlayEl = document.createElement('div');
+routeAircraftManagementModalOverlayEl.className = 'shop-modal-overlay routes-aircraft-modal-overlay hidden';
+routeAircraftManagementModalOverlayEl.setAttribute('aria-hidden', 'true');
+
+const routeAircraftManagementModalDialogEl = document.createElement('div');
+routeAircraftManagementModalDialogEl.className = 'shop-modal routes-modal routes-aircraft-modal';
+routeAircraftManagementModalDialogEl.setAttribute('role', 'dialog');
+routeAircraftManagementModalDialogEl.setAttribute('aria-modal', 'true');
+
+const routeAircraftManagementModalCloseButtonEl = document.createElement('button');
+routeAircraftManagementModalCloseButtonEl.type = 'button';
+routeAircraftManagementModalCloseButtonEl.className = 'shop-modal-close';
+routeAircraftManagementModalCloseButtonEl.setAttribute('aria-label', 'Close route aircraft management modal');
+routeAircraftManagementModalCloseButtonEl.textContent = 'x';
+
+const routeAircraftManagementModalTitleEl = document.createElement('h3');
+routeAircraftManagementModalTitleEl.className = 'shop-modal-title';
+routeAircraftManagementModalTitleEl.textContent = '-';
+
+const routeAircraftManagementModalContentEl = document.createElement('div');
+routeAircraftManagementModalContentEl.className = 'shop-modal-content routes-modal-content';
+
+const routeAircraftManagementFeedbackEl = document.createElement('p');
+routeAircraftManagementFeedbackEl.className = 'airport-interaction-row routes-aircraft-management-feedback hidden';
+
+const routeAvailableAircraftSectionEl = document.createElement('section');
+routeAvailableAircraftSectionEl.className = 'routes-aircraft-section';
+
+const routeAvailableAircraftTitleEl = document.createElement('h4');
+routeAvailableAircraftTitleEl.className = 'routes-modal-section-title';
+routeAvailableAircraftTitleEl.textContent = 'Available Aircraft';
+
+const routeAvailableAircraftListEl = document.createElement('div');
+routeAvailableAircraftListEl.className = 'routes-aircraft-group-list';
+
+routeAvailableAircraftSectionEl.appendChild(routeAvailableAircraftTitleEl);
+routeAvailableAircraftSectionEl.appendChild(routeAvailableAircraftListEl);
+
+const routeAircraftSectionsDividerEl = document.createElement('div');
+routeAircraftSectionsDividerEl.className = 'routes-aircraft-sections-divider';
+
+const routeAssignedAircraftSectionEl = document.createElement('section');
+routeAssignedAircraftSectionEl.className = 'routes-aircraft-section';
+
+const routeAssignedAircraftTitleEl = document.createElement('h4');
+routeAssignedAircraftTitleEl.className = 'routes-modal-section-title';
+routeAssignedAircraftTitleEl.textContent = 'Assigned Aircraft';
+
+const routeAssignedAircraftListEl = document.createElement('div');
+routeAssignedAircraftListEl.className = 'routes-aircraft-group-list';
+
+routeAssignedAircraftSectionEl.appendChild(routeAssignedAircraftTitleEl);
+routeAssignedAircraftSectionEl.appendChild(routeAssignedAircraftListEl);
+
+routeAircraftManagementModalContentEl.appendChild(routeAircraftManagementFeedbackEl);
+routeAircraftManagementModalContentEl.appendChild(routeAvailableAircraftSectionEl);
+routeAircraftManagementModalContentEl.appendChild(routeAircraftSectionsDividerEl);
+routeAircraftManagementModalContentEl.appendChild(routeAssignedAircraftSectionEl);
+
+routeAircraftManagementModalDialogEl.appendChild(routeAircraftManagementModalCloseButtonEl);
+routeAircraftManagementModalDialogEl.appendChild(routeAircraftManagementModalTitleEl);
+routeAircraftManagementModalDialogEl.appendChild(routeAircraftManagementModalContentEl);
+routeAircraftManagementModalOverlayEl.appendChild(routeAircraftManagementModalDialogEl);
+
 if (gameScreenEl) {
   gameScreenEl.appendChild(hudBottomRightStackEl);
   gameScreenEl.appendChild(routesModalOverlayEl);
   gameScreenEl.appendChild(createRouteModalOverlayEl);
+  gameScreenEl.appendChild(routeAircraftManagementModalOverlayEl);
 }
 
 isRoutesModalDomReady = Boolean(gameScreenEl);
@@ -1326,6 +1487,11 @@ function refreshRoutesHudButton(state = gameState.getState()) {
   if (!isInActiveGame && RoutesModalState.isOpen) {
     RoutesModalState.isOpen = false;
     RoutesModalState.isCreateRouteOpen = false;
+    RoutesModalState.isAircraftManagementOpen = false;
+    selectedRouteAircraftManagementRouteId = null;
+    pendingRouteAircraftAssignAircraftInstanceId = null;
+    pendingRouteAircraftUnassignAircraftInstanceId = null;
+    routeAircraftManagementErrorMessage = '';
     RoutesModalState.openedFrom = null;
   }
 }
@@ -1397,13 +1563,14 @@ function refreshRoutesModal(state = gameState.getState()) {
 
       const originAirport = airportLookupById.get(String(route.originAirportId || '')) || null;
       const destinationAirport = airportLookupById.get(String(route.destinationAirportId || '')) || null;
-      const originName = originAirport ? getAirportDisplayName(originAirport) : String(route.originAirportId || 'Unknown');
-      const destinationName = destinationAirport
-        ? getAirportDisplayName(destinationAirport)
-        : String(route.destinationAirportId || 'Unknown');
+      const originCode = getAirportCodeForRouteCard(originAirport, route.originAirportId);
+      const destinationCode = getAirportCodeForRouteCard(destinationAirport, route.destinationAirportId);
       const distanceText = Number.isFinite(route.distanceKm)
         ? `${INTEGER_FORMATTER.format(route.distanceKm)} km`
         : '-';
+      const activeFlightsCount = Number.isFinite(route.activeFlightsCount)
+        ? Math.max(0, route.activeFlightsCount)
+        : 0;
 
       const routeItemEl = document.createElement('div');
       routeItemEl.className = 'routes-list-item';
@@ -1413,14 +1580,42 @@ function refreshRoutesModal(state = gameState.getState()) {
 
       const routeTitleEl = document.createElement('p');
       routeTitleEl.className = 'routes-list-route';
-      routeTitleEl.textContent = `${originName} -> ${destinationName}`;
+      routeTitleEl.textContent = `${originCode} → ${destinationCode}`;
 
       const routeMetaEl = document.createElement('p');
       routeMetaEl.className = 'routes-list-meta';
-      routeMetaEl.textContent = `Distance: ${distanceText}`;
+
+      const routeDistanceMetaEl = document.createElement('span');
+      routeDistanceMetaEl.className = 'routes-list-meta-metric';
+      routeDistanceMetaEl.textContent = `Distance: ${distanceText}`;
+
+      const routeActiveFlightsMetaEl = document.createElement('span');
+      routeActiveFlightsMetaEl.className = 'routes-list-meta-metric';
+      routeActiveFlightsMetaEl.textContent = `Active Flights: ${INTEGER_FORMATTER.format(activeFlightsCount)}`;
+
+      routeMetaEl.appendChild(routeDistanceMetaEl);
+      routeMetaEl.appendChild(routeActiveFlightsMetaEl);
 
       routeMainEl.appendChild(routeTitleEl);
       routeMainEl.appendChild(routeMetaEl);
+
+      const routeActionsEl = document.createElement('div');
+      routeActionsEl.className = 'routes-list-actions';
+
+      const manageAircraftButtonEl = document.createElement('button');
+      manageAircraftButtonEl.type = 'button';
+      manageAircraftButtonEl.className = 'hud-icon-button routes-aircraft-launch-button';
+      manageAircraftButtonEl.setAttribute('aria-label', `Manage aircraft for route ${originCode} to ${destinationCode}`);
+      manageAircraftButtonEl.title = 'Manage aircraft';
+      manageAircraftButtonEl.textContent = '✈+';
+      manageAircraftButtonEl.disabled = !isInActiveGame;
+      manageAircraftButtonEl.addEventListener('click', () => {
+        if (!isInActiveGame) {
+          return;
+        }
+
+        openRouteAircraftManagementModal(routeId);
+      });
 
       const removeButtonEl = document.createElement('button');
       removeButtonEl.type = 'button';
@@ -1440,8 +1635,11 @@ function refreshRoutesModal(state = gameState.getState()) {
         emitRouteRemoveRequest(routeId);
       });
 
+      routeActionsEl.appendChild(manageAircraftButtonEl);
+      routeActionsEl.appendChild(removeButtonEl);
+
       routeItemEl.appendChild(routeMainEl);
-      routeItemEl.appendChild(removeButtonEl);
+      routeItemEl.appendChild(routeActionsEl);
       listEl.appendChild(routeItemEl);
     });
 
@@ -1453,6 +1651,178 @@ function refreshRoutesModal(state = gameState.getState()) {
     } else {
       routesListContainerEl.appendChild(listEl);
     }
+  }
+
+  const selectedRouteForAircraftModal = selectedRouteAircraftManagementRouteId
+    ? sortedLocalPlayerRoutes.find((route) => {
+      if (!route || !route.routeId) {
+        return false;
+      }
+
+      return String(route.routeId) === String(selectedRouteAircraftManagementRouteId);
+    })
+    : null;
+
+  if (RoutesModalState.isAircraftManagementOpen && !selectedRouteForAircraftModal) {
+    RoutesModalState.isAircraftManagementOpen = false;
+    selectedRouteAircraftManagementRouteId = null;
+    pendingRouteAircraftAssignAircraftInstanceId = null;
+    pendingRouteAircraftUnassignAircraftInstanceId = null;
+    routeAircraftManagementErrorMessage = '';
+    routeAircraftManagementFeedbackKind = 'error';
+    routeAircraftAssignQuantityByCatalogId = new Map();
+    routeAircraftUnassignQuantityByCatalogId = new Map();
+    routeAircraftAssignQuantityInputByCatalogId = new Map();
+    routeAircraftUnassignQuantityInputByCatalogId = new Map();
+    routeAircraftAssignMaxByCatalogId = new Map();
+    routeAircraftUnassignMaxByCatalogId = new Map();
+    resetRouteAircraftManagementRowCaches();
+    routeAircraftBulkOperation = null;
+  }
+
+  const shouldShowAircraftManagementModal = Boolean(
+    shouldShowRoutesModal && RoutesModalState.isAircraftManagementOpen && selectedRouteForAircraftModal
+  );
+  routeAircraftManagementModalOverlayEl.classList.toggle('hidden', !shouldShowAircraftManagementModal);
+  routeAircraftManagementModalOverlayEl.setAttribute('aria-hidden', shouldShowAircraftManagementModal ? 'false' : 'true');
+
+  if (routeAircraftManagementErrorMessage) {
+    routeAircraftManagementFeedbackEl.textContent = routeAircraftManagementErrorMessage;
+    routeAircraftManagementFeedbackEl.classList.remove('hidden');
+    routeAircraftManagementFeedbackEl.classList.toggle(
+      'routes-aircraft-management-feedback--success',
+      routeAircraftManagementFeedbackKind === 'success'
+    );
+  } else {
+    routeAircraftManagementFeedbackEl.textContent = '';
+    routeAircraftManagementFeedbackEl.classList.add('hidden');
+    routeAircraftManagementFeedbackEl.classList.remove('routes-aircraft-management-feedback--success');
+  }
+
+  if (selectedRouteForAircraftModal) {
+    const selectedOriginAirport = airportLookupById.get(String(selectedRouteForAircraftModal.originAirportId || '')) || null;
+    const selectedDestinationAirport = airportLookupById.get(String(selectedRouteForAircraftModal.destinationAirportId || '')) || null;
+    const selectedOriginCode = getAirportCodeForRouteCard(selectedOriginAirport, selectedRouteForAircraftModal.originAirportId);
+    const selectedDestinationCode = getAirportCodeForRouteCard(selectedDestinationAirport, selectedRouteForAircraftModal.destinationAirportId);
+    routeAircraftManagementModalTitleEl.textContent = `${selectedOriginCode} → ${selectedDestinationCode}`;
+
+    const localPlayerIdForAircraftModal = normalizedState && normalizedState.session ? normalizedState.session.playerId : null;
+    const normalizedLocalPlayerId = String(localPlayerIdForAircraftModal || '').trim();
+    const selectedRouteId = String(selectedRouteForAircraftModal.routeId || '').trim();
+    const routeDistanceKm = Number(selectedRouteForAircraftModal.distanceKm);
+    const ownedAircraft = Array.isArray(normalizedState && normalizedState.game && normalizedState.game.ownedAircraft)
+      ? normalizedState.game.ownedAircraft
+      : [];
+    const aircraftCatalogLookupById = getAircraftCatalogLookupById(normalizedState);
+
+    const localOwnedAircraft = ownedAircraft.filter((aircraft) => {
+      if (!aircraft || aircraft.ownerPlayerId == null) {
+        return false;
+      }
+
+      return String(aircraft.ownerPlayerId) === normalizedLocalPlayerId;
+    });
+
+    const availableAircraft = localOwnedAircraft.filter((aircraft) => {
+      const aircraftStatus = String(aircraft.status || '').trim().toLocaleLowerCase();
+      const assignedRouteId = String(aircraft.assignedRouteId || '').trim();
+      const catalogId = String(aircraft.aircraftCatalogId || '').trim();
+      const catalogEntry = aircraftCatalogLookupById.get(catalogId) || null;
+      const aircraftRangeKm = Number(catalogEntry && catalogEntry.rangeKm);
+
+      if (aircraftStatus !== 'available') {
+        return false;
+      }
+
+      if (assignedRouteId) {
+        return false;
+      }
+
+      if (!Number.isFinite(routeDistanceKm) || !Number.isFinite(aircraftRangeKm)) {
+        return false;
+      }
+
+      return aircraftRangeKm >= routeDistanceKm;
+    });
+
+    const assignedAircraft = localOwnedAircraft.filter((aircraft) => {
+      const assignedRouteId = String(aircraft.assignedRouteId || '').trim();
+      return assignedRouteId.length > 0 && assignedRouteId === selectedRouteId;
+    });
+
+    const groupedAvailableAircraft = groupRouteAircraftByCatalog(availableAircraft, aircraftCatalogLookupById);
+    const groupedAssignedAircraft = groupRouteAircraftByCatalog(assignedAircraft, aircraftCatalogLookupById);
+    if (lastRenderedRouteAircraftManagementRouteId !== selectedRouteId) {
+      routeAvailableAircraftRowByCatalogId = new Map();
+      routeAssignedAircraftRowByCatalogId = new Map();
+      routeAvailableAircraftListEl.innerHTML = '';
+      routeAssignedAircraftListEl.innerHTML = '';
+      lastRenderedRouteAircraftManagementRouteId = selectedRouteId;
+    }
+
+    routeAvailableAircraftGroupByCatalogId = groupedAvailableAircraft.reduce((lookup, group) => {
+      const catalogId = String(group && group.catalogId ? group.catalogId : '').trim();
+      if (!catalogId) {
+        return lookup;
+      }
+
+      lookup.set(catalogId, group);
+      return lookup;
+    }, new Map());
+
+    routeAssignedAircraftGroupByCatalogId = groupedAssignedAircraft.reduce((lookup, group) => {
+      const catalogId = String(group && group.catalogId ? group.catalogId : '').trim();
+      if (!catalogId) {
+        return lookup;
+      }
+
+      lookup.set(catalogId, group);
+      return lookup;
+    }, new Map());
+
+    const focusedRouteQuantityInputBeforeSync =
+      document.activeElement &&
+      document.activeElement.classList &&
+      document.activeElement.classList.contains('routes-aircraft-quantity-input')
+        ? document.activeElement
+        : null;
+
+    syncRouteAircraftGroupRows({
+      mode: 'assign',
+      groups: groupedAvailableAircraft,
+      listEl: routeAvailableAircraftListEl,
+      emptyMessage: 'No range-compatible available aircraft for this route.',
+      isInActiveGame
+    });
+
+    syncRouteAircraftGroupRows({
+      mode: 'unassign',
+      groups: groupedAssignedAircraft,
+      listEl: routeAssignedAircraftListEl,
+      emptyMessage: 'No aircraft currently assigned to this route.',
+      isInActiveGame
+    });
+
+    if (focusedRouteQuantityInputBeforeSync) {
+      const focusedRouteQuantityInputAfterSync = document.activeElement;
+      console.debug(
+        '[route-aircraft-focus-check]',
+        focusedRouteQuantityInputBeforeSync === focusedRouteQuantityInputAfterSync,
+        {
+          mode: focusedRouteQuantityInputBeforeSync.closest('[data-mode]')
+            ? focusedRouteQuantityInputBeforeSync.closest('[data-mode]').getAttribute('data-mode')
+            : null,
+          catalogId: focusedRouteQuantityInputBeforeSync.closest('[data-catalog-id]')
+            ? focusedRouteQuantityInputBeforeSync.closest('[data-catalog-id]').getAttribute('data-catalog-id')
+            : null
+        }
+      );
+    }
+  } else {
+    routeAircraftManagementModalTitleEl.textContent = '-';
+    routeAvailableAircraftListEl.innerHTML = '';
+    routeAssignedAircraftListEl.innerHTML = '';
+    resetRouteAircraftManagementRowCaches();
   }
 
   const shouldShowCreateRouteModal = Boolean(shouldShowRoutesModal && RoutesModalState.isCreateRouteOpen);
@@ -1714,6 +2084,19 @@ function emitRouteRemoveRequest(routeId) {
   socket.emit('route:remove:request', { routeId });
 }
 
+function emitRouteAircraftAssignRequest(routeId, aircraftInstanceId) {
+  socket.emit('route:aircraft:assign:request', {
+    routeId,
+    aircraftInstanceId
+  });
+}
+
+function emitRouteAircraftUnassignRequest(aircraftInstanceId) {
+  socket.emit('route:aircraft:unassign:request', {
+    aircraftInstanceId
+  });
+}
+
 function emitAirportListRequestWithPrompt(airportId) {
   const rawInput = window.prompt('Enter asking price', '');
   if (rawInput == null) {
@@ -1747,6 +2130,23 @@ function createAirportActionButton(label, onClick, { variant = 'default' } = {})
   button.className = classNames.join(' ');
   button.textContent = label;
   button.addEventListener('click', onClick);
+  return button;
+}
+
+function createRoutesShortcutIconButton({ onClick, ariaLabel = 'Open Routes', isDisabled = false } = {}) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'hud-icon-button routes-aircraft-launch-button';
+  button.setAttribute('aria-label', ariaLabel);
+  button.title = ariaLabel;
+  button.textContent = '✈+';
+  button.disabled = Boolean(isDisabled);
+  button.style.marginLeft = 'auto';
+
+  if (typeof onClick === 'function') {
+    button.addEventListener('click', onClick);
+  }
+
   return button;
 }
 
@@ -1808,6 +2208,23 @@ function getAirportDisplayName(airport) {
   const airportName = airport && airport.name ? airport.name : 'Unknown Airport';
   const airportCode = airport && (airport.iata || airport.id) ? (airport.iata || airport.id) : '---';
   return `${airportName} (${airportCode})`;
+}
+
+function getAirportCodeForRouteCard(airport, fallbackAirportId) {
+  if (airport && typeof airport.iata === 'string' && airport.iata.trim().length > 0) {
+    return airport.iata.trim();
+  }
+
+  if (airport && typeof airport.icao === 'string' && airport.icao.trim().length > 0) {
+    return airport.icao.trim();
+  }
+
+  if (airport && typeof airport.id === 'string' && airport.id.trim().length > 0) {
+    return airport.id.trim();
+  }
+
+  const normalizedFallbackAirportId = String(fallbackAirportId || '').trim();
+  return normalizedFallbackAirportId || '---';
 }
 
 function compareAirportsAlphabetically(leftAirport, rightAirport) {
@@ -2067,6 +2484,601 @@ function getRouteCreateResultMessage(result) {
   return 'Unable to create route.';
 }
 
+function getRouteAircraftManagementResultMessage(result, fallbackMessage) {
+  const code = result && typeof result.code === 'string' ? result.code.trim() : '';
+  const message = result && typeof result.message === 'string' ? result.message.trim() : '';
+
+  if (message && code) {
+    return `${message} [${code}]`;
+  }
+
+  if (message) {
+    return message;
+  }
+
+  if (code) {
+    return code;
+  }
+
+  return fallbackMessage;
+}
+
+function getAircraftCatalogLookupById(state) {
+  const aircraftCatalog = getAircraftCatalogEntries(state);
+  return aircraftCatalog.reduce((lookup, aircraft) => {
+    if (!aircraft) {
+      return lookup;
+    }
+
+    const catalogId = String(aircraft.aircraftCatalogId || '').trim();
+    if (!catalogId) {
+      return lookup;
+    }
+
+    lookup.set(catalogId, aircraft);
+    return lookup;
+  }, new Map());
+}
+
+function groupRouteAircraftByCatalog(aircraftList, aircraftCatalogLookupById) {
+  const groupedByCatalogId = new Map();
+
+  (Array.isArray(aircraftList) ? aircraftList : []).forEach((aircraft) => {
+    if (!aircraft) {
+      return;
+    }
+
+    const catalogId = String(aircraft.aircraftCatalogId || '').trim();
+    if (!catalogId) {
+      return;
+    }
+
+    const catalogEntry = aircraftCatalogLookupById.get(catalogId) || null;
+    const group = groupedByCatalogId.get(catalogId) || {
+      catalogId,
+      catalogEntry,
+      aircraftInstanceIds: []
+    };
+
+    group.aircraftInstanceIds.push(String(aircraft.aircraftInstanceId || '').trim());
+    groupedByCatalogId.set(catalogId, group);
+  });
+
+  return Array.from(groupedByCatalogId.values())
+    .map((group) => ({
+      ...group,
+      aircraftInstanceIds: group.aircraftInstanceIds
+        .filter((aircraftInstanceId) => aircraftInstanceId.length > 0)
+        .sort((leftAircraftInstanceId, rightAircraftInstanceId) => {
+          return leftAircraftInstanceId.localeCompare(rightAircraftInstanceId);
+        })
+    }))
+    .filter((group) => group.aircraftInstanceIds.length > 0)
+    .sort((leftGroup, rightGroup) => {
+      const leftDisplayName = getAircraftDisplayName(leftGroup.catalogEntry).toLocaleLowerCase();
+      const rightDisplayName = getAircraftDisplayName(rightGroup.catalogEntry).toLocaleLowerCase();
+      if (leftDisplayName !== rightDisplayName) {
+        return leftDisplayName.localeCompare(rightDisplayName);
+      }
+
+      return leftGroup.catalogId.localeCompare(rightGroup.catalogId);
+    });
+}
+
+function normalizeRouteAircraftQuantity(value, maxQuantity) {
+  const normalizedMax = Number.isInteger(maxQuantity) && maxQuantity > 0 ? maxQuantity : 0;
+  if (normalizedMax === 0) {
+    return 0;
+  }
+
+  if (value == null) {
+    return 1;
+  }
+
+  if (typeof value === 'string') {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) {
+      return 1;
+    }
+
+    const parsedValue = Number(trimmedValue);
+    if (!Number.isInteger(parsedValue)) {
+      return 1;
+    }
+
+    value = parsedValue;
+  }
+
+  if (!Number.isInteger(value)) {
+    return 1;
+  }
+
+  if (value < 1) {
+    return 1;
+  }
+
+  if (value > normalizedMax) {
+    return normalizedMax;
+  }
+
+  return value;
+}
+
+function getRouteAircraftQuantityMapsForMode(mode) {
+  const isUnassignMode = mode === 'unassign';
+
+  if (isUnassignMode) {
+    return {
+      quantityByCatalogId: routeAircraftUnassignQuantityByCatalogId,
+      quantityInputByCatalogId: routeAircraftUnassignQuantityInputByCatalogId,
+      maxByCatalogId: routeAircraftUnassignMaxByCatalogId
+    };
+  }
+
+  return {
+    quantityByCatalogId: routeAircraftAssignQuantityByCatalogId,
+    quantityInputByCatalogId: routeAircraftAssignQuantityInputByCatalogId,
+    maxByCatalogId: routeAircraftAssignMaxByCatalogId
+  };
+}
+
+function resolveRouteAircraftQuantityForRender({ mode, catalogId, maxQuantity }) {
+  const normalizedCatalogId = String(catalogId || '').trim();
+  const normalizedMaxQuantity = Number.isInteger(maxQuantity) && maxQuantity > 0 ? maxQuantity : 0;
+
+  if (!normalizedCatalogId) {
+    return {
+      displayValue: normalizedMaxQuantity > 0 ? '1' : '0',
+      normalizedQuantity: normalizedMaxQuantity > 0 ? 1 : 0
+    };
+  }
+
+  const {
+    quantityByCatalogId,
+    quantityInputByCatalogId,
+    maxByCatalogId
+  } = getRouteAircraftQuantityMapsForMode(mode);
+
+  const previousMaxQuantity = maxByCatalogId.get(normalizedCatalogId);
+  const hasMaxDecreased = Number.isInteger(previousMaxQuantity) && normalizedMaxQuantity < previousMaxQuantity;
+  maxByCatalogId.set(normalizedCatalogId, normalizedMaxQuantity);
+
+  if (normalizedMaxQuantity < 1) {
+    quantityByCatalogId.set(normalizedCatalogId, 0);
+    quantityInputByCatalogId.set(normalizedCatalogId, '0');
+
+    return {
+      displayValue: '0',
+      normalizedQuantity: 0
+    };
+  }
+
+  let committedQuantity = normalizeRouteAircraftQuantity(
+    quantityByCatalogId.get(normalizedCatalogId),
+    normalizedMaxQuantity
+  );
+  quantityByCatalogId.set(normalizedCatalogId, committedQuantity);
+
+  const rawInputValue = quantityInputByCatalogId.get(normalizedCatalogId);
+  if (rawInputValue == null) {
+    const initializedInputValue = String(committedQuantity);
+    quantityInputByCatalogId.set(normalizedCatalogId, initializedInputValue);
+
+    return {
+      displayValue: initializedInputValue,
+      normalizedQuantity: committedQuantity
+    };
+  }
+
+  if (rawInputValue === '') {
+    if (hasMaxDecreased && committedQuantity > normalizedMaxQuantity) {
+      committedQuantity = normalizeRouteAircraftQuantity(committedQuantity, normalizedMaxQuantity);
+      quantityByCatalogId.set(normalizedCatalogId, committedQuantity);
+    }
+
+    return {
+      displayValue: '',
+      normalizedQuantity: committedQuantity
+    };
+  }
+
+  const parsedRawInputValue = Number(rawInputValue);
+  const hasValidIntegerInput = Number.isFinite(parsedRawInputValue) && Number.isInteger(parsedRawInputValue);
+  const hasValidPositiveInput = hasValidIntegerInput && parsedRawInputValue >= 1;
+
+  if (!hasValidPositiveInput) {
+    return {
+      displayValue: String(rawInputValue),
+      normalizedQuantity: committedQuantity
+    };
+  }
+
+  if (hasMaxDecreased && parsedRawInputValue > normalizedMaxQuantity) {
+    const clampedQuantity = normalizeRouteAircraftQuantity(parsedRawInputValue, normalizedMaxQuantity);
+    quantityByCatalogId.set(normalizedCatalogId, clampedQuantity);
+    quantityInputByCatalogId.set(normalizedCatalogId, String(clampedQuantity));
+
+    return {
+      displayValue: String(clampedQuantity),
+      normalizedQuantity: clampedQuantity
+    };
+  }
+
+  quantityByCatalogId.set(normalizedCatalogId, parsedRawInputValue);
+
+  return {
+    displayValue: String(rawInputValue),
+    normalizedQuantity: parsedRawInputValue
+  };
+}
+
+function commitRouteAircraftQuantityInput({ mode, catalogId, maxQuantity, rawInputValue }) {
+  const normalizedCatalogId = String(catalogId || '').trim();
+  const normalizedMaxQuantity = Number.isInteger(maxQuantity) && maxQuantity > 0 ? maxQuantity : 0;
+
+  if (!normalizedCatalogId || normalizedMaxQuantity < 1) {
+    return 0;
+  }
+
+  const {
+    quantityByCatalogId,
+    quantityInputByCatalogId,
+    maxByCatalogId
+  } = getRouteAircraftQuantityMapsForMode(mode);
+  const normalizedQuantity = normalizeRouteAircraftQuantity(rawInputValue, normalizedMaxQuantity);
+
+  quantityByCatalogId.set(normalizedCatalogId, normalizedQuantity);
+  quantityInputByCatalogId.set(normalizedCatalogId, String(normalizedQuantity));
+  maxByCatalogId.set(normalizedCatalogId, normalizedMaxQuantity);
+
+  return normalizedQuantity;
+}
+
+function getRouteAircraftGroupLookupByMode(mode) {
+  return mode === 'unassign' ? routeAssignedAircraftGroupByCatalogId : routeAvailableAircraftGroupByCatalogId;
+}
+
+function getRouteAircraftRowLookupByMode(mode) {
+  return mode === 'unassign' ? routeAssignedAircraftRowByCatalogId : routeAvailableAircraftRowByCatalogId;
+}
+
+function createRouteAircraftGroupRow(mode, catalogId) {
+  const groupCardEl = document.createElement('div');
+  groupCardEl.className = 'routes-aircraft-group-card';
+  groupCardEl.dataset.catalogId = catalogId;
+  groupCardEl.dataset.mode = mode;
+
+  const groupMainEl = document.createElement('div');
+  groupMainEl.className = 'routes-aircraft-group-main';
+
+  const groupTitleEl = document.createElement('p');
+  groupTitleEl.className = 'routes-aircraft-group-title';
+
+  const groupMetaPrimaryEl = document.createElement('p');
+  groupMetaPrimaryEl.className = 'routes-aircraft-group-meta';
+
+  const groupMetaSecondaryEl = document.createElement('p');
+  groupMetaSecondaryEl.className = 'routes-aircraft-group-meta';
+
+  groupMainEl.appendChild(groupTitleEl);
+  groupMainEl.appendChild(groupMetaPrimaryEl);
+  groupMainEl.appendChild(groupMetaSecondaryEl);
+
+  const groupActionsEl = document.createElement('div');
+  groupActionsEl.className = 'routes-aircraft-group-actions';
+
+  const actionButtonEl = document.createElement('button');
+  actionButtonEl.type = 'button';
+  actionButtonEl.className = mode === 'unassign'
+    ? 'airport-interaction-action-button shop-aircraft-trade-button shop-aircraft-sell-button routes-aircraft-single-action-button'
+    : 'airport-interaction-action-button shop-aircraft-trade-button routes-aircraft-assign-button routes-aircraft-single-action-button';
+
+  const quantityControlEl = document.createElement('div');
+  quantityControlEl.className = 'aircraft-quantity-control routes-aircraft-quantity-control';
+
+  const quantityInputEl = document.createElement('input');
+  quantityInputEl.type = 'number';
+  quantityInputEl.className = 'aircraft-quantity-input routes-aircraft-quantity-input';
+  quantityInputEl.step = '1';
+
+  const quantityMaxButtonEl = document.createElement('button');
+  quantityMaxButtonEl.type = 'button';
+  quantityMaxButtonEl.className = 'aircraft-quantity-max-label routes-aircraft-quantity-max-label';
+
+  quantityInputEl.addEventListener('input', () => {
+    const catalogIdFromRow = String(groupCardEl.dataset.catalogId || '').trim();
+    if (!catalogIdFromRow) {
+      return;
+    }
+
+    if (mode === 'unassign') {
+      routeAircraftUnassignQuantityInputByCatalogId.set(catalogIdFromRow, quantityInputEl.value);
+      return;
+    }
+
+    routeAircraftAssignQuantityInputByCatalogId.set(catalogIdFromRow, quantityInputEl.value);
+  });
+
+  quantityInputEl.addEventListener('change', () => {
+    const catalogIdFromRow = String(groupCardEl.dataset.catalogId || '').trim();
+    const groupLookup = getRouteAircraftGroupLookupByMode(mode);
+    const currentGroup = groupLookup.get(catalogIdFromRow);
+    const maxQuantity = currentGroup && Array.isArray(currentGroup.aircraftInstanceIds)
+      ? currentGroup.aircraftInstanceIds.length
+      : 0;
+
+    commitRouteAircraftQuantityInput({
+      mode,
+      catalogId: catalogIdFromRow,
+      maxQuantity,
+      rawInputValue: quantityInputEl.value
+    });
+    refreshRoutesModal(gameState.getState());
+  });
+
+  quantityMaxButtonEl.addEventListener('click', () => {
+    const catalogIdFromRow = String(groupCardEl.dataset.catalogId || '').trim();
+    const groupLookup = getRouteAircraftGroupLookupByMode(mode);
+    const currentGroup = groupLookup.get(catalogIdFromRow);
+    const maxQuantity = currentGroup && Array.isArray(currentGroup.aircraftInstanceIds)
+      ? currentGroup.aircraftInstanceIds.length
+      : 0;
+
+    commitRouteAircraftQuantityInput({
+      mode,
+      catalogId: catalogIdFromRow,
+      maxQuantity,
+      rawInputValue: maxQuantity
+    });
+    refreshRoutesModal(gameState.getState());
+  });
+
+  actionButtonEl.addEventListener('click', () => {
+    const catalogIdFromRow = String(groupCardEl.dataset.catalogId || '').trim();
+    const selectedRouteId = String(selectedRouteAircraftManagementRouteId || '').trim();
+    const state = gameState.getState();
+    const isInActiveGame = Boolean(state && state.ui && state.ui.screen === 'game' && state && state.game && state.game.id);
+    const groupLookup = getRouteAircraftGroupLookupByMode(mode);
+    const currentGroup = groupLookup.get(catalogIdFromRow);
+    const aircraftInstanceIds = currentGroup && Array.isArray(currentGroup.aircraftInstanceIds)
+      ? currentGroup.aircraftInstanceIds
+      : [];
+    const maxQuantity = aircraftInstanceIds.length;
+    const hasPendingAircraftMutation =
+      pendingRouteAircraftAssignAircraftInstanceId != null || pendingRouteAircraftUnassignAircraftInstanceId != null;
+    const isBulkAssignInProgress = routeAircraftBulkOperation && routeAircraftBulkOperation.mode === 'assign';
+    const isBulkUnassignInProgress = routeAircraftBulkOperation && routeAircraftBulkOperation.mode === 'unassign';
+
+    if (
+      !selectedRouteId ||
+      maxQuantity < 1 ||
+      !currentGroup ||
+      !Array.isArray(currentGroup.aircraftInstanceIds) ||
+      hasPendingAircraftMutation ||
+      !isInActiveGame
+    ) {
+      return;
+    }
+
+    if ((mode === 'assign' && isBulkUnassignInProgress) || (mode === 'unassign' && isBulkAssignInProgress)) {
+      return;
+    }
+
+    const rawInputValue = mode === 'unassign'
+      ? routeAircraftUnassignQuantityInputByCatalogId.get(catalogIdFromRow)
+      : routeAircraftAssignQuantityInputByCatalogId.get(catalogIdFromRow);
+    const committedQuantity = commitRouteAircraftQuantityInput({
+      mode,
+      catalogId: catalogIdFromRow,
+      maxQuantity,
+      rawInputValue
+    });
+    const aircraftInstanceIdsToMutate = currentGroup.aircraftInstanceIds.slice(0, committedQuantity);
+    if (!aircraftInstanceIdsToMutate.length) {
+      refreshRoutesModal(gameState.getState());
+      return;
+    }
+
+    startRouteAircraftBulkOperation({
+      mode,
+      routeId: selectedRouteId,
+      aircraftInstanceIds: aircraftInstanceIdsToMutate
+    });
+  });
+
+  quantityControlEl.appendChild(quantityInputEl);
+  quantityControlEl.appendChild(quantityMaxButtonEl);
+  groupActionsEl.appendChild(actionButtonEl);
+  groupActionsEl.appendChild(quantityControlEl);
+
+  groupCardEl.appendChild(groupMainEl);
+  groupCardEl.appendChild(groupActionsEl);
+
+  return {
+    groupCardEl,
+    groupTitleEl,
+    groupMetaPrimaryEl,
+    groupMetaSecondaryEl,
+    actionButtonEl,
+    quantityInputEl,
+    quantityMaxButtonEl
+  };
+}
+
+function syncRouteAircraftGroupRows({ mode, groups, listEl, emptyMessage, isInActiveGame }) {
+  const rowLookup = getRouteAircraftRowLookupByMode(mode);
+  const currentCatalogIds = new Set();
+  const isBulkAssignInProgress = routeAircraftBulkOperation && routeAircraftBulkOperation.mode === 'assign';
+  const isBulkUnassignInProgress = routeAircraftBulkOperation && routeAircraftBulkOperation.mode === 'unassign';
+  const hasPendingAircraftMutation =
+    pendingRouteAircraftAssignAircraftInstanceId != null || pendingRouteAircraftUnassignAircraftInstanceId != null;
+
+  groups.forEach((group, groupIndex) => {
+    const catalogId = String(group && group.catalogId ? group.catalogId : '').trim();
+    if (!catalogId) {
+      return;
+    }
+
+    currentCatalogIds.add(catalogId);
+
+    let row = rowLookup.get(catalogId);
+    if (!row) {
+      row = createRouteAircraftGroupRow(mode, catalogId);
+      rowLookup.set(catalogId, row);
+    }
+
+    const expectedRowAtIndex = listEl.children[groupIndex] || null;
+    if (expectedRowAtIndex !== row.groupCardEl) {
+      listEl.insertBefore(row.groupCardEl, expectedRowAtIndex);
+    }
+
+    const maxQuantity = Array.isArray(group.aircraftInstanceIds) ? group.aircraftInstanceIds.length : 0;
+    const {
+      displayValue: quantityDisplayValue,
+      normalizedQuantity
+    } = resolveRouteAircraftQuantityForRender({
+      mode,
+      catalogId,
+      maxQuantity
+    });
+
+    row.groupTitleEl.textContent = getAircraftDisplayName(group.catalogEntry);
+
+    if (mode === 'assign') {
+      row.groupMetaPrimaryEl.textContent = `Available: ${INTEGER_FORMATTER.format(maxQuantity)}`;
+      row.groupMetaPrimaryEl.classList.remove('hidden');
+      row.groupMetaSecondaryEl.textContent = '';
+      row.groupMetaSecondaryEl.classList.add('hidden');
+    } else {
+      row.groupMetaPrimaryEl.textContent = `Assigned: ${INTEGER_FORMATTER.format(maxQuantity)}`;
+      row.groupMetaPrimaryEl.classList.remove('hidden');
+      row.groupMetaSecondaryEl.textContent = '';
+      row.groupMetaSecondaryEl.classList.add('hidden');
+    }
+
+    row.quantityInputEl.min = maxQuantity >= 1 ? '1' : '0';
+    row.quantityInputEl.max = String(Math.max(0, maxQuantity));
+
+    const desiredInputValue = maxQuantity >= 1 ? quantityDisplayValue : '0';
+    if (row.quantityInputEl.value !== desiredInputValue) {
+      row.quantityInputEl.value = desiredInputValue;
+    }
+
+    row.quantityMaxButtonEl.textContent = `Max ${INTEGER_FORMATTER.format(maxQuantity)}`;
+
+    const aircraftInstanceIdsToMutate = Array.isArray(group.aircraftInstanceIds)
+      ? group.aircraftInstanceIds.slice(0, normalizedQuantity)
+      : [];
+    const aircraftInstanceIdToMutate = aircraftInstanceIdsToMutate[0] || null;
+    const isPendingForGroup = mode === 'assign'
+      ? isBulkAssignInProgress && Boolean(aircraftInstanceIdToMutate)
+      : isBulkUnassignInProgress && Boolean(aircraftInstanceIdToMutate);
+
+    row.actionButtonEl.textContent = mode === 'assign'
+      ? (isPendingForGroup ? 'Assigning...' : 'Assign')
+      : (isPendingForGroup ? 'Unassigning...' : 'Unassign');
+    row.actionButtonEl.disabled =
+      !isInActiveGame ||
+      hasPendingAircraftMutation ||
+      !aircraftInstanceIdsToMutate.length ||
+      (mode === 'assign' ? isBulkUnassignInProgress : isBulkAssignInProgress);
+    row.quantityInputEl.disabled = !isInActiveGame || hasPendingAircraftMutation || maxQuantity < 1;
+    row.quantityMaxButtonEl.disabled = !isInActiveGame || hasPendingAircraftMutation || maxQuantity < 1;
+  });
+
+  Array.from(rowLookup.keys()).forEach((catalogId) => {
+    if (currentCatalogIds.has(catalogId)) {
+      return;
+    }
+
+    const row = rowLookup.get(catalogId);
+    if (row && row.groupCardEl.parentElement) {
+      row.groupCardEl.parentElement.removeChild(row.groupCardEl);
+    }
+
+    rowLookup.delete(catalogId);
+  });
+
+  const emptyStateEl = listEl.querySelector('.routes-aircraft-empty');
+  if (!groups.length) {
+    if (!emptyStateEl) {
+      const emptyEl = document.createElement('p');
+      emptyEl.className = 'shop-airport-results-empty routes-aircraft-empty';
+      emptyEl.textContent = emptyMessage;
+      listEl.appendChild(emptyEl);
+    }
+    return;
+  }
+
+  if (emptyStateEl) {
+    emptyStateEl.remove();
+  }
+}
+
+function dispatchNextRouteAircraftBulkOperationRequest() {
+  if (!routeAircraftBulkOperation || !Array.isArray(routeAircraftBulkOperation.remainingAircraftInstanceIds)) {
+    return;
+  }
+
+  if (routeAircraftBulkOperation.remainingAircraftInstanceIds.length === 0) {
+    routeAircraftManagementFeedbackKind = 'error';
+    routeAircraftManagementErrorMessage = '';
+    pendingRouteAircraftAssignAircraftInstanceId = null;
+    pendingRouteAircraftUnassignAircraftInstanceId = null;
+    routeAircraftBulkOperation = null;
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  const nextAircraftInstanceId = routeAircraftBulkOperation.remainingAircraftInstanceIds[0];
+  if (!nextAircraftInstanceId) {
+    routeAircraftBulkOperation.remainingAircraftInstanceIds.shift();
+    dispatchNextRouteAircraftBulkOperationRequest();
+    return;
+  }
+
+  if (routeAircraftBulkOperation.mode === 'unassign') {
+    pendingRouteAircraftAssignAircraftInstanceId = null;
+    pendingRouteAircraftUnassignAircraftInstanceId = nextAircraftInstanceId;
+    emitRouteAircraftUnassignRequest(nextAircraftInstanceId);
+    return;
+  }
+
+  pendingRouteAircraftUnassignAircraftInstanceId = null;
+  pendingRouteAircraftAssignAircraftInstanceId = nextAircraftInstanceId;
+  emitRouteAircraftAssignRequest(routeAircraftBulkOperation.routeId, nextAircraftInstanceId);
+}
+
+function startRouteAircraftBulkOperation({ mode, routeId, aircraftInstanceIds }) {
+  const normalizedMode = mode === 'unassign' ? 'unassign' : 'assign';
+  const normalizedRouteId = String(routeId || '').trim();
+  const queueAircraftInstanceIds = (Array.isArray(aircraftInstanceIds) ? aircraftInstanceIds : [])
+    .map((aircraftInstanceId) => String(aircraftInstanceId || '').trim())
+    .filter((aircraftInstanceId) => aircraftInstanceId.length > 0);
+
+  if (!queueAircraftInstanceIds.length) {
+    routeAircraftManagementFeedbackKind = 'error';
+    routeAircraftManagementErrorMessage = normalizedMode === 'unassign'
+      ? 'No assigned aircraft are available to unassign.'
+      : 'No available aircraft are ready to assign.';
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  routeAircraftBulkOperation = {
+    mode: normalizedMode,
+    routeId: normalizedRouteId,
+    totalCount: queueAircraftInstanceIds.length,
+    completedCount: 0,
+    remainingAircraftInstanceIds: queueAircraftInstanceIds.slice()
+  };
+
+  routeAircraftManagementFeedbackKind = 'error';
+  routeAircraftManagementErrorMessage = '';
+  dispatchNextRouteAircraftBulkOperationRequest();
+  refreshRoutesModal(gameState.getState());
+}
+
 function compareAircraftAlphabetically(leftAircraft, rightAircraft) {
   const leftName = `${leftAircraft && leftAircraft.manufacturer ? leftAircraft.manufacturer : ''} ${leftAircraft && leftAircraft.model ? leftAircraft.model : ''}`.trim().toLocaleLowerCase();
   const rightName = `${rightAircraft && rightAircraft.manufacturer ? rightAircraft.manufacturer : ''} ${rightAircraft && rightAircraft.model ? rightAircraft.model : ''}`.trim().toLocaleLowerCase();
@@ -2226,6 +3238,7 @@ function renderShopAircraftSelectorList(state) {
 function renderAirportInteractionActions(state, airport, actionsEl) {
   actionsEl.innerHTML = '';
 
+  const isInActiveGame = Boolean(state && state.ui && state.ui.screen === 'game' && state && state.game && state.game.id);
   const ownerPlayerId = airport.ownerPlayerId;
   const hasOwner = ownerPlayerId != null;
   const isOwnedByLocalPlayer = isAirportOwnedByLocalPlayer(state, airport);
@@ -2253,6 +3266,23 @@ function renderAirportInteractionActions(state, airport, actionsEl) {
     actionsEl.appendChild(
       createAirportActionButton('Sell', () => emitAirportSellToGameRequest(airportId), { variant: 'sell' })
     );
+
+    if (!hasListing) {
+      actionsEl.appendChild(
+        createRoutesShortcutIconButton({
+          ariaLabel: 'Open Routes',
+          isDisabled: !isInActiveGame,
+          onClick: () => {
+            if (!isInActiveGame) {
+              return;
+            }
+
+            openRoutesModal({ openedFrom: ROUTES_MODAL_OPENED_FROM.SHOP_AIRPORT_PANEL });
+          }
+        })
+      );
+    }
+
     return;
   }
 
@@ -2627,6 +3657,23 @@ createRouteModalDialogEl.addEventListener('click', (event) => {
   event.stopPropagation();
 });
 
+routeAircraftManagementModalCloseButtonEl.addEventListener('click', () => {
+  closeRouteAircraftManagementModal();
+});
+
+routeAircraftManagementModalOverlayEl.addEventListener('click', (event) => {
+  if (event.target !== routeAircraftManagementModalOverlayEl) {
+    return;
+  }
+
+  event.stopPropagation();
+  closeRouteAircraftManagementModal();
+});
+
+routeAircraftManagementModalDialogEl.addEventListener('click', (event) => {
+  event.stopPropagation();
+});
+
 shopModalOverlayEl.addEventListener('click', (event) => {
   if (shouldIgnoreNextOverlayClick) {
     shouldIgnoreNextOverlayClick = false;
@@ -2746,6 +3793,12 @@ document.addEventListener('keydown', (event) => {
   if (!createRouteModalOverlayEl.classList.contains('hidden')) {
     event.preventDefault();
     closeCreateRouteModal();
+    return;
+  }
+
+  if (!routeAircraftManagementModalOverlayEl.classList.contains('hidden')) {
+    event.preventDefault();
+    closeRouteAircraftManagementModal();
     return;
   }
 
@@ -3144,6 +4197,128 @@ socket.on('route:remove:result', (result = {}) => {
   }
 
   routeRemoveErrorMessage = '';
+  refreshRoutesModal(gameState.getState());
+});
+
+socket.on('route:aircraft:assign:result', (result = {}) => {
+  if (pendingRouteAircraftAssignAircraftInstanceId == null) {
+    return;
+  }
+
+  const expectedAircraftInstanceId = String(pendingRouteAircraftAssignAircraftInstanceId || '').trim();
+  const resultAircraftInstanceId = String(result && result.aircraftInstanceId ? result.aircraftInstanceId : '').trim();
+  if (resultAircraftInstanceId && expectedAircraftInstanceId && resultAircraftInstanceId !== expectedAircraftInstanceId) {
+    return;
+  }
+
+  pendingRouteAircraftAssignAircraftInstanceId = null;
+  pendingRouteAircraftUnassignAircraftInstanceId = null;
+
+  if (
+    routeAircraftBulkOperation &&
+    routeAircraftBulkOperation.mode === 'assign' &&
+    Array.isArray(routeAircraftBulkOperation.remainingAircraftInstanceIds)
+  ) {
+    const queueAircraftInstanceId = String(routeAircraftBulkOperation.remainingAircraftInstanceIds[0] || '').trim();
+    if (!queueAircraftInstanceId || queueAircraftInstanceId !== expectedAircraftInstanceId) {
+      routeAircraftBulkOperation = null;
+      routeAircraftManagementFeedbackKind = 'error';
+      routeAircraftManagementErrorMessage = 'Aircraft assignment queue was interrupted. Please try again.';
+      refreshRoutesModal(gameState.getState());
+      return;
+    }
+
+    if (!result.success) {
+      const completedCount = Number.isInteger(routeAircraftBulkOperation.completedCount)
+        ? routeAircraftBulkOperation.completedCount
+        : 0;
+      const totalCount = Number.isInteger(routeAircraftBulkOperation.totalCount)
+        ? routeAircraftBulkOperation.totalCount
+        : completedCount;
+      routeAircraftBulkOperation = null;
+      routeAircraftManagementFeedbackKind = 'error';
+      routeAircraftManagementErrorMessage = `${getRouteAircraftManagementResultMessage(result, 'Unable to assign aircraft.')} Assigned ${INTEGER_FORMATTER.format(completedCount)} of ${INTEGER_FORMATTER.format(totalCount)} before stopping.`;
+      refreshRoutesModal(gameState.getState());
+      return;
+    }
+
+    routeAircraftBulkOperation.remainingAircraftInstanceIds.shift();
+    routeAircraftBulkOperation.completedCount += 1;
+    dispatchNextRouteAircraftBulkOperationRequest();
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  if (!result.success) {
+    routeAircraftManagementFeedbackKind = 'error';
+    routeAircraftManagementErrorMessage = getRouteAircraftManagementResultMessage(result, 'Unable to assign aircraft.');
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  routeAircraftManagementFeedbackKind = 'success';
+  routeAircraftManagementErrorMessage = '';
+  refreshRoutesModal(gameState.getState());
+});
+
+socket.on('route:aircraft:unassign:result', (result = {}) => {
+  if (pendingRouteAircraftUnassignAircraftInstanceId == null) {
+    return;
+  }
+
+  const expectedAircraftInstanceId = String(pendingRouteAircraftUnassignAircraftInstanceId || '').trim();
+  const resultAircraftInstanceId = String(result && result.aircraftInstanceId ? result.aircraftInstanceId : '').trim();
+  if (resultAircraftInstanceId && expectedAircraftInstanceId && resultAircraftInstanceId !== expectedAircraftInstanceId) {
+    return;
+  }
+
+  pendingRouteAircraftUnassignAircraftInstanceId = null;
+  pendingRouteAircraftAssignAircraftInstanceId = null;
+
+  if (
+    routeAircraftBulkOperation &&
+    routeAircraftBulkOperation.mode === 'unassign' &&
+    Array.isArray(routeAircraftBulkOperation.remainingAircraftInstanceIds)
+  ) {
+    const queueAircraftInstanceId = String(routeAircraftBulkOperation.remainingAircraftInstanceIds[0] || '').trim();
+    if (!queueAircraftInstanceId || queueAircraftInstanceId !== expectedAircraftInstanceId) {
+      routeAircraftBulkOperation = null;
+      routeAircraftManagementFeedbackKind = 'error';
+      routeAircraftManagementErrorMessage = 'Aircraft unassignment queue was interrupted. Please try again.';
+      refreshRoutesModal(gameState.getState());
+      return;
+    }
+
+    if (!result.success) {
+      const completedCount = Number.isInteger(routeAircraftBulkOperation.completedCount)
+        ? routeAircraftBulkOperation.completedCount
+        : 0;
+      const totalCount = Number.isInteger(routeAircraftBulkOperation.totalCount)
+        ? routeAircraftBulkOperation.totalCount
+        : completedCount;
+      routeAircraftBulkOperation = null;
+      routeAircraftManagementFeedbackKind = 'error';
+      routeAircraftManagementErrorMessage = `${getRouteAircraftManagementResultMessage(result, 'Unable to unassign aircraft.')} Unassigned ${INTEGER_FORMATTER.format(completedCount)} of ${INTEGER_FORMATTER.format(totalCount)} before stopping.`;
+      refreshRoutesModal(gameState.getState());
+      return;
+    }
+
+    routeAircraftBulkOperation.remainingAircraftInstanceIds.shift();
+    routeAircraftBulkOperation.completedCount += 1;
+    dispatchNextRouteAircraftBulkOperationRequest();
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  if (!result.success) {
+    routeAircraftManagementFeedbackKind = 'error';
+    routeAircraftManagementErrorMessage = getRouteAircraftManagementResultMessage(result, 'Unable to unassign aircraft.');
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  routeAircraftManagementFeedbackKind = 'success';
+  routeAircraftManagementErrorMessage = '';
   refreshRoutesModal(gameState.getState());
 });
 

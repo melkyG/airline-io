@@ -1152,6 +1152,12 @@ body {
   color: #e0f2fe;
 }
 
+.routes-aircraft-assign-button {
+  border-color: rgba(56, 189, 248, 0.72);
+  background: rgba(14, 116, 144, 0.78);
+  color: #e0f2fe;
+}
+
 .routes-create-feedback {
   margin-top: 0.1rem;
   color: #fca5a5;
@@ -1163,8 +1169,8 @@ body {
 }
 
 .routes-list-item {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 132px;
   align-items: center;
   gap: 0.7rem;
   border: 1px solid rgba(71, 85, 105, 0.72);
@@ -1175,6 +1181,14 @@ body {
 
 .routes-list-main {
   min-width: 0;
+}
+
+.routes-list-actions {
+  width: 132px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .routes-list-route {
@@ -1188,6 +1202,34 @@ body {
   margin: 0.2rem 0 0;
   color: #94a3b8;
   font-size: 0.78rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.routes-list-meta-metric {
+  white-space: nowrap;
+}
+
+.routes-aircraft-launch-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  padding: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #e2e8f0;
+  border-color: rgba(148, 163, 184, 0.4);
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.34);
+}
+
+.routes-aircraft-launch-button:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
 }
 
 .routes-remove-button {
@@ -1205,6 +1247,103 @@ body {
 .routes-modal-open-create-button {
   align-self: flex-start;
   margin-top: 0.2rem;
+}
+
+.routes-aircraft-modal-overlay {
+  z-index: 1510;
+}
+
+.routes-aircraft-modal-route,
+.routes-aircraft-management-feedback {
+  margin: 0;
+}
+
+.routes-aircraft-modal-route {
+  color: #f8fafc;
+  font-weight: 700;
+}
+
+.routes-aircraft-management-feedback {
+  color: #fca5a5;
+}
+
+.routes-aircraft-management-feedback.routes-aircraft-management-feedback--success {
+  color: #86efac;
+}
+
+.routes-aircraft-section {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.routes-aircraft-sections-divider {
+  border-top: 1px solid rgba(71, 85, 105, 0.62);
+  margin: 0.1rem 0;
+}
+
+.routes-aircraft-group-list {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.routes-aircraft-group-card {
+  border: 1px solid rgba(71, 85, 105, 0.72);
+  border-radius: 9px;
+  background: rgba(15, 23, 42, 0.56);
+  padding: 0.48rem 0.56rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.62rem;
+}
+
+.routes-aircraft-group-main {
+  min-width: 0;
+}
+
+.routes-aircraft-group-title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.routes-aircraft-group-meta {
+  margin: 0.16rem 0 0;
+  color: #94a3b8;
+  font-size: 0.76rem;
+}
+
+.routes-aircraft-group-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.44rem;
+}
+
+.routes-aircraft-quantity-control {
+  gap: 0.12rem;
+  justify-items: center;
+}
+
+.routes-aircraft-quantity-input {
+  width: 2.9rem;
+  font-size: 0.76rem;
+  padding: 0.28rem 0.42rem;
+}
+
+.routes-aircraft-quantity-max-label {
+  width: 2.9rem;
+  font-size: 0.68rem;
+}
+
+.routes-aircraft-single-action-button {
+  min-width: 5.4rem;
+  text-align: center;
+}
+
+.routes-aircraft-empty {
+  margin: 0;
 }
 
 .routes-modal-create-button:disabled {

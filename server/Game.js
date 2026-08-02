@@ -1306,12 +1306,17 @@ class Game {
   createPublicRouteSnapshot() {
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
 
-    return routes.map((route) => ({
-      ...route,
-      assignedAircraftInstanceIds: Array.isArray(route.assignedAircraftInstanceIds)
+    return routes.map((route) => {
+      const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
         ? route.assignedAircraftInstanceIds.slice()
-        : []
-    }));
+        : [];
+
+      return {
+        ...route,
+        assignedAircraftInstanceIds,
+        activeFlightsCount: assignedAircraftInstanceIds.length
+      };
+    });
   }
 
   createPublicAircraftCatalogSnapshot() {
