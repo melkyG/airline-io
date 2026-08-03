@@ -12,6 +12,15 @@
   const ROUTE_LINE_WIDTH = 2;
   const MAPLIBRE_ROUTE_SOURCE_ID = 'airline-routes-source';
   const MAPLIBRE_ROUTE_LAYER_ID = 'airline-routes-layer';
+  const MAPLIBRE_FLIGHT_SOURCE_ID = 'airline-flights-source';
+  const MAPLIBRE_FLIGHT_LAYER_ID = 'airline-flights-layer';
+  const FLIGHT_DOT_COLOR = '#0e7ccf';
+  const FLIGHT_DOT_RADIUS_MIN_PX = 4;
+  const FLIGHT_DOT_RADIUS_MAX_PX = 7;
+  const FLIGHT_DOT_RADIUS_MIN_ZOOM = INITIAL_ZOOM;
+  const FLIGHT_DOT_RADIUS_MAX_ZOOM = BASEMAP_MAX_ZOOM;
+  const FLIGHT_DOT_STROKE_COLOR = '#ffffff';
+  const FLIGHT_DOT_STROKE_WIDTH_PX = 1.2;
   const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -103,6 +112,160 @@
     }, new Map());
   }
 
+  function deriveSimulationNowGameMs(snapshot, realNowMs = Date.now()) {
+    const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
+    if (Number.isFinite(source.simulationEndedAtGameMs)) {
+      return source.simulationEndedAtGameMs;
+    }
+
+    if (
+      Number.isFinite(source.simulationStartedAtRealMs) &&
+      Number.isFinite(source.simulationStartedAtGameMs) &&
+      Number.isFinite(source.simulationSpeedMultiplier) &&
+      source.simulationSpeedMultiplier > 0
+    ) {
+      const elapsedRealMs = Math.max(0, realNowMs - source.simulationStartedAtRealMs);
+      return source.simulationStartedAtGameMs + (elapsedRealMs * source.simulationSpeedMultiplier);
+    }
+
+    if (Number.isFinite(source.simulationNowGameMs)) {
+      return source.simulationNowGameMs;
+    }
+
+    return null;
+  }
+
+  function clamp01(value) {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+
+    if (value <= 0) {
+      return 0;
+    }
+
+    if (value >= 1) {
+      return 1;
+    }
+
+    return value;
+  }
+
+  function easeFlightProgress(rawProgress) {
+    const clampedProgress = clamp01(rawProgress);
+    return clampedProgress * clampedProgress * (3 - (2 * clampedProgress));
+  }
+
+  function getFlightDotRadiusPxForZoom(zoom, minZoom, maxZoom) {
+    const normalizedZoom = Number(zoom);
+    const normalizedMinZoom = Number(minZoom);
+    const normalizedMaxZoom = Number(maxZoom);
+
+    if (
+      !Number.isFinite(normalizedZoom) ||
+      !Number.isFinite(normalizedMinZoom) ||
+      !Number.isFinite(normalizedMaxZoom) ||
+      normalizedMaxZoom <= normalizedMinZoom
+    ) {
+      return FLIGHT_DOT_RADIUS_MIN_PX;
+    }
+
+    const zoomSpan = normalizedMaxZoom - normalizedMinZoom;
+    const zoomProgress = clamp01((normalizedZoom - normalizedMinZoom) / zoomSpan);
+    return FLIGHT_DOT_RADIUS_MIN_PX + ((FLIGHT_DOT_RADIUS_MAX_PX - FLIGHT_DOT_RADIUS_MIN_PX) * zoomProgress);
+  }
+
+  function getMapLibreFlightDotRadiusExpression() {
+    return [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      FLIGHT_DOT_RADIUS_MIN_ZOOM,
+      FLIGHT_DOT_RADIUS_MIN_PX,
+      FLIGHT_DOT_RADIUS_MAX_ZOOM,
+      FLIGHT_DOT_RADIUS_MAX_PX
+    ];
+  }
+
+  function getDrawableFlights(gameSnapshot, realNowMs = Date.now()) {
+    const game = gameSnapshot && typeof gameSnapshot === 'object' ? gameSnapshot : null;
+    if (!game) {
+      return [];
+    }
+
+    const airports = Array.isArray(game.airports) ? game.airports : [];
+    const flights = Array.isArray(game.flights) ? game.flights : [];
+    const airportLookupById = createAirportLookupById(airports);
+    const simulationClock = game.simulationClock && typeof game.simulationClock === 'object'
+      ? game.simulationClock
+      : game;
+    const simulationNowGameMs = deriveSimulationNowGameMs(simulationClock, realNowMs);
+    if (!Number.isFinite(simulationNowGameMs)) {
+      return [];
+    }
+
+    return flights.reduce((drawableFlights, flight) => {
+      if (!flight || String(flight.status || '') !== 'in-flight') {
+        return drawableFlights;
+      }
+
+      const flightId = String(flight.flightId || '').trim();
+      const originAirportId = String(flight.originAirportId || '').trim();
+      const destinationAirportId = String(flight.destinationAirportId || '').trim();
+      const departedAtSimulationMs = Number(flight.departedAtSimulationMs);
+      const arrivesAtSimulationMs = Number(flight.arrivesAtSimulationMs);
+
+      if (
+        !flightId ||
+        !originAirportId ||
+        !destinationAirportId ||
+        !Number.isFinite(departedAtSimulationMs) ||
+        !Number.isFinite(arrivesAtSimulationMs) ||
+        arrivesAtSimulationMs <= departedAtSimulationMs
+      ) {
+        return drawableFlights;
+      }
+
+      const originAirport = airportLookupById.get(originAirportId);
+      const destinationAirport = airportLookupById.get(destinationAirportId);
+      if (!originAirport || !destinationAirport) {
+        return drawableFlights;
+      }
+
+      const originLat = Number(originAirport.lat);
+      const originLng = Number(originAirport.lng);
+      const destinationLat = Number(destinationAirport.lat);
+      const destinationLng = Number(destinationAirport.lng);
+      if (
+        !Number.isFinite(originLat) ||
+        !Number.isFinite(originLng) ||
+        !Number.isFinite(destinationLat) ||
+        !Number.isFinite(destinationLng)
+      ) {
+        return drawableFlights;
+      }
+
+      const rawProgress = clamp01(
+        (simulationNowGameMs - departedAtSimulationMs) / (arrivesAtSimulationMs - departedAtSimulationMs)
+      );
+      const easedProgress = easeFlightProgress(rawProgress);
+
+      const lng = originLng + ((destinationLng - originLng) * easedProgress);
+      const lat = originLat + ((destinationLat - originLat) * easedProgress);
+      drawableFlights.push({
+        flightId,
+        lng,
+        lat
+      });
+
+      return drawableFlights;
+    }, []);
+  }
+
+  function isActiveGameSnapshot(gameSnapshot) {
+    return Boolean(gameSnapshot && String(gameSnapshot.status || '') === 'active');
+  }
+
   function getRenderableRouteSegments(routes, airports) {
     const airportLookupById = createAirportLookupById(airports);
     return (Array.isArray(routes) ? routes : []).reduce((segments, route) => {
@@ -158,6 +321,8 @@
     let airportSelectHandler = null;
     let activeHoveredAirportId = null;
     let latestGameSnapshot = null;
+    let flightAnimationFrameId = null;
+    let isFlightAnimationRunning = false;
 
     if (tooltipElement) {
       tooltipElement.className = 'airport-tooltip airport-tooltip-hidden';
@@ -415,6 +580,143 @@
       const existingSource = mapInstance.getSource(MAPLIBRE_ROUTE_SOURCE_ID);
       if (existingSource && typeof existingSource.setData === 'function') {
         existingSource.setData(getEmptyRouteFeatureCollection());
+      }
+    }
+
+    function getEmptyFlightFeatureCollection() {
+      return {
+        type: 'FeatureCollection',
+        features: []
+      };
+    }
+
+    function ensureFlightLayer() {
+      if (!mapInstance || !mapLoaded) {
+        return false;
+      }
+
+      const existingSource = mapInstance.getSource(MAPLIBRE_FLIGHT_SOURCE_ID);
+      if (!existingSource) {
+        mapInstance.addSource(MAPLIBRE_FLIGHT_SOURCE_ID, {
+          type: 'geojson',
+          data: getEmptyFlightFeatureCollection()
+        });
+      }
+
+      if (!mapInstance.getLayer(MAPLIBRE_FLIGHT_LAYER_ID)) {
+        mapInstance.addLayer({
+          id: MAPLIBRE_FLIGHT_LAYER_ID,
+          type: 'circle',
+          source: MAPLIBRE_FLIGHT_SOURCE_ID,
+          paint: {
+            'circle-radius': getMapLibreFlightDotRadiusExpression(),
+            'circle-color': FLIGHT_DOT_COLOR,
+            'circle-stroke-color': FLIGHT_DOT_STROKE_COLOR,
+            'circle-stroke-width': FLIGHT_DOT_STROKE_WIDTH_PX,
+            'circle-opacity': 0.95
+          }
+        });
+      }
+
+      if (mapInstance.getLayer(MAPLIBRE_ROUTE_LAYER_ID) && mapInstance.getLayer(MAPLIBRE_FLIGHT_LAYER_ID)) {
+        mapInstance.moveLayer(MAPLIBRE_FLIGHT_LAYER_ID);
+      }
+
+      return true;
+    }
+
+    function syncNativeFlightDotsNow(realNowMs = Date.now()) {
+      if (!mapInstance || !mapLoaded) {
+        return 0;
+      }
+
+      if (!ensureFlightLayer()) {
+        return 0;
+      }
+
+      const drawableFlights = getDrawableFlights(latestGameSnapshot, realNowMs);
+      const flightFeatureCollection = {
+        type: 'FeatureCollection',
+        features: drawableFlights.map((flight) => ({
+          type: 'Feature',
+          properties: {
+            flightId: flight.flightId
+          },
+          geometry: {
+            type: 'Point',
+            coordinates: [flight.lng, flight.lat]
+          }
+        }))
+      };
+
+      const source = mapInstance.getSource(MAPLIBRE_FLIGHT_SOURCE_ID);
+      if (source && typeof source.setData === 'function') {
+        source.setData(flightFeatureCollection);
+      }
+
+      return drawableFlights.length;
+    }
+
+    function stopNativeFlightAnimation() {
+      if (flightAnimationFrameId != null) {
+        globalScope.cancelAnimationFrame(flightAnimationFrameId);
+        flightAnimationFrameId = null;
+      }
+
+      isFlightAnimationRunning = false;
+    }
+
+    function runNativeFlightAnimationFrame() {
+      if (!isFlightAnimationRunning) {
+        return;
+      }
+
+      if (!latestGameSnapshot || !isActiveGameSnapshot(latestGameSnapshot) || !mapInstance || !mapLoaded) {
+        clearNativeFlightDots();
+        stopNativeFlightAnimation();
+        return;
+      }
+
+      const drawableCount = syncNativeFlightDotsNow(Date.now());
+      if (drawableCount < 1) {
+        stopNativeFlightAnimation();
+        return;
+      }
+
+      flightAnimationFrameId = globalScope.requestAnimationFrame(runNativeFlightAnimationFrame);
+    }
+
+    function ensureNativeFlightAnimationState() {
+      if (!latestGameSnapshot || !isActiveGameSnapshot(latestGameSnapshot) || !mapInstance || !mapLoaded) {
+        clearNativeFlightDots();
+        stopNativeFlightAnimation();
+        return;
+      }
+
+      const drawableCount = syncNativeFlightDotsNow(Date.now());
+      if (drawableCount < 1) {
+        stopNativeFlightAnimation();
+        return;
+      }
+
+      if (isFlightAnimationRunning) {
+        return;
+      }
+
+      isFlightAnimationRunning = true;
+      flightAnimationFrameId = globalScope.requestAnimationFrame(runNativeFlightAnimationFrame);
+    }
+
+    function clearNativeFlightDots() {
+      stopNativeFlightAnimation();
+
+      if (!mapInstance || !mapLoaded) {
+        return;
+      }
+
+      const source = mapInstance.getSource(MAPLIBRE_FLIGHT_SOURCE_ID);
+      if (source && typeof source.setData === 'function') {
+        source.setData(getEmptyFlightFeatureCollection());
       }
     }
 
@@ -752,6 +1054,7 @@
         if (mapInstance) {
           clearAirportMarkers();
           clearRouteLines();
+          clearNativeFlightDots();
         }
         return;
       }
@@ -767,6 +1070,7 @@
       applyInitialCameraSetupIfReady();
       syncAirportMarkers(state.game && state.game.airports);
       syncRouteLines(state.game && state.game.routes, state.game && state.game.airports);
+      ensureNativeFlightAnimationState();
       refreshAirportTooltip();
     }
 
@@ -789,9 +1093,12 @@
     const routeCollection = [];
     const airportMarkersById = new Map();
     const airportMarkerMetadataById = new Map();
+    const flightMarkersById = new Map();
     let airportSelectHandler = null;
     let activeHoveredAirportId = null;
     let latestGameSnapshot = null;
+    let flightAnimationFrameId = null;
+    let isFlightAnimationRunning = false;
     const tooltipElement = mapContainer ? documentRef.createElement('div') : null;
     const tooltipCodeElement = tooltipElement ? documentRef.createElement('div') : null;
     const tooltipPriceElement = tooltipElement ? documentRef.createElement('div') : null;
@@ -1025,6 +1332,130 @@
       routeCollection.length = 0;
     }
 
+    function stopLeafletFlightAnimation() {
+      if (flightAnimationFrameId != null) {
+        globalScope.cancelAnimationFrame(flightAnimationFrameId);
+        flightAnimationFrameId = null;
+      }
+
+      isFlightAnimationRunning = false;
+    }
+
+    function clearLeafletFlightMarkers(map) {
+      stopLeafletFlightAnimation();
+      if (!map) {
+        return;
+      }
+
+      flightMarkersById.forEach((marker) => {
+        map.removeLayer(marker);
+      });
+      flightMarkersById.clear();
+    }
+
+    function syncLeafletFlightMarkers(map, realNowMs = Date.now()) {
+      if (!map) {
+        return 0;
+      }
+
+      const drawableFlights = getDrawableFlights(latestGameSnapshot, realNowMs);
+      const radiusPx = getFlightDotRadiusPxForZoom(
+        map.getZoom(),
+        Number.isFinite(viewportMinZoom) ? viewportMinZoom : FLIGHT_DOT_RADIUS_MIN_ZOOM,
+        FLIGHT_DOT_RADIUS_MAX_ZOOM
+      );
+      const activeFlightIds = new Set();
+
+      drawableFlights.forEach((flight) => {
+        activeFlightIds.add(flight.flightId);
+        const existingMarker = flightMarkersById.get(flight.flightId);
+        if (existingMarker) {
+          existingMarker.setLatLng([flight.lat, flight.lng]);
+          existingMarker.setRadius(radiusPx);
+          return;
+        }
+
+        const marker = globalScope.L.circleMarker([flight.lat, flight.lng], {
+          radius: radiusPx,
+          color: FLIGHT_DOT_STROKE_COLOR,
+          weight: FLIGHT_DOT_STROKE_WIDTH_PX,
+          fillColor: FLIGHT_DOT_COLOR,
+          fillOpacity: 0.95,
+          interactive: false
+        });
+        marker.addTo(map);
+        flightMarkersById.set(flight.flightId, marker);
+      });
+
+      Array.from(flightMarkersById.entries()).forEach(([flightId, marker]) => {
+        if (activeFlightIds.has(flightId)) {
+          return;
+        }
+
+        map.removeLayer(marker);
+        flightMarkersById.delete(flightId);
+      });
+
+      return drawableFlights.length;
+    }
+
+    function syncLeafletFlightMarkerRadiiForZoom(map) {
+      if (!map || flightMarkersById.size < 1) {
+        return;
+      }
+
+      const radiusPx = getFlightDotRadiusPxForZoom(
+        map.getZoom(),
+        Number.isFinite(viewportMinZoom) ? viewportMinZoom : FLIGHT_DOT_RADIUS_MIN_ZOOM,
+        FLIGHT_DOT_RADIUS_MAX_ZOOM
+      );
+
+      flightMarkersById.forEach((marker) => {
+        marker.setRadius(radiusPx);
+      });
+    }
+
+    function runLeafletFlightAnimationFrame(map) {
+      if (!isFlightAnimationRunning) {
+        return;
+      }
+
+      if (!latestGameSnapshot || !isActiveGameSnapshot(latestGameSnapshot) || !map) {
+        clearLeafletFlightMarkers(map);
+        stopLeafletFlightAnimation();
+        return;
+      }
+
+      const drawableCount = syncLeafletFlightMarkers(map, Date.now());
+      if (drawableCount < 1) {
+        stopLeafletFlightAnimation();
+        return;
+      }
+
+      flightAnimationFrameId = globalScope.requestAnimationFrame(() => runLeafletFlightAnimationFrame(map));
+    }
+
+    function ensureLeafletFlightAnimationState(map) {
+      if (!latestGameSnapshot || !isActiveGameSnapshot(latestGameSnapshot) || !map) {
+        clearLeafletFlightMarkers(map);
+        stopLeafletFlightAnimation();
+        return;
+      }
+
+      const drawableCount = syncLeafletFlightMarkers(map, Date.now());
+      if (drawableCount < 1) {
+        stopLeafletFlightAnimation();
+        return;
+      }
+
+      if (isFlightAnimationRunning) {
+        return;
+      }
+
+      isFlightAnimationRunning = true;
+      flightAnimationFrameId = globalScope.requestAnimationFrame(() => runLeafletFlightAnimationFrame(map));
+    }
+
     function syncRouteLines(map, routes, airports) {
       clearRouteLines(map);
 
@@ -1208,6 +1639,7 @@
       mapInstance.on('move zoom', () => {
         refreshAirportMarkerLabels(mapInstance);
         refreshAirportTooltip(mapInstance);
+        syncLeafletFlightMarkerRadiiForZoom(mapInstance);
       });
 
       return mapInstance;
@@ -1218,6 +1650,7 @@
         if (mapInstance) {
           clearRouteLines(mapInstance);
           clearAirportMarkers(mapInstance);
+          clearLeafletFlightMarkers(mapInstance);
           mapContainer.classList.remove('map-visible');
         }
         return;
@@ -1234,6 +1667,7 @@
       updateViewportMinZoom(map, { forceFit: !hasFittedWorld });
       syncRouteLines(map, state.game && state.game.routes, state.game && state.game.airports);
       syncAirportMarkers(map, state.game && state.game.airports);
+      ensureLeafletFlightAnimationState(map);
       refreshAirportTooltip(map);
       hasFittedWorld = true;
     }

@@ -32,6 +32,69 @@
 				"server/tests/owned-aircraft.test.js"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "diag-flight-lifecycle-once",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tmp-flight-diagnose.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-flight-lifecycle-once",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tmp-flight-diagnose.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-flight-lifecycle-once",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tmp-flight-diagnose.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-flight-lifecycle-once-2",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tmp-flight-diagnose.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-flight-filter-once",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tmp-flight-filter-diagnose.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-flight-filter-once-2",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tmp-flight-filter-diagnose.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-flight-filter-once-3",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tmp-flight-filter-diagnose.js"
+			],
+			"isBackground": false
 		}
 	]
 }

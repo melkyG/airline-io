@@ -981,6 +981,21 @@ test('purchaseListedAirport removes seller routes using sold airport and unassig
           assignedAircraftInstanceIds: ['acft-1']
         }
       ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-yyz-jfk',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ],
       ownedAircraft: [
         {
           aircraftInstanceId: 'acft-1',
@@ -1006,8 +1021,10 @@ test('purchaseListedAirport removes seller routes using sold airport and unassig
   assert.equal(game.authoritativeState.routes.length, 0);
   assert.equal(game.authoritativeState.ownedAircraft[0].status, 'available');
   assert.equal(game.authoritativeState.ownedAircraft[0].assignedRouteId, null);
+  assert.deepEqual(game.authoritativeState.flights, []);
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].eventName, 'game:state');
+  assert.deepEqual(emitted[0].payload.game.flights, []);
 });
 
 test('purchaseListedAirport is atomic when route cleanup validation fails', () => {
@@ -1309,6 +1326,21 @@ test('sellAirportToGame removes owner routes using sold airport and unassigns th
           assignedAircraftInstanceIds: ['acft-1']
         }
       ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-yyz-jfk',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ],
       ownedAircraft: [
         {
           aircraftInstanceId: 'acft-1',
@@ -1332,8 +1364,10 @@ test('sellAirportToGame removes owner routes using sold airport and unassigns th
   assert.equal(game.authoritativeState.routes.length, 0);
   assert.equal(game.authoritativeState.ownedAircraft[0].status, 'available');
   assert.equal(game.authoritativeState.ownedAircraft[0].assignedRouteId, null);
+  assert.deepEqual(game.authoritativeState.flights, []);
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].eventName, 'game:state');
+  assert.deepEqual(emitted[0].payload.game.flights, []);
 });
 
 test('sellAirportToGame is atomic when route cleanup validation fails', () => {

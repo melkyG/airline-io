@@ -404,6 +404,44 @@ body {
   letter-spacing: 0.03em;
 }
 
+.main-content.game-active .simulation-clock-hud {
+  position: absolute;
+  top: 1rem;
+  right: calc(min(320px, 42vw) + 1.8rem);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.08rem;
+  margin: 0;
+  padding: 0.38rem 0.62rem 0.42rem;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.72);
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+
+.simulation-clock-date,
+.simulation-clock-time {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.simulation-clock-date {
+  font-size: 0.73rem;
+  color: #cbd5e1;
+}
+
+.simulation-clock-time {
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
 .main-content.game-active .hud-dev-button {
   position: absolute;
   top: 1rem;
@@ -591,6 +629,7 @@ body {
 
 .map-box.map-is-dragging ~ .hud-bottom-right-stack,
 .map-box.map-is-dragging ~ .event-log-hud,
+.map-box.map-is-dragging ~ .simulation-clock-hud,
 .map-box.map-is-dragging ~ .game-panel,
 .map-box.map-is-dragging ~ .results-overlay {
   pointer-events: none;
@@ -1947,6 +1986,20 @@ body {
   .main-content.game-active .hud-dev-button {
     top: 0.75rem;
     left: 0.75rem;
+  }
+
+  .main-content.game-active .simulation-clock-hud {
+    top: 0.75rem;
+    right: calc(min(260px, 70vw) + 1.2rem);
+    padding: 0.34rem 0.52rem 0.36rem;
+  }
+
+  .simulation-clock-date {
+    font-size: 0.66rem;
+  }
+
+  .simulation-clock-time {
+    font-size: 0.9rem;
   }
 
   .main-content.game-active .capital-hud {

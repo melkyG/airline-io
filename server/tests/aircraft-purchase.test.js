@@ -607,6 +607,8 @@ test('sellAircraftToGame sells deterministically by model and owner, refunds onc
   assert.equal(result.code, 'OK');
   assert.equal(result.aircraftCatalogId, 'BOEING_747');
   assert.equal(result.quantitySold, 2);
+  assert.equal(result.availableQuantitySold, 2);
+  assert.equal(result.assignedQuantitySold, 0);
   assert.equal(result.unitSellPrice, 240000);
   assert.equal(result.totalRefund, 480000);
   assert.equal(result.ownedQuantity, 1);
@@ -619,6 +621,227 @@ test('sellAircraftToGame sells deterministically by model and owner, refunds onc
   );
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].eventName, 'game:state');
+});
+
+test('sellAircraftToGame selects available first, then assigned in stable authoritative order, and detaches sold assignments', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 550,
+          assignedAircraftInstanceIds: ['acft-3', 'acft-4', 'acft-5']
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-3',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-3',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        },
+        {
+          flightId: 'flight-4',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-4',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        },
+        {
+          flightId: 'flight-5',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-5',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-3',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        },
+        {
+          aircraftInstanceId: 'acft-2',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-4',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        },
+        {
+          aircraftInstanceId: 'acft-5',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        }
+      ]
+    }),
+    manager
+  );
+
+  const result = game.sellAircraftToGame('p1', 'BOEING_737', 4);
+
+  assert.equal(result.success, true);
+  assert.equal(result.code, 'OK');
+  assert.equal(result.aircraftCatalogId, 'BOEING_737');
+  assert.equal(result.quantitySold, 4);
+  assert.equal(result.availableQuantitySold, 2);
+  assert.equal(result.assignedQuantitySold, 2);
+  assert.equal(result.unitSellPrice, 176000);
+  assert.equal(result.totalRefund, 704000);
+  assert.equal(result.ownedQuantity, 1);
+  assert.equal(result.maxSellable, 1);
+  assert.equal(result.updatedCapital, 1704000);
+
+  assert.deepEqual(
+    game.authoritativeState.ownedAircraft.map((aircraft) => aircraft.aircraftInstanceId),
+    ['acft-5']
+  );
+  assert.deepEqual(game.authoritativeState.routes[0].assignedAircraftInstanceIds, ['acft-5']);
+  assert.deepEqual(
+    game.authoritativeState.flights.map((flight) => flight.aircraftInstanceId),
+    ['acft-5']
+  );
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0].eventName, 'game:state');
+});
+
+test('sellAircraftToGame aborts atomically when any selected assigned-aircraft detachment validation fails', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createInitialState({
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 550,
+          assignedAircraftInstanceIds: ['acft-4']
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-3',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-3',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        },
+        {
+          flightId: 'flight-4',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-4',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-3',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        },
+        {
+          aircraftInstanceId: 'acft-2',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'available',
+          assignedRouteId: null
+        },
+        {
+          aircraftInstanceId: 'acft-4',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_737',
+          acquisitionPrice: 220000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        }
+      ]
+    }),
+    manager
+  );
+  const before = JSON.stringify(game.authoritativeState);
+
+  const result = game.sellAircraftToGame('p1', 'BOEING_737', 4);
+
+  assert.equal(result.success, false);
+  assert.equal(result.code, 'ASSIGNMENT_NOT_FOUND');
+  assert.equal(JSON.stringify(game.authoritativeState), before);
+  assert.equal(emitted.length, 0);
 });
 
 test('sellAircraftToGame is atomic on failures (invalid quantity or oversell) with no mutation or broadcast', () => {

@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createGame, STARTING_CAPITAL, STARTING_SCORE, GAME_DURATION_MS, SCORE_TO_WIN } = require('../gameFactory');
+const {
+  createGame,
+  STARTING_CAPITAL,
+  STARTING_SCORE,
+  GAME_DURATION_MS,
+  SCORE_TO_WIN,
+  SIMULATION_SPEED_MULTIPLIER
+} = require('../gameFactory');
 const { AIRPORT_CATALOG } = require('../airports/catalog');
 
 function makeLobbyPlayers() {
@@ -35,6 +42,10 @@ test('createGame builds the expected initial authoritative state shape', () => {
   assert.equal(game.endsAt, game.startedAt + GAME_DURATION_MS);
   assert.equal(game.durationMs, GAME_DURATION_MS);
   assert.equal(game.scoreToWin, SCORE_TO_WIN);
+  assert.equal(game.simulationStartedAtRealMs, null);
+  assert.equal(game.simulationStartedAtGameMs, null);
+  assert.equal(game.simulationSpeedMultiplier, SIMULATION_SPEED_MULTIPLIER);
+  assert.equal(game.simulationEndedAtGameMs, null);
 
   assert.equal(Array.isArray(game.players), true);
   assert.equal(game.players.length, 2);
@@ -65,6 +76,8 @@ test('createGame builds the expected initial authoritative state shape', () => {
   assert.deepEqual(game.ownedAircraft, []);
   assert.equal(Array.isArray(game.routes), true);
   assert.deepEqual(game.routes, []);
+  assert.equal(Array.isArray(game.flights), true);
+  assert.deepEqual(game.flights, []);
 });
 
 test('createGame does not reuse lobby player object references', () => {

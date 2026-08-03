@@ -42,6 +42,7 @@ function createGameState(overrides = {}) {
     ],
     ownedAircraft: [],
     routes: [],
+    flights: [],
     ...overrides
   };
 }
@@ -143,6 +144,21 @@ test('removeRoute unassigns one aircraft before deleting route and broadcasts on
           assignedAircraftInstanceIds: ['acft-1']
         }
       ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ],
       ownedAircraft: [
         {
           aircraftInstanceId: 'acft-1',
@@ -167,10 +183,12 @@ test('removeRoute unassigns one aircraft before deleting route and broadcasts on
   assert.deepEqual(game.authoritativeState.routes, []);
   assert.equal(game.authoritativeState.ownedAircraft[0].status, OWNED_AIRCRAFT_STATUS.AVAILABLE);
   assert.equal(game.authoritativeState.ownedAircraft[0].assignedRouteId, null);
+  assert.deepEqual(game.authoritativeState.flights, []);
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].eventName, 'game:state');
   assert.deepEqual(emitted[0].payload.game.routes, []);
   assert.equal(emitted[0].payload.game.ownedAircraft[0].assignedRouteId, null);
+  assert.deepEqual(emitted[0].payload.game.flights, []);
 });
 
 test('removeRoute unassigns multiple aircraft before deleting route and broadcasts once', () => {
@@ -186,6 +204,34 @@ test('removeRoute unassigns multiple aircraft before deleting route and broadcas
           routeKey: canonicalRouteKey('YYZ', 'JFK'),
           distanceKm: 550,
           assignedAircraftInstanceIds: ['acft-1', 'acft-2']
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        },
+        {
+          flightId: 'flight-2',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-2',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
         }
       ],
       ownedAircraft: [
@@ -220,6 +266,7 @@ test('removeRoute unassigns multiple aircraft before deleting route and broadcas
   assert.equal(game.authoritativeState.ownedAircraft[1].status, OWNED_AIRCRAFT_STATUS.AVAILABLE);
   assert.equal(game.authoritativeState.ownedAircraft[0].assignedRouteId, null);
   assert.equal(game.authoritativeState.ownedAircraft[1].assignedRouteId, null);
+  assert.deepEqual(game.authoritativeState.flights, []);
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].eventName, 'game:state');
   assert.deepEqual(emitted[0].payload.game.routes, []);
@@ -264,6 +311,21 @@ test('removeRoute fails safely when assigned aircraft references are stale and l
           assignedAircraftInstanceIds: ['acft-missing']
         }
       ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-missing',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ],
       ownedAircraft: [
         {
           aircraftInstanceId: 'acft-1',
@@ -300,6 +362,21 @@ test('removeRoute fails safely on route-aircraft mismatch and leaves state uncha
           routeKey: canonicalRouteKey('YYZ', 'JFK'),
           distanceKm: 550,
           assignedAircraftInstanceIds: ['acft-1']
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
         }
       ],
       ownedAircraft: [
@@ -438,8 +515,19 @@ test('assignAircraftToRoute assigns an available owned aircraft atomically and b
   assert.equal(game.authoritativeState.ownedAircraft[0].status, OWNED_AIRCRAFT_STATUS.ASSIGNED);
   assert.equal(game.authoritativeState.ownedAircraft[0].assignedRouteId, routeResult.routeId);
   assert.deepEqual(game.authoritativeState.routes[0].assignedAircraftInstanceIds, ['acft-1']);
+  assert.equal(game.authoritativeState.flights.length, 1);
+  assert.equal(game.authoritativeState.flights[0].ownerPlayerId, 'p1');
+  assert.equal(game.authoritativeState.flights[0].routeId, routeResult.routeId);
+  assert.equal(game.authoritativeState.flights[0].aircraftInstanceId, 'acft-1');
+  assert.equal(game.authoritativeState.flights[0].originAirportId, 'YYZ');
+  assert.equal(game.authoritativeState.flights[0].destinationAirportId, 'JFK');
+  assert.equal(game.authoritativeState.flights[0].direction, 'outbound');
+  assert.equal(game.authoritativeState.flights[0].status, 'ready');
+  assert.equal(typeof game.authoritativeState.flights[0].flightId, 'string');
+  assert.ok(game.authoritativeState.flights[0].flightId.startsWith('flight-'));
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].eventName, 'game:state');
+  assert.equal(emitted[0].payload.game.flights.length, 1);
 });
 
 test('assignAircraftToRoute validates player/route/aircraft existence, ownership, availability, assignment, and range with no mutation on failure', () => {
@@ -560,6 +648,21 @@ test('unassignAircraftFromRoute restores aircraft availability and route list at
           assignedAircraftInstanceIds: ['acft-1']
         }
       ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ],
       ownedAircraft: [
         {
           aircraftInstanceId: 'acft-1',
@@ -587,8 +690,10 @@ test('unassignAircraftFromRoute restores aircraft availability and route list at
   assert.equal(game.authoritativeState.ownedAircraft[0].status, OWNED_AIRCRAFT_STATUS.AVAILABLE);
   assert.equal(game.authoritativeState.ownedAircraft[0].assignedRouteId, null);
   assert.deepEqual(game.authoritativeState.routes[0].assignedAircraftInstanceIds, []);
+  assert.deepEqual(game.authoritativeState.flights, []);
   assert.equal(emitted.length, 1);
   assert.equal(emitted[0].eventName, 'game:state');
+  assert.deepEqual(emitted[0].payload.game.flights, []);
 });
 
 test('unassignAircraftFromRoute validates ownership and assignment preconditions with no mutation on failure', () => {
@@ -616,6 +721,60 @@ test('unassignAircraftFromRoute validates ownership and assignment preconditions
         routeKey: `${canonicalRouteKey('YYZ', 'JFK')}::other`,
         distanceKm: 550,
         assignedAircraftInstanceIds: ['acft-other-route']
+      }
+    ],
+    flights: [
+      {
+        flightId: 'flight-other-route',
+        ownerPlayerId: 'p2',
+        routeId: 'route-other-owner',
+        aircraftInstanceId: 'acft-foreign-owner',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        direction: 'outbound',
+        status: 'ready',
+        departedAtSimulationMs: null,
+        arrivesAtSimulationMs: null,
+        nextTransitionAtSimulationMs: null
+      },
+      {
+        flightId: 'flight-missing-link',
+        ownerPlayerId: 'p1',
+        routeId: 'route-owned',
+        aircraftInstanceId: 'acft-missing-link',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        direction: 'outbound',
+        status: 'ready',
+        departedAtSimulationMs: null,
+        arrivesAtSimulationMs: null,
+        nextTransitionAtSimulationMs: null
+      },
+      {
+        flightId: 'flight-other-route-owned',
+        ownerPlayerId: 'p2',
+        routeId: 'route-other-owner',
+        aircraftInstanceId: 'acft-other-route',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        direction: 'outbound',
+        status: 'ready',
+        departedAtSimulationMs: null,
+        arrivesAtSimulationMs: null,
+        nextTransitionAtSimulationMs: null
+      },
+      {
+        flightId: 'flight-route-missing',
+        ownerPlayerId: 'p1',
+        routeId: 'route-missing',
+        aircraftInstanceId: 'acft-route-missing',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        direction: 'outbound',
+        status: 'ready',
+        departedAtSimulationMs: null,
+        arrivesAtSimulationMs: null,
+        nextTransitionAtSimulationMs: null
       }
     ],
     ownedAircraft: [

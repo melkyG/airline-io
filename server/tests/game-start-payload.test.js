@@ -26,6 +26,21 @@ test('game:started public payload includes authoritative game wrapper', () => {
         assignedAircraftInstanceIds: ['acft-1', 'acft-2']
       }
     ],
+    flights: [
+      {
+        flightId: 'flight-1',
+        ownerPlayerId: 'p1',
+        routeId: 'route-1',
+        aircraftInstanceId: 'acft-1',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        direction: 'outbound',
+        status: 'ready',
+        departedAtSimulationMs: null,
+        arrivesAtSimulationMs: null,
+        nextTransitionAtSimulationMs: null
+      }
+    ],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null }
     ]
@@ -53,6 +68,17 @@ test('game:started public payload includes authoritative game wrapper', () => {
       endsAt: 1923456,
       durationMs: 1800000,
       scoreToWin: 1000,
+      simulationStartedAtRealMs: null,
+      simulationStartedAtGameMs: null,
+      simulationSpeedMultiplier: 10000,
+      simulationEndedAtGameMs: null,
+      simulationClock: {
+        simulationStartedAtRealMs: null,
+        simulationStartedAtGameMs: null,
+        simulationSpeedMultiplier: 10000,
+        simulationEndedAtGameMs: null,
+        simulationNowGameMs: null
+      },
       players: [
         { id: 'p1', username: 'Alice', isBot: false, capital: 1000000, score: 0 }
       ],
@@ -66,6 +92,21 @@ test('game:started public payload includes authoritative game wrapper', () => {
           distanceKm: 550,
           assignedAircraftInstanceIds: ['acft-1', 'acft-2'],
           activeFlightsCount: 2
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
         }
       ],
       aircraftCatalog: AIRCRAFT_CATALOG.map((aircraft) => ({
@@ -95,6 +136,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
   payload.game.players[0].score = 999;
   payload.game.airports[0].ownerPlayerId = 'p1';
   payload.game.routes[0].assignedAircraftInstanceIds.push('acft-3');
+  payload.game.flights[0].status = 'departed';
   assert.notEqual(payload.game.players[0], game.authoritativeState.players[0]);
   assert.equal(game.authoritativeState.players[0].username, 'Alice');
   assert.equal(game.authoritativeState.players[0].capital, 1000000);
@@ -106,12 +148,15 @@ test('game:started public payload includes authoritative game wrapper', () => {
     payload.game.routes[0].assignedAircraftInstanceIds,
     game.authoritativeState.routes[0].assignedAircraftInstanceIds
   );
+  assert.notEqual(payload.game.flights[0], game.authoritativeState.flights[0]);
   assert.deepEqual(game.authoritativeState.routes[0].assignedAircraftInstanceIds, ['acft-1', 'acft-2']);
+  assert.equal(game.authoritativeState.flights[0].status, 'ready');
   assert.equal('routeId' in payload.game.routes[0], true);
   assert.equal('startedAt' in payload.game, true);
   assert.equal('endsAt' in payload.game, true);
   assert.equal('durationMs' in payload.game, true);
   assert.equal('scoreToWin' in payload.game, true);
+  assert.equal('simulationClock' in payload.game, true);
 });
 
 test('game:started public player payload includes only explicit public fields', () => {
@@ -134,6 +179,7 @@ test('game:started public player payload includes only explicit public fields', 
     ],
     ownedAircraft: [],
     routes: [],
+    flights: [],
     airports: []
   };
 
@@ -177,6 +223,7 @@ test('game:started public payload includes airport definition plus game-owned mu
     ],
     ownedAircraft: [],
     routes: [],
+    flights: [],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null }
     ]
@@ -229,6 +276,7 @@ test('unknown airport IDs in game state are skipped with warning during public p
     ],
     ownedAircraft: [],
     routes: [],
+    flights: [],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null },
       { airportId: 'UNKNOWN', ownerPlayerId: null, saleListing: null }
@@ -279,6 +327,7 @@ test('airport saleListing is projected as a new object when present', () => {
     ],
     ownedAircraft: [],
     routes: [],
+    flights: [],
     airports: [
       {
         airportId: 'YYZ',

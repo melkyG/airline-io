@@ -5,6 +5,7 @@ const STARTING_CAPITAL = 1000000;
 const STARTING_SCORE = 0;
 const GAME_DURATION_MS = 30 * 60 * 1000;
 const SCORE_TO_WIN = 1000;
+const SIMULATION_SPEED_MULTIPLIER = 10000;
 
 function createInitialAirportState() {
   return AIRPORT_CATALOG.map((airport) => ({
@@ -32,10 +33,15 @@ function createGame(lobbyPlayers) {
     endsAt: startedAt + GAME_DURATION_MS,
     durationMs: GAME_DURATION_MS,
     scoreToWin: SCORE_TO_WIN,
+    simulationStartedAtRealMs: null,
+    simulationStartedAtGameMs: null,
+    simulationSpeedMultiplier: SIMULATION_SPEED_MULTIPLIER,
+    simulationEndedAtGameMs: null,
     players,
     airports: createInitialAirportState(),
     ownedAircraft: [],
-    routes: []
+    routes: [],
+    flights: []
   };
 }
 
@@ -44,5 +50,6 @@ module.exports = {
   STARTING_SCORE,
   GAME_DURATION_MS,
   SCORE_TO_WIN,
+  SIMULATION_SPEED_MULTIPLIER,
   createGame
 };

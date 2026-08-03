@@ -45,16 +45,19 @@ test('game ends by score threshold and records endReason/endedAt once', () => {
   assert.equal(game.authoritativeState.status, 'ended');
   assert.equal(game.authoritativeState.endReason, 'score');
   assert.equal(typeof game.authoritativeState.endedAt, 'number');
+  assert.equal(typeof game.authoritativeState.simulationEndedAtGameMs, 'number');
   assert.equal(game.endTimeoutId, null);
   assert.equal(emitted.length, 2);
   assert.equal(emitted[0].eventName, 'game:started');
   assert.equal(emitted[1].eventName, 'game:state');
 
   const endedAt = game.authoritativeState.endedAt;
+  const simulationEndedAtGameMs = game.authoritativeState.simulationEndedAtGameMs;
   const secondEndAttempt = game.endGame('time');
   assert.equal(secondEndAttempt, false);
   assert.equal(game.authoritativeState.endReason, 'score');
   assert.equal(game.authoritativeState.endedAt, endedAt);
+  assert.equal(game.authoritativeState.simulationEndedAtGameMs, simulationEndedAtGameMs);
 });
 
 test('game ends by time expiration and records time end reason', () => {
@@ -80,6 +83,7 @@ test('game ends by time expiration and records time end reason', () => {
   assert.equal(game.status, 'ended');
   assert.equal(game.authoritativeState.endReason, 'time');
   assert.equal(typeof game.authoritativeState.endedAt, 'number');
+  assert.equal(typeof game.authoritativeState.simulationEndedAtGameMs, 'number');
   assert.equal(game.endTimeoutId, null);
   assert.equal(emitted.length, 2);
   assert.equal(emitted[0].eventName, 'game:started');

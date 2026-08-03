@@ -15,7 +15,30 @@ const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
 const INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0
 });
+const SIMULATION_CLOCK_TICK_MS = 750;
+const SIMULATION_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'UTC',
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric'
+});
+const SIMULATION_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'UTC',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false
+});
 let gameCountdownIntervalId = null;
+let simulationClockIntervalId = null;
+let simulationClockSnapshot = {
+  simulationStartedAtRealMs: null,
+  simulationStartedAtGameMs: null,
+  simulationSpeedMultiplier: null,
+  simulationEndedAtGameMs: null,
+  simulationNowGameMs: null
+};
+let lastRenderedSimulationDateText = '';
+let lastRenderedSimulationTimeText = '';
 let selectedAirportId = null;
 let selectedAircraftCatalogId = null;
 let isAircraftPurchasePending = false;
@@ -279,8 +302,77 @@ function getEmptyGameState() {
     airports: [],
     ownedAircraft: [],
     routes: [],
-    aircraftCatalog: []
+    aircraftCatalog: [],
+    simulationStartedAtRealMs: null,
+    simulationStartedAtGameMs: null,
+    simulationSpeedMultiplier: null,
+    simulationEndedAtGameMs: null,
+    simulationClock: {
+      simulationStartedAtRealMs: null,
+      simulationStartedAtGameMs: null,
+      simulationSpeedMultiplier: null,
+      simulationEndedAtGameMs: null,
+      simulationNowGameMs: null
+    }
   };
+}
+
+function getEmptySimulationClockSnapshot() {
+  return {
+    simulationStartedAtRealMs: null,
+    simulationStartedAtGameMs: null,
+    simulationSpeedMultiplier: null,
+    simulationEndedAtGameMs: null,
+    simulationNowGameMs: null
+  };
+}
+
+function normalizeSimulationClockSnapshot(source) {
+  const snapshotSource = source && typeof source === 'object' ? source : {};
+  const normalizedSpeed =
+    Number.isFinite(snapshotSource.simulationSpeedMultiplier) && snapshotSource.simulationSpeedMultiplier > 0
+      ? snapshotSource.simulationSpeedMultiplier
+      : null;
+
+  return {
+    simulationStartedAtRealMs: Number.isFinite(snapshotSource.simulationStartedAtRealMs)
+      ? snapshotSource.simulationStartedAtRealMs
+      : null,
+    simulationStartedAtGameMs: Number.isFinite(snapshotSource.simulationStartedAtGameMs)
+      ? snapshotSource.simulationStartedAtGameMs
+      : null,
+    simulationSpeedMultiplier: normalizedSpeed,
+    simulationEndedAtGameMs: Number.isFinite(snapshotSource.simulationEndedAtGameMs)
+      ? snapshotSource.simulationEndedAtGameMs
+      : null,
+    simulationNowGameMs: Number.isFinite(snapshotSource.simulationNowGameMs)
+      ? snapshotSource.simulationNowGameMs
+      : null
+  };
+}
+
+function deriveSimulationNowGameMs(snapshot, realNowMs = Date.now()) {
+  const normalizedSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : getEmptySimulationClockSnapshot();
+
+  if (Number.isFinite(normalizedSnapshot.simulationEndedAtGameMs)) {
+    return normalizedSnapshot.simulationEndedAtGameMs;
+  }
+
+  if (
+    Number.isFinite(normalizedSnapshot.simulationStartedAtRealMs) &&
+    Number.isFinite(normalizedSnapshot.simulationStartedAtGameMs) &&
+    Number.isFinite(normalizedSnapshot.simulationSpeedMultiplier) &&
+    normalizedSnapshot.simulationSpeedMultiplier > 0
+  ) {
+    const elapsedRealMs = Math.max(0, realNowMs - normalizedSnapshot.simulationStartedAtRealMs);
+    return normalizedSnapshot.simulationStartedAtGameMs + (elapsedRealMs * normalizedSnapshot.simulationSpeedMultiplier);
+  }
+
+  if (Number.isFinite(normalizedSnapshot.simulationNowGameMs)) {
+    return normalizedSnapshot.simulationNowGameMs;
+  }
+
+  return null;
 }
 
 function formatRemainingTime(endsAt) {
@@ -429,6 +521,20 @@ renderer.render(gameState.getState());
 
 const hudBottomRightStackEl = document.createElement('div');
 hudBottomRightStackEl.className = 'hud-bottom-right-stack hidden';
+
+const simulationClockHudEl = document.createElement('div');
+simulationClockHudEl.className = 'simulation-clock-hud hidden';
+
+const simulationClockDateEl = document.createElement('p');
+simulationClockDateEl.className = 'simulation-clock-date';
+simulationClockDateEl.textContent = '--';
+
+const simulationClockTimeEl = document.createElement('p');
+simulationClockTimeEl.className = 'simulation-clock-time';
+simulationClockTimeEl.textContent = '--:--';
+
+simulationClockHudEl.appendChild(simulationClockDateEl);
+simulationClockHudEl.appendChild(simulationClockTimeEl);
 
 const hudIconColumnEl = document.createElement('div');
 hudIconColumnEl.className = 'hud-icon-column';
@@ -762,6 +868,7 @@ routeAircraftManagementModalDialogEl.appendChild(routeAircraftManagementModalCon
 routeAircraftManagementModalOverlayEl.appendChild(routeAircraftManagementModalDialogEl);
 
 if (gameScreenEl) {
+  gameScreenEl.appendChild(simulationClockHudEl);
   gameScreenEl.appendChild(hudBottomRightStackEl);
   gameScreenEl.appendChild(routesModalOverlayEl);
   gameScreenEl.appendChild(createRouteModalOverlayEl);
@@ -3864,6 +3971,99 @@ function applyLobbySnapshot(payload) {
   }));
 }
 
+function setSimulationClockSnapshotFromGame(authoritativeGame) {
+  if (!authoritativeGame || typeof authoritativeGame !== 'object') {
+    simulationClockSnapshot = getEmptySimulationClockSnapshot();
+    return;
+  }
+
+  const sourceSnapshot =
+    authoritativeGame.simulationClock && typeof authoritativeGame.simulationClock === 'object'
+      ? authoritativeGame.simulationClock
+      : authoritativeGame;
+  simulationClockSnapshot = normalizeSimulationClockSnapshot(sourceSnapshot);
+}
+
+function renderSimulationClockText(dateText, timeText) {
+  if (simulationClockDateEl && lastRenderedSimulationDateText !== dateText) {
+    simulationClockDateEl.textContent = dateText;
+    lastRenderedSimulationDateText = dateText;
+  }
+
+  if (simulationClockTimeEl && lastRenderedSimulationTimeText !== timeText) {
+    simulationClockTimeEl.textContent = timeText;
+    lastRenderedSimulationTimeText = timeText;
+  }
+}
+
+function updateSimulationClockDisplay() {
+  if (!simulationClockHudEl || !simulationClockDateEl || !simulationClockTimeEl) {
+    return false;
+  }
+
+  const state = gameState.getState();
+  const isGameScreen = Boolean(state && state.ui && state.ui.screen === 'game');
+  const gameStatus = state && state.game ? state.game.status : null;
+  const shouldShowClock = isGameScreen && (gameStatus === 'active' || gameStatus === 'ended');
+
+  if (!shouldShowClock) {
+    simulationClockHudEl.classList.add('hidden');
+    renderSimulationClockText('--', '--:--');
+    return false;
+  }
+
+  simulationClockHudEl.classList.remove('hidden');
+
+  const simulationNowGameMs = deriveSimulationNowGameMs(simulationClockSnapshot);
+  if (!Number.isFinite(simulationNowGameMs)) {
+    renderSimulationClockText('--', '--:--');
+    return true;
+  }
+
+  const simulationNowDate = new Date(simulationNowGameMs);
+  renderSimulationClockText(
+    SIMULATION_DATE_FORMATTER.format(simulationNowDate),
+    SIMULATION_TIME_FORMATTER.format(simulationNowDate)
+  );
+  return true;
+}
+
+function stopSimulationClockTicker() {
+  if (simulationClockIntervalId) {
+    clearInterval(simulationClockIntervalId);
+    simulationClockIntervalId = null;
+  }
+}
+
+function startSimulationClockTicker() {
+  if (simulationClockIntervalId) {
+    return;
+  }
+
+  simulationClockIntervalId = setInterval(() => {
+    updateSimulationClockDisplay();
+  }, SIMULATION_CLOCK_TICK_MS);
+}
+
+function syncSimulationClockLifecycle() {
+  const shouldRun = updateSimulationClockDisplay();
+  if (!shouldRun) {
+    stopSimulationClockTicker();
+    return;
+  }
+
+  startSimulationClockTicker();
+}
+
+function resetSimulationClockClientState() {
+  simulationClockSnapshot = getEmptySimulationClockSnapshot();
+  stopSimulationClockTicker();
+  renderSimulationClockText('--', '--:--');
+  if (simulationClockHudEl) {
+    simulationClockHudEl.classList.add('hidden');
+  }
+}
+
 setInterval(() => {
   gameState.update((state) => {
     const shouldAnimateLobbyDots = state.lobby.status === 'waiting' || state.lobby.status === 'countdown';
@@ -3955,6 +4155,7 @@ socket.on('connect', () => {
 
 socket.on('disconnect', () => {
   stopGameCountdown();
+  resetSimulationClockClientState();
   closeRoutesModal();
   isRouteCreatePending = false;
   routeCreateErrorMessage = '';
@@ -4025,6 +4226,7 @@ socket.on('lobby:joined', ({ lobbyId, playerId, username }) => {
 
 socket.on('lobby:left', ({ lobbyId, playerId }) => {
   stopGameCountdown();
+  resetSimulationClockClientState();
   gameState.update(() => ({
     session: {
       joined: false,
@@ -4040,6 +4242,7 @@ socket.on('lobby:left', ({ lobbyId, playerId }) => {
 
 socket.on('game:left', ({ gameId, playerId }) => {
   stopGameCountdown();
+  resetSimulationClockClientState();
   closeShopModal();
   closeRoutesModal();
   isRouteCreatePending = false;
@@ -4128,6 +4331,8 @@ socket.on('lobby:bot-fill:result', (result = {}) => {
 function applyAuthoritativeGamePayload(payload) {
   const authoritativeGame = payload && payload.game ? payload.game : getEmptyGameState();
 
+  setSimulationClockSnapshotFromGame(authoritativeGame);
+
   gameState.update(() => ({
     session: {
       currentGameId: authoritativeGame.id,
@@ -4139,6 +4344,7 @@ function applyAuthoritativeGamePayload(payload) {
   }));
 
   startGameCountdown();
+  syncSimulationClockLifecycle();
 
   return authoritativeGame;
 }
@@ -4154,6 +4360,11 @@ socket.on('game:started', (payload) => {
 socket.on('game:state', (payload) => {
   applyAuthoritativeGamePayload(payload);
   refreshSelectedAircraftEconomicsFromServer({ state: gameState.getState() });
+});
+
+window.addEventListener('beforeunload', () => {
+  stopGameCountdown();
+  stopSimulationClockTicker();
 });
 
 socket.on('game:event', (eventPayload) => {
