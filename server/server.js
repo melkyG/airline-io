@@ -26,7 +26,7 @@ io.on('connection', (socket) => {
   gameManager.broadcastLobbyPreviews();
 
   socket.on('lobby:join', (payload = {}) => {
-    const result = gameManager.assignPlayerToLobby(socket.id, payload.username);
+    const result = gameManager.assignPlayerToLobby(socket.id, payload.username, payload.preferredColorId);
     if (!result.success) {
       socket.emit('lobby:error', { message: result.message });
     }
@@ -50,6 +50,14 @@ io.on('connection', (socket) => {
     const result = gameManager.handleLobbyBotFillRequest(socket.id);
     socket.emit('lobby:bot-fill:result', result);
     if (!result.success) {
+      socket.emit('lobby:error', { message: result.message });
+    }
+  });
+
+  socket.on('lobby:color:request', (payload = {}) => {
+    const result = gameManager.requestLobbyPlayerColor(socket.id, payload.colorId);
+    socket.emit('lobby:color:result', result);
+    if (!result.success && result.message) {
       socket.emit('lobby:error', { message: result.message });
     }
   });

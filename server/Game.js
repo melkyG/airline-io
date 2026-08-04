@@ -2163,7 +2163,9 @@ class Game {
       username: player.username,
       isBot: Boolean(player && player.isBot),
       score: player.score,
-      capital: player.capital
+      capital: player.capital,
+      colorId: player.colorId ?? null,
+      colorHex: player.colorHex ?? null
     }));
   }
 

@@ -5,6 +5,7 @@ const Game = require('./Game');
 const { createGame } = require('./gameFactory');
 const { AIRCRAFT_CATALOG_BY_ID } = require('./aircraft/catalog');
 const { FULL_AIRPORT_CATALOG } = require('./airports/catalog');
+const { PLAYER_COLOR_CATALOG, PLAYER_COLOR_BY_ID } = require('./colors/palette');
 
 const AIRPORT_CATALOG_BY_ID = Object.freeze(
   FULL_AIRPORT_CATALOG.reduce((lookup, airport) => {
@@ -237,12 +238,245 @@ class GameManager {
     return player;
   }
 
-  addPlayerToLobby(lobby, player) {
+  getPlayerColorCatalog() {
+    return PLAYER_COLOR_CATALOG;
+  }
+
+  getPlayerColorDefinition(colorId) {
+    const normalizedColorId = String(colorId || '').trim();
+    if (!normalizedColorId) {
+      return null;
+    }
+
+    return PLAYER_COLOR_BY_ID[normalizedColorId] || null;
+  }
+
+  getFirstAvailableLobbyColorDefinition(lobby) {
+    if (!lobby || !lobby.colorAssignments) {
+      return null;
+    }
+
+    return PLAYER_COLOR_CATALOG.find((colorDefinition) => !lobby.colorAssignments.has(colorDefinition.colorId)) || null;
+  }
+
+  getAvailableColorIdsForLobby(lobby) {
+    if (!lobby || !lobby.colorAssignments) {
+      return PLAYER_COLOR_CATALOG.map((colorDefinition) => colorDefinition.colorId);
+    }
+
+    return PLAYER_COLOR_CATALOG
+      .filter((colorDefinition) => !lobby.colorAssignments.has(colorDefinition.colorId))
+      .map((colorDefinition) => colorDefinition.colorId);
+  }
+
+  claimLobbyPlayerColor(lobby, player, requestedColorId = null, { allowFallback = true } = {}) {
+    if (!lobby || !player) {
+      return null;
+    }
+
+    if (lobby.status !== 'waiting' && lobby.status !== 'countdown') {
+      return null;
+    }
+
+    const normalizedRequestedColorId = String(requestedColorId || '').trim();
+    const requestedDefinition = normalizedRequestedColorId ? this.getPlayerColorDefinition(normalizedRequestedColorId) : null;
+    const currentColorId = String(player.colorId || '').trim();
+    const currentColorDefinition = currentColorId ? this.getPlayerColorDefinition(currentColorId) : null;
+
+    let selectedDefinition = null;
+    if (requestedDefinition) {
+      const requestedOwnerId = lobby.colorAssignments.get(requestedDefinition.colorId) || null;
+      if (requestedOwnerId == null || requestedOwnerId === player.id) {
+        selectedDefinition = requestedDefinition;
+      } else if (!allowFallback) {
+        return null;
+      }
+    }
+
+    if (!selectedDefinition && allowFallback) {
+      if (currentColorDefinition && lobby.colorAssignments.get(currentColorDefinition.colorId) === player.id) {
+        selectedDefinition = currentColorDefinition;
+      } else {
+        selectedDefinition = this.getFirstAvailableLobbyColorDefinition(lobby);
+      }
+    }
+
+    if (!selectedDefinition) {
+      return null;
+    }
+
+    if (currentColorDefinition && currentColorDefinition.colorId !== selectedDefinition.colorId) {
+      this.releaseLobbyPlayerColor(lobby, player);
+    }
+
+    const selectedOwnerId = lobby.colorAssignments.get(selectedDefinition.colorId) || null;
+    if (selectedOwnerId != null && selectedOwnerId !== player.id) {
+      return null;
+    }
+
+    lobby.colorAssignments.set(selectedDefinition.colorId, player.id);
+    player.colorId = selectedDefinition.colorId;
+    player.colorHex = selectedDefinition.colorHex;
+    return selectedDefinition;
+  }
+
+  releaseLobbyPlayerColor(lobby, playerOrId) {
+    if (!lobby || !playerOrId) {
+      return false;
+    }
+
+    const playerId = typeof playerOrId === 'string' ? playerOrId : playerOrId.id;
+    const player = typeof playerOrId === 'string' ? this.players.get(playerId) || null : playerOrId;
+    const currentColorId = String((player && player.colorId) || '').trim();
+
+    if (!currentColorId) {
+      if (player) {
+        player.colorId = null;
+        player.colorHex = null;
+      }
+      return false;
+    }
+
+    if (lobby.colorAssignments.get(currentColorId) === playerId) {
+      lobby.colorAssignments.delete(currentColorId);
+    }
+
+    if (player) {
+      player.colorId = null;
+      player.colorHex = null;
+    }
+
+    return true;
+  }
+
+  requestLobbyPlayerColor(socketId, requestedColorId) {
+    const player = this.players.get(socketId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_REGISTERED',
+        message: 'Player not registered.',
+        playerId: socketId,
+        colorId: null,
+        colorHex: null,
+        availableColorIds: []
+      };
+    }
+
+    if (player.gameId) {
+      return {
+        success: false,
+        code: 'GAME_ALREADY_STARTED',
+        message: 'Color changes are only allowed in the lobby.',
+        playerId: player.id,
+        colorId: player.colorId,
+        colorHex: player.colorHex,
+        availableColorIds: []
+      };
+    }
+
+    if (!player.lobbyId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_IN_LOBBY',
+        message: 'You are not in a lobby.',
+        playerId: player.id,
+        colorId: player.colorId,
+        colorHex: player.colorHex,
+        availableColorIds: []
+      };
+    }
+
+    const lobby = this.lobbies.get(player.lobbyId);
+    if (!lobby) {
+      this.playerLobbyIds.delete(socketId);
+      player.lobbyId = null;
+      return {
+        success: false,
+        code: 'LOBBY_NOT_FOUND',
+        message: 'Lobby no longer exists.',
+        playerId: player.id,
+        colorId: player.colorId,
+        colorHex: player.colorHex,
+        availableColorIds: []
+      };
+    }
+
+    if (lobby.status !== 'waiting' && lobby.status !== 'countdown') {
+      return {
+        success: false,
+        code: 'LOBBY_NOT_WAITING',
+        message: 'Lobby is no longer waiting.',
+        playerId: player.id,
+        colorId: player.colorId,
+        colorHex: player.colorHex,
+        availableColorIds: this.getAvailableColorIdsForLobby(lobby)
+      };
+    }
+
+    const requestedDefinition = this.getPlayerColorDefinition(requestedColorId);
+    if (!requestedDefinition) {
+      return {
+        success: false,
+        code: 'INVALID_COLOR',
+        message: 'Requested color does not exist.',
+        playerId: player.id,
+        colorId: player.colorId,
+        colorHex: player.colorHex,
+        availableColorIds: this.getAvailableColorIdsForLobby(lobby)
+      };
+    }
+
+    const requestedOwnerId = lobby.colorAssignments.get(requestedDefinition.colorId) || null;
+    if (requestedOwnerId != null && requestedOwnerId !== player.id) {
+      return {
+        success: false,
+        code: 'COLOR_UNAVAILABLE',
+        message: 'Requested color is already taken in this lobby.',
+        playerId: player.id,
+        colorId: player.colorId,
+        colorHex: player.colorHex,
+        availableColorIds: this.getAvailableColorIdsForLobby(lobby)
+      };
+    }
+
+    this.releaseLobbyPlayerColor(lobby, player);
+    const assignedColor = this.claimLobbyPlayerColor(lobby, player, requestedDefinition.colorId, {
+      allowFallback: false
+    });
+
+    if (!assignedColor) {
+      return {
+        success: false,
+        code: 'COLOR_UNAVAILABLE',
+        message: 'Requested color is already taken in this lobby.',
+        playerId: player.id,
+        colorId: player.colorId,
+        colorHex: player.colorHex,
+        availableColorIds: this.getAvailableColorIdsForLobby(lobby)
+      };
+    }
+
+    lobby.broadcastState();
+    this.broadcastLobbyPreviews();
+
+    return {
+      success: true,
+      code: 'OK',
+      lobbyId: lobby.id,
+      playerId: player.id,
+      colorId: player.colorId,
+      colorHex: player.colorHex,
+      availableColorIds: this.getAvailableColorIdsForLobby(lobby)
+    };
+  }
+
+  addPlayerToLobby(lobby, player, requestedColorId = null) {
     if (!lobby || !player) {
       return false;
     }
 
-    const added = lobby.addPlayer(player);
+    const added = lobby.addPlayer(player, requestedColorId);
     if (!added) {
       return false;
     }
@@ -333,7 +567,7 @@ class GameManager {
     return `Player_${Date.now().toString(36)}`;
   }
 
-  assignPlayerToLobby(socketId, requestedUsername) {
+  assignPlayerToLobby(socketId, requestedUsername, requestedColorId = null) {
     const socket = this.connections.get(socketId);
     if (!socket && !this.players.has(socketId)) {
       return { success: false, message: 'Player not registered.' };
@@ -368,19 +602,26 @@ class GameManager {
       player.setDisplayName(resolvedUsername);
     }
 
-    if (!this.addPlayerToLobby(lobby, player)) {
+    if (!this.addPlayerToLobby(lobby, player, requestedColorId)) {
       return { success: false, message: 'Unable to join the lobby.' };
     }
 
     this.playerLobbyIds.set(socketId, lobby.id);
 
+    const lobbySnapshot = lobby.getPublicState();
+
     this.io.to(player.socket.id).emit('lobby:joined', {
       lobbyId: lobby.id,
       playerId: player.id,
-      username: player.displayName
+      username: player.displayName,
+      colorId: player.colorId,
+      colorHex: player.colorHex,
+      palette: lobbySnapshot.palette,
+      availableColorIds: lobbySnapshot.availableColorIds,
+      players: lobbySnapshot.players
     });
 
-    this.io.to(player.socket.id).emit('lobby:update', lobby.getPublicState());
+    this.io.to(player.socket.id).emit('lobby:update', lobbySnapshot);
 
     this.broadcastLobbyPreviews();
     return { success: true, lobby };
@@ -552,6 +793,7 @@ class GameManager {
         member.socket.leave(lobby.getRoomName());
       }
 
+      this.releaseLobbyPlayerColor(lobby, member);
       member.lobbyId = null;
       this.playerLobbyIds.delete(member.id);
 
@@ -562,6 +804,9 @@ class GameManager {
     });
 
     lobby.players.clear();
+    if (lobby.colorAssignments && typeof lobby.colorAssignments.clear === 'function') {
+      lobby.colorAssignments.clear();
+    }
     this.removeLobby(lobby.id);
     this.broadcastLobbyPreviews();
     return true;
@@ -831,6 +1076,11 @@ class GameManager {
   }
 
   getLobbyPreview() {
+    const palette = this.getPlayerColorCatalog().map((colorDefinition) => ({
+      colorId: colorDefinition.colorId,
+      colorHex: colorDefinition.colorHex
+    }));
+
     const joinableLobby = this.findBestJoinableLobby();
     if (!joinableLobby) {
       return {
@@ -839,6 +1089,8 @@ class GameManager {
         playerCount: 0,
         maxPlayers: 5,
         players: [],
+        palette,
+        availableColorIds: palette.map((entry) => entry.colorId),
         countdown: null
       };
     }
@@ -849,6 +1101,8 @@ class GameManager {
       playerCount: joinableLobby.getPlayerCount(),
       maxPlayers: joinableLobby.maxPlayers,
       players: Array.from(joinableLobby.players.values()).map((player) => player.getPublicState()),
+      palette,
+      availableColorIds: this.getAvailableColorIdsForLobby(joinableLobby),
       botFillInProgress: joinableLobby.botFillInProgress,
       countdown: joinableLobby.countdownRemaining
     };

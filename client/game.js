@@ -7,6 +7,9 @@ const gameTimerEl = document.getElementById('gameTimer');
 const devAddScoreButtonEl = document.getElementById('devAddScoreButton');
 const gameScreenEl = document.getElementById('gameScreen');
 const capitalHudEl = document.getElementById('capitalHud');
+const lobbyColorPickerEl = document.getElementById('lobbyColorPicker');
+const lobbyColorPickerRowEl = document.getElementById('lobbyColorPickerRow');
+const lobbyColorPickerHintEl = document.getElementById('lobbyColorPickerHint');
 const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
@@ -284,6 +287,8 @@ function getEmptyLobbyState() {
     playerCount: 0,
     maxPlayers: 5,
     players: [],
+    palette: [],
+    availableColorIds: [],
     botFillInProgress: false,
     countdownSeconds: null
   };
@@ -495,6 +500,8 @@ const gameState = window.createGameState({
     joined: false,
     joinPending: false,
     botFillPending: false,
+    lobbyColorRequestPending: false,
+    preferredLobbyColorId: null,
     currentLobbyId: null,
     currentGameId: null,
     gameEvents: []
@@ -513,6 +520,7 @@ const gameState = window.createGameState({
 const renderer = window.createRenderer(document);
 gameState.subscribe((state) => {
   renderer.render(state);
+  refreshLobbyColorPicker(state);
   refreshShopModal(state);
   refreshRoutesHudButton(state);
   refreshRoutesModal(state);
@@ -3946,29 +3954,220 @@ function getUsernameForJoin() {
   return sanitized;
 }
 
-function normalizeLobbySnapshot(payload) {
-  const source = payload || {};
+function normalizeLobbyPalette(sourcePalette, fallbackPalette = []) {
+  const paletteEntries = Array.isArray(sourcePalette) ? sourcePalette : fallbackPalette;
+
+  const palette = [];
+  const seenColorIds = new Set();
+
+  paletteEntries.forEach((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return;
+    }
+
+    const colorId = String(entry.colorId || '').trim();
+    const colorHex = String(entry.colorHex || '').trim();
+    if (!colorId || !colorHex || seenColorIds.has(colorId)) {
+      return;
+    }
+
+    seenColorIds.add(colorId);
+    palette.push({ colorId, colorHex });
+  });
+
+  return palette;
+}
+
+function normalizeLobbyPlayer(player) {
+  if (!player || typeof player !== 'object') {
+    return {
+      id: null,
+      displayName: 'Unknown player',
+      connected: false,
+      isBot: false,
+      colorId: null,
+      colorHex: null
+    };
+  }
+
+  const colorId = typeof player.colorId === 'string' && player.colorId.trim().length > 0
+    ? player.colorId.trim()
+    : null;
+
+  const colorHex = typeof player.colorHex === 'string' && player.colorHex.trim().length > 0
+    ? player.colorHex.trim()
+    : null;
+
   return {
-    lobbyId: source.lobbyId || null,
+    ...player,
+    isBot: Boolean(player.isBot),
+    colorId,
+    colorHex
+  };
+}
+
+function normalizeLobbySnapshot(payload, currentLobby = getEmptyLobbyState()) {
+  const source = payload || {};
+  const current = currentLobby && typeof currentLobby === 'object' ? currentLobby : getEmptyLobbyState();
+  const normalizedPlayers = Array.isArray(source.players)
+    ? source.players.map((player) => normalizeLobbyPlayer(player))
+    : Array.isArray(current.players)
+      ? current.players.map((player) => normalizeLobbyPlayer(player))
+      : [];
+
+  const normalizedPalette = normalizeLobbyPalette(source.palette, current.palette);
+  const paletteColorIds = new Set(normalizedPalette.map((entry) => entry.colorId));
+
+  let normalizedAvailableColorIds = [];
+  if (Array.isArray(source.availableColorIds)) {
+    normalizedAvailableColorIds = source.availableColorIds
+      .map((colorId) => String(colorId || '').trim())
+      .filter((colorId) => colorId.length > 0 && paletteColorIds.has(colorId));
+  } else if (Array.isArray(current.availableColorIds)) {
+    normalizedAvailableColorIds = current.availableColorIds
+      .map((colorId) => String(colorId || '').trim())
+      .filter((colorId) => colorId.length > 0 && paletteColorIds.has(colorId));
+  }
+
+  const computedPlayerCount = Number.isFinite(source.playerCount)
+    ? source.playerCount
+    : normalizedPlayers.length;
+
+  return {
+    lobbyId: source.lobbyId || current.lobbyId || null,
     status: source.status === 'countdown' ? 'countdown' : 'waiting',
-    playerCount: Number.isFinite(source.playerCount) ? source.playerCount : 0,
-    maxPlayers: Number.isFinite(source.maxPlayers) ? source.maxPlayers : 5,
-    players: Array.isArray(source.players)
-      ? source.players.map((player) => ({
-          ...player,
-          isBot: Boolean(player && player.isBot)
-        }))
-      : [],
-    botFillInProgress: Boolean(source.botFillInProgress),
-    countdownSeconds: Number.isFinite(source.countdown) ? source.countdown : null
+    playerCount: computedPlayerCount,
+    maxPlayers: Number.isFinite(source.maxPlayers) ? source.maxPlayers : current.maxPlayers,
+    players: normalizedPlayers,
+    palette: normalizedPalette,
+    availableColorIds: normalizedAvailableColorIds,
+    botFillInProgress: typeof source.botFillInProgress === 'boolean'
+      ? source.botFillInProgress
+      : Boolean(current.botFillInProgress),
+    countdownSeconds: Number.isFinite(source.countdown)
+      ? source.countdown
+      : (Number.isFinite(current.countdownSeconds) ? current.countdownSeconds : null)
   };
 }
 
 function applyLobbySnapshot(payload) {
-  const lobbySnapshot = normalizeLobbySnapshot(payload);
-  gameState.update(() => ({
+  const currentLobby = gameState.getState().lobby;
+  const lobbySnapshot = normalizeLobbySnapshot(payload, currentLobby);
+  gameState.update((state) => ({
+    session: {
+      preferredLobbyColorId:
+        state.session && state.session.joined
+          ? state.session.preferredLobbyColorId
+          : (state.session && state.session.preferredLobbyColorId &&
+            lobbySnapshot.palette.some((entry) => entry.colorId === state.session.preferredLobbyColorId)
+              ? state.session.preferredLobbyColorId
+              : null)
+    },
     lobby: lobbySnapshot
   }));
+}
+
+function getLocalLobbyPlayer(state) {
+  const sessionPlayerId = state && state.session ? state.session.playerId : null;
+  const lobbyPlayers = Array.isArray(state && state.lobby && state.lobby.players) ? state.lobby.players : [];
+
+  if (sessionPlayerId == null) {
+    return null;
+  }
+
+  return lobbyPlayers.find((player) => player && String(player.id) === String(sessionPlayerId)) || null;
+}
+
+function getPreferredLobbyColorIdForJoin(state) {
+  const preferredColorId = state && state.session ? state.session.preferredLobbyColorId : null;
+  if (typeof preferredColorId !== 'string' || preferredColorId.trim().length === 0) {
+    return null;
+  }
+
+  const palette = Array.isArray(state && state.lobby && state.lobby.palette) ? state.lobby.palette : [];
+  const paletteColorIds = new Set(palette.map((entry) => entry.colorId));
+  return paletteColorIds.has(preferredColorId) ? preferredColorId : null;
+}
+
+function refreshLobbyColorPicker(state) {
+  if (!lobbyColorPickerEl || !lobbyColorPickerRowEl || !lobbyColorPickerHintEl) {
+    return;
+  }
+
+  const palette = Array.isArray(state && state.lobby && state.lobby.palette) ? state.lobby.palette : [];
+  const availableColorIds = new Set(
+    Array.isArray(state && state.lobby && state.lobby.availableColorIds) ? state.lobby.availableColorIds : []
+  );
+  const localPlayer = getLocalLobbyPlayer(state);
+  const authoritativeColorId = localPlayer && localPlayer.colorId ? localPlayer.colorId : null;
+  const joined = Boolean(state && state.session && state.session.joined);
+  const colorRequestPending = Boolean(state && state.session && state.session.lobbyColorRequestPending);
+  const preferredColorId = state && state.session ? state.session.preferredLobbyColorId : null;
+  const selectedColorId = joined ? authoritativeColorId : preferredColorId;
+
+  if (palette.length === 0) {
+    lobbyColorPickerEl.classList.add('hidden');
+    lobbyColorPickerRowEl.innerHTML = '';
+    lobbyColorPickerHintEl.textContent = 'Waiting for palette...';
+    return;
+  }
+
+  lobbyColorPickerEl.classList.remove('hidden');
+  lobbyColorPickerRowEl.innerHTML = '';
+
+  const fragment = document.createDocumentFragment();
+  palette.forEach((entry) => {
+    const colorId = entry.colorId;
+    const colorHex = entry.colorHex;
+    const isAvailable = availableColorIds.has(colorId);
+    const isSelected = selectedColorId === colorId;
+    const canRequestColorChange = joined && !colorRequestPending && isAvailable && colorId !== authoritativeColorId;
+    const canSetPreference = !joined && isAvailable;
+
+    const tileButtonEl = document.createElement('button');
+    tileButtonEl.type = 'button';
+    tileButtonEl.className = 'lobby-color-tile';
+    tileButtonEl.style.backgroundColor = colorHex;
+    tileButtonEl.setAttribute('data-color-id', colorId);
+    tileButtonEl.setAttribute('aria-label', `Choose ${colorId}`);
+    tileButtonEl.setAttribute('role', 'option');
+    tileButtonEl.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+    tileButtonEl.title = isAvailable
+      ? `${colorId}${isSelected ? ' (selected)' : ''}`
+      : `${colorId} (unavailable)`;
+
+    if (isSelected) {
+      tileButtonEl.classList.add('is-selected');
+    }
+
+    if (!isAvailable) {
+      tileButtonEl.classList.add('is-unavailable');
+    }
+
+    tileButtonEl.disabled = !(canSetPreference || canRequestColorChange);
+    fragment.appendChild(tileButtonEl);
+  });
+
+  lobbyColorPickerRowEl.appendChild(fragment);
+
+  if (joined) {
+    lobbyColorPickerHintEl.textContent = colorRequestPending
+      ? 'Updating color selection...'
+      : 'Choose any available tile to request a color change.';
+    return;
+  }
+
+  if (selectedColorId && !availableColorIds.has(selectedColorId)) {
+    lobbyColorPickerHintEl.textContent = 'Preferred color is no longer available. Join anyway to receive a server fallback.';
+    return;
+  }
+
+  if (selectedColorId) {
+    lobbyColorPickerHintEl.textContent = 'Preferred color will be requested when you join.';
+    return;
+  }
+
+  lobbyColorPickerHintEl.textContent = 'Pick a preferred color before joining.';
 }
 
 function setSimulationClockSnapshotFromGame(authoritativeGame) {
@@ -4079,6 +4278,70 @@ setInterval(() => {
   });
 }, 850);
 
+if (lobbyColorPickerRowEl) {
+  lobbyColorPickerRowEl.addEventListener('click', (event) => {
+    const tileButton = event.target && typeof event.target.closest === 'function'
+      ? event.target.closest('.lobby-color-tile')
+      : null;
+
+    if (!tileButton || tileButton.disabled) {
+      return;
+    }
+
+    const requestedColorId = String(tileButton.getAttribute('data-color-id') || '').trim();
+    if (!requestedColorId) {
+      return;
+    }
+
+    const state = gameState.getState();
+    const palette = Array.isArray(state && state.lobby && state.lobby.palette) ? state.lobby.palette : [];
+    const paletteColorIds = new Set(palette.map((entry) => entry.colorId));
+    if (!paletteColorIds.has(requestedColorId)) {
+      return;
+    }
+
+    const availableColorIds = new Set(
+      Array.isArray(state && state.lobby && state.lobby.availableColorIds) ? state.lobby.availableColorIds : []
+    );
+    const isAvailable = availableColorIds.has(requestedColorId);
+    if (!isAvailable) {
+      return;
+    }
+
+    if (!state.session.joined) {
+      gameState.update(() => ({
+        session: {
+          preferredLobbyColorId: requestedColorId
+        },
+        ui: {
+          errorMessage: null
+        }
+      }));
+      return;
+    }
+
+    if (state.session.lobbyColorRequestPending) {
+      return;
+    }
+
+    const localPlayer = getLocalLobbyPlayer(state);
+    if (localPlayer && localPlayer.colorId === requestedColorId) {
+      return;
+    }
+
+    gameState.update(() => ({
+      session: {
+        lobbyColorRequestPending: true
+      },
+      ui: {
+        errorMessage: null
+      }
+    }));
+
+    socket.emit('lobby:color:request', { colorId: requestedColorId });
+  });
+}
+
 joinButtonEl.addEventListener('click', () => {
   const state = gameState.getState();
   const isConnected = state.connection.status === 'connected';
@@ -4094,7 +4357,11 @@ joinButtonEl.addEventListener('click', () => {
     }));
 
     const username = getUsernameForJoin();
-    socket.emit('lobby:join', { username });
+    const preferredColorId = getPreferredLobbyColorIdForJoin(state);
+    socket.emit('lobby:join', {
+      username,
+      preferredColorId
+    });
     return;
   }
 
@@ -4176,6 +4443,8 @@ socket.on('disconnect', () => {
       joined: false,
       joinPending: false,
       botFillPending: false,
+      lobbyColorRequestPending: false,
+      preferredLobbyColorId: null,
       currentLobbyId: null,
       currentGameId: null,
       gameEvents: []
@@ -4206,9 +4475,17 @@ socket.on('lobby:preview', (payload) => {
   applyLobbySnapshot(payload);
 });
 
-socket.on('lobby:joined', ({ lobbyId, playerId, username }) => {
+socket.on('lobby:joined', (payload = {}) => {
+  const lobbyId = payload.lobbyId || null;
+  const playerId = payload.playerId || null;
+  const username = payload.username;
+
   if (typeof username === 'string') {
     usernameInputEl.value = username;
+  }
+
+  if (payload && payload.lobbyId) {
+    applyLobbySnapshot(payload);
   }
 
   gameState.update(() => ({
@@ -4217,6 +4494,11 @@ socket.on('lobby:joined', ({ lobbyId, playerId, username }) => {
       joined: true,
       joinPending: false,
       botFillPending: false,
+      lobbyColorRequestPending: false,
+      preferredLobbyColorId:
+        typeof payload.colorId === 'string' && payload.colorId.trim().length > 0
+          ? payload.colorId.trim()
+          : null,
       currentLobbyId: lobbyId
     }
   }));
@@ -4232,6 +4514,7 @@ socket.on('lobby:left', ({ lobbyId, playerId }) => {
       joined: false,
       joinPending: false,
       botFillPending: false,
+      lobbyColorRequestPending: false,
       currentLobbyId: null
     },
     lobby: getEmptyLobbyState()
@@ -4261,6 +4544,8 @@ socket.on('game:left', ({ gameId, playerId }) => {
     session: {
       joinPending: false,
       botFillPending: false,
+      lobbyColorRequestPending: false,
+      preferredLobbyColorId: null,
       currentGameId: null,
       joined: false,
       currentLobbyId: null,
@@ -4279,10 +4564,52 @@ socket.on('game:left', ({ gameId, playerId }) => {
 socket.on('lobby:update', (payload) => {
   if (payload && payload.lobbyId) {
     gameState.update(() => ({
-      session: { botFillPending: false }
+      session: {
+        botFillPending: false,
+        lobbyColorRequestPending: false
+      }
     }));
     applyLobbySnapshot(payload);
   }
+});
+
+socket.on('lobby:color:result', (result = {}) => {
+  gameState.update((state) => {
+    const currentLobby = state && state.lobby ? state.lobby : getEmptyLobbyState();
+    const currentPlayers = Array.isArray(currentLobby.players) ? currentLobby.players : [];
+
+    const nextPlayers = result.success
+      ? currentPlayers.map((player) => {
+          if (!player || String(player.id) !== String(result.playerId)) {
+            return player;
+          }
+
+          return {
+            ...player,
+            colorId: typeof result.colorId === 'string' ? result.colorId : player.colorId,
+            colorHex: typeof result.colorHex === 'string' ? result.colorHex : player.colorHex
+          };
+        })
+      : currentPlayers;
+
+    const nextAvailableColorIds = Array.isArray(result.availableColorIds)
+      ? result.availableColorIds
+      : currentLobby.availableColorIds;
+
+    return {
+      session: {
+        lobbyColorRequestPending: false,
+        preferredLobbyColorId:
+          typeof result.colorId === 'string' && result.colorId.trim().length > 0
+            ? result.colorId.trim()
+            : state.session.preferredLobbyColorId
+      },
+      lobby: {
+        players: nextPlayers,
+        availableColorIds: nextAvailableColorIds
+      }
+    };
+  });
 });
 
 socket.on('lobby:countdown', ({ secondsRemaining }) => {
@@ -4307,7 +4634,7 @@ socket.on('lobby:countdown-cancelled', ({ lobbyId, message }) => {
 
 socket.on('lobby:error', ({ message }) => {
   gameState.update(() => ({
-    session: { joinPending: false, botFillPending: false },
+    session: { joinPending: false, botFillPending: false, lobbyColorRequestPending: false },
     ui: { errorMessage: message || '' }
   }));
 

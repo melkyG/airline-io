@@ -18,6 +18,8 @@ class Player {
     this.joinedAt = Date.now();
     this.connected = options.connected == null ? true : Boolean(options.connected);
     this.score = 0;
+    this.colorId = options.colorId || null;
+    this.colorHex = options.colorHex || null;
     this.socket = socket;
     this.lobbyId = null;
     this.gameId = null;
@@ -33,7 +35,9 @@ class Player {
       id: this.id,
       displayName: this.displayName,
       connected: this.connected,
-      isBot: this.isBot
+      isBot: this.isBot,
+      colorId: this.colorId,
+      colorHex: this.colorHex
     };
   }
 }

@@ -13,7 +13,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
     durationMs: 1800000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0, internalOnlyField: 'secret' }
+      { id: 'p1', username: 'Alice', capital: 1000000, score: 0, colorId: 'red', colorHex: '#ef4444', internalOnlyField: 'secret' }
     ],
     ownedAircraft: [],
     routes: [
@@ -80,7 +80,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
         simulationNowGameMs: null
       },
       players: [
-        { id: 'p1', username: 'Alice', isBot: false, capital: 1000000, score: 0 }
+        { id: 'p1', username: 'Alice', isBot: false, capital: 1000000, score: 0, colorId: 'red', colorHex: '#ef4444' }
       ],
       ownedAircraft: [],
       routes: [
@@ -174,6 +174,8 @@ test('game:started public player payload includes only explicit public fields', 
         username: 'Alice',
         capital: 1000000,
         score: 0,
+        colorId: 'red',
+        colorHex: '#ef4444',
         internalOnlyField: 'hidden-value'
       }
     ],
@@ -202,11 +204,99 @@ test('game:started public player payload includes only explicit public fields', 
       username: 'Alice',
       isBot: false,
       capital: 1000000,
-      score: 0
+      score: 0,
+      colorId: 'red',
+      colorHex: '#ef4444'
     }
   ]);
   assert.equal('internalOnlyField' in payload.game.players[0], false);
   assert.notEqual(payload.game.players[0], game.authoritativeState.players[0]);
+});
+
+test('game public player snapshots preserve authoritative bot and human colors across state updates', () => {
+  const initialState = {
+    id: 'game-colors-1',
+    status: 'active',
+    createdAt: 523999,
+    startedAt: 523999,
+    endsAt: 2323999,
+    durationMs: 1800000,
+    scoreToWin: 1000,
+    players: [
+      {
+        id: 'p1',
+        username: 'Alice',
+        isBot: false,
+        capital: 1000000,
+        score: 0,
+        colorId: 'violet',
+        colorHex: '#8b5cf6'
+      },
+      {
+        id: 'bot-1',
+        username: 'Sky Goose',
+        isBot: true,
+        capital: 1000000,
+        score: 0,
+        colorId: 'sky',
+        colorHex: '#0ea5e9'
+      }
+    ],
+    ownedAircraft: [],
+    routes: [],
+    flights: [],
+    airports: []
+  };
+
+  const manager = {
+    io: {
+      to() {
+        return {
+          emit() {}
+        };
+      }
+    }
+  };
+
+  const game = new Game(initialState, manager);
+
+  const startedPayload = game.getPublicState();
+  assert.deepEqual(startedPayload.game.players, [
+    {
+      id: 'p1',
+      username: 'Alice',
+      isBot: false,
+      capital: 1000000,
+      score: 0,
+      colorId: 'violet',
+      colorHex: '#8b5cf6'
+    },
+    {
+      id: 'bot-1',
+      username: 'Sky Goose',
+      isBot: true,
+      capital: 1000000,
+      score: 0,
+      colorId: 'sky',
+      colorHex: '#0ea5e9'
+    }
+  ]);
+
+  game.addScore('p1', 50);
+  const statePayload = game.getPublicState();
+
+  assert.deepEqual(
+    statePayload.game.players.map((player) => ({
+      id: player.id,
+      isBot: player.isBot,
+      colorId: player.colorId,
+      colorHex: player.colorHex
+    })),
+    [
+      { id: 'p1', isBot: false, colorId: 'violet', colorHex: '#8b5cf6' },
+      { id: 'bot-1', isBot: true, colorId: 'sky', colorHex: '#0ea5e9' }
+    ]
+  );
 });
 
 test('game:started public payload includes airport definition plus game-owned mutable state', () => {
@@ -219,7 +309,7 @@ test('game:started public payload includes airport definition plus game-owned mu
     durationMs: 1800000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000, score: 0, colorId: null, colorHex: null }
     ],
     ownedAircraft: [],
     routes: [],
@@ -272,7 +362,7 @@ test('unknown airport IDs in game state are skipped with warning during public p
     durationMs: 1800000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000, score: 0, colorId: null, colorHex: null }
     ],
     ownedAircraft: [],
     routes: [],

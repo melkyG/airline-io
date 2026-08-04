@@ -10,6 +10,7 @@
   const AIRPORT_LABEL_ZOOM_NAME = 6.1;
   const ROUTE_LINE_COLOR = '#000000';
   const ROUTE_LINE_WIDTH = 2;
+  const OWNED_AIRPORT_FALLBACK_COLOR = '#0ea5e9';
   const MAPLIBRE_ROUTE_SOURCE_ID = 'airline-routes-source';
   const MAPLIBRE_ROUTE_LAYER_ID = 'airline-routes-layer';
   const MAPLIBRE_FLIGHT_SOURCE_ID = 'airline-flights-source';
@@ -112,6 +113,111 @@
     }, new Map());
   }
 
+  function createPlayersById(players) {
+    return (Array.isArray(players) ? players : []).reduce((lookup, player) => {
+      if (!player || !player.id) {
+        return lookup;
+      }
+
+      lookup.set(String(player.id), player);
+      return lookup;
+    }, new Map());
+  }
+
+  function isValidHexColor(value) {
+    return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(String(value || '').trim());
+  }
+
+  function normalizeHexColor(value, fallbackColor) {
+    const normalizedValue = String(value || '').trim();
+    if (isValidHexColor(normalizedValue)) {
+      return normalizedValue;
+    }
+
+    return fallbackColor;
+  }
+
+  function parseHexColorChannels(colorHex) {
+    const normalizedColorHex = normalizeHexColor(colorHex, OWNED_AIRPORT_FALLBACK_COLOR);
+    const compactHex = normalizedColorHex.slice(1);
+    const expandedHex = compactHex.length === 3
+      ? compactHex.split('').map((segment) => `${segment}${segment}`).join('')
+      : compactHex;
+
+    return {
+      red: Number.parseInt(expandedHex.slice(0, 2), 16),
+      green: Number.parseInt(expandedHex.slice(2, 4), 16),
+      blue: Number.parseInt(expandedHex.slice(4, 6), 16)
+    };
+  }
+
+  function darkenHexColor(colorHex, multiplier = 0.45) {
+    const { red, green, blue } = parseHexColorChannels(colorHex);
+    const toHexChannel = (channel) => {
+      const nextChannel = Math.max(0, Math.min(255, Math.round(channel * multiplier)));
+      return nextChannel.toString(16).padStart(2, '0');
+    };
+
+    return `#${toHexChannel(red)}${toHexChannel(green)}${toHexChannel(blue)}`;
+  }
+
+  function resolvePlayerColorHexById(playerId, playersById, fallbackColor = null) {
+    const normalizedPlayerId = playerId != null ? String(playerId).trim() : '';
+    if (!normalizedPlayerId) {
+      return fallbackColor;
+    }
+
+    const player = playersById instanceof Map ? playersById.get(normalizedPlayerId) : null;
+    if (!player) {
+      return fallbackColor;
+    }
+
+    return normalizeHexColor(player.colorHex, fallbackColor);
+  }
+
+  function resolveAirportOwnerColorHex(airport, playersById) {
+    const ownerPlayerId = airport && airport.ownerPlayerId != null
+      ? String(airport.ownerPlayerId).trim()
+      : '';
+
+    if (!ownerPlayerId) {
+      return null;
+    }
+
+    return resolvePlayerColorHexById(ownerPlayerId, playersById, OWNED_AIRPORT_FALLBACK_COLOR);
+  }
+
+  function applyAirportMarkerOwnershipStyling(markerElement, airport, playersById) {
+    if (!markerElement) {
+      return;
+    }
+
+    const colorTargetElement =
+      markerElement.querySelector('.airport-marker-visual') ||
+      markerElement.querySelector('.airport-marker') ||
+      (markerElement.classList && markerElement.classList.contains('airport-marker') ? markerElement : null);
+    const ownerPlayerId = airport && airport.ownerPlayerId;
+    const hasListing =
+      !!(airport && airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice));
+    const ownerColorHex = resolveAirportOwnerColorHex(airport, playersById);
+
+    markerElement.setAttribute('data-owned', ownerPlayerId == null ? 'false' : 'true');
+    markerElement.setAttribute('data-listed', hasListing ? 'true' : 'false');
+
+    if (!colorTargetElement) {
+      return;
+    }
+
+    if (!ownerColorHex) {
+      colorTargetElement.style.removeProperty('--airport-marker-room-fill');
+      colorTargetElement.style.removeProperty('--airport-marker-stroke');
+      return;
+    }
+
+    colorTargetElement.style.setProperty('--airport-marker-room-fill', ownerColorHex);
+    colorTargetElement.style.setProperty('--airport-marker-stroke', darkenHexColor(ownerColorHex));
+  }
+
   function deriveSimulationNowGameMs(snapshot, realNowMs = Date.now()) {
     const source = snapshot && typeof snapshot === 'object' ? snapshot : {};
     if (Number.isFinite(source.simulationEndedAtGameMs)) {
@@ -195,6 +301,7 @@
 
     const airports = Array.isArray(game.airports) ? game.airports : [];
     const flights = Array.isArray(game.flights) ? game.flights : [];
+    const playersById = createPlayersById(game.players);
     const airportLookupById = createAirportLookupById(airports);
     const simulationClock = game.simulationClock && typeof game.simulationClock === 'object'
       ? game.simulationClock
@@ -249,11 +356,13 @@
         (simulationNowGameMs - departedAtSimulationMs) / (arrivesAtSimulationMs - departedAtSimulationMs)
       );
       const easedProgress = easeFlightProgress(rawProgress);
+      const colorHex = resolvePlayerColorHexById(flight.ownerPlayerId, playersById, FLIGHT_DOT_COLOR);
 
       const lng = originLng + ((destinationLng - originLng) * easedProgress);
       const lat = originLat + ((destinationLat - originLat) * easedProgress);
       drawableFlights.push({
         flightId,
+        colorHex,
         lng,
         lat
       });
@@ -342,17 +451,6 @@
       }
 
       return CURRENCY_FORMATTER.format(numericValue);
-    }
-
-    function createPlayersById(players) {
-      return (Array.isArray(players) ? players : []).reduce((lookup, player) => {
-        if (!player || !player.id) {
-          return lookup;
-        }
-
-        lookup.set(String(player.id), player);
-        return lookup;
-      }, new Map());
     }
 
     function getAirportTooltipData(airportId) {
@@ -506,19 +604,6 @@
       return String(code || name || '');
     }
 
-    function applyAirportOwnershipStyling(markerElement, airport) {
-      if (!markerElement) {
-        return;
-      }
-
-      const ownerPlayerId = airport && airport.ownerPlayerId;
-      const hasListing =
-        !!(airport && airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice));
-
-      markerElement.setAttribute('data-owned', ownerPlayerId == null ? 'false' : 'true');
-      markerElement.setAttribute('data-listed', hasListing ? 'true' : 'false');
-    }
-
     function applyAirportMarkerLabel(markerElement, airport, zoom) {
       if (!markerElement) {
         return;
@@ -610,7 +695,7 @@
           source: MAPLIBRE_FLIGHT_SOURCE_ID,
           paint: {
             'circle-radius': getMapLibreFlightDotRadiusExpression(),
-            'circle-color': FLIGHT_DOT_COLOR,
+            'circle-color': ['coalesce', ['get', 'colorHex'], FLIGHT_DOT_COLOR],
             'circle-stroke-color': FLIGHT_DOT_STROKE_COLOR,
             'circle-stroke-width': FLIGHT_DOT_STROKE_WIDTH_PX,
             'circle-opacity': 0.95
@@ -640,7 +725,8 @@
         features: drawableFlights.map((flight) => ({
           type: 'Feature',
           properties: {
-            flightId: flight.flightId
+            flightId: flight.flightId,
+            colorHex: flight.colorHex
           },
           geometry: {
             type: 'Point',
@@ -838,12 +924,13 @@
       return markerElement;
     }
 
-    function syncAirportMarkers(airports) {
+    function syncAirportMarkers(airports, players) {
       if (!mapInstance) {
         return;
       }
 
       const sourceAirports = Array.isArray(airports) ? airports : [];
+      const playersById = createPlayersById(players);
       const activeMarkerIds = new Set();
 
       sourceAirports.forEach((airport, index) => {
@@ -862,7 +949,7 @@
         if (existingMarker) {
           existingMarker.setLngLat([lng, lat]);
           const existingElement = existingMarker.getElement();
-          applyAirportOwnershipStyling(existingElement, airport);
+          applyAirportMarkerOwnershipStyling(existingElement, airport, playersById);
           applyAirportMarkerLabel(existingElement, airport, mapInstance.getZoom());
           return;
         }
@@ -890,7 +977,7 @@
         });
 
         airportMarkersById.set(markerId, marker);
-        applyAirportOwnershipStyling(markerElement, airport);
+        applyAirportMarkerOwnershipStyling(markerElement, airport, playersById);
         applyAirportMarkerLabel(markerElement, airport, mapInstance.getZoom());
       });
 
@@ -1068,7 +1155,7 @@
       latestGameSnapshot = state.game || null;
   resizeMapIfNeeded();
       applyInitialCameraSetupIfReady();
-      syncAirportMarkers(state.game && state.game.airports);
+      syncAirportMarkers(state.game && state.game.airports, state.game && state.game.players);
       syncRouteLines(state.game && state.game.routes, state.game && state.game.airports);
       ensureNativeFlightAnimationState();
       refreshAirportTooltip();
@@ -1122,17 +1209,6 @@
       }
 
       return CURRENCY_FORMATTER.format(numericValue);
-    }
-
-    function createPlayersById(players) {
-      return (Array.isArray(players) ? players : []).reduce((lookup, player) => {
-        if (!player || !player.id) {
-          return lookup;
-        }
-
-        lookup.set(String(player.id), player);
-        return lookup;
-      }, new Map());
     }
 
     function getAirportTooltipData(airportId) {
@@ -1372,6 +1448,9 @@
         if (existingMarker) {
           existingMarker.setLatLng([flight.lat, flight.lng]);
           existingMarker.setRadius(radiusPx);
+          existingMarker.setStyle({
+            fillColor: flight.colorHex
+          });
           return;
         }
 
@@ -1379,7 +1458,7 @@
           radius: radiusPx,
           color: FLIGHT_DOT_STROKE_COLOR,
           weight: FLIGHT_DOT_STROKE_WIDTH_PX,
-          fillColor: FLIGHT_DOT_COLOR,
+          fillColor: flight.colorHex,
           fillOpacity: 0.95,
           interactive: false
         });
@@ -1477,8 +1556,9 @@
       });
     }
 
-    function syncAirportMarkers(map, airports) {
+    function syncAirportMarkers(map, airports, players) {
       const sourceAirports = Array.isArray(airports) ? airports : [];
+      const playersById = createPlayersById(players);
       const activeMarkerIds = new Set();
 
       sourceAirports.forEach((airport, index) => {
@@ -1496,6 +1576,7 @@
         const existingMarker = airportMarkersById.get(markerId);
         if (existingMarker) {
           existingMarker.setLatLng([lat, lng]);
+          applyAirportMarkerOwnershipStyling(existingMarker.getElement(), airport, playersById);
           applyAirportMarkerLabel(existingMarker, airport, map.getZoom());
           return;
         }
@@ -1527,6 +1608,7 @@
 
         marker.addTo(map);
         airportMarkersById.set(markerId, marker);
+        applyAirportMarkerOwnershipStyling(marker.getElement(), airport, playersById);
         applyAirportMarkerLabel(marker, airport, map.getZoom());
       });
 
@@ -1666,7 +1748,7 @@
       invalidateMapSizeIfNeeded(map);
       updateViewportMinZoom(map, { forceFit: !hasFittedWorld });
       syncRouteLines(map, state.game && state.game.routes, state.game && state.game.airports);
-      syncAirportMarkers(map, state.game && state.game.airports);
+      syncAirportMarkers(map, state.game && state.game.airports, state.game && state.game.players);
       ensureLeafletFlightAnimationState(map);
       refreshAirportTooltip(map);
       hasFittedWorld = true;

@@ -62,10 +62,13 @@ test('handleLobbyBotFillRequest fills remaining lobby slots with server-side bot
     assert.match(player.id, /^bot-/);
     assert.equal(player.connected, true);
     assert.equal(player.socket, null);
+    assert.equal(typeof player.colorId, 'string');
+    assert.equal(typeof player.colorHex, 'string');
   });
 
   const botNames = botPlayers.map((player) => player.displayName);
   assert.equal(new Set(botNames).size, botNames.length);
+  assert.equal(new Set(botPlayers.map((player) => player.colorId)).size, botPlayers.length);
 
   const publicSnapshot = lobby.getPublicState();
   assert.equal(publicSnapshot.playerCount, 5);
@@ -124,6 +127,7 @@ test('leaving a waiting lobby with only bots remaining destroys the lobby and pu
 
   const leaveResult = manager.leaveLobby(socket.id);
   assert.equal(leaveResult.success, true);
+  assert.equal(manager.players.get(socket.id).colorId, null);
 
   assert.equal(manager.lobbies.has(lobbyId), false);
   assert.equal(lobby.players.size, 0);

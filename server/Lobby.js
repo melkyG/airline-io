@@ -4,6 +4,7 @@ class Lobby {
     this.status = 'waiting';
     this.maxPlayers = 5;
     this.players = new Map();
+    this.colorAssignments = new Map();
     this.botFillInProgress = false;
     this.countdownRemaining = null;
     this.countdownInterval = null;
@@ -15,13 +16,26 @@ class Lobby {
     return this.status === 'waiting' && this.players.size < this.maxPlayers;
   }
 
-  addPlayer(player) {
+  addPlayer(player, requestedColorId = null) {
     if (!this.isJoinable()) {
       return false;
     }
 
     if (this.players.has(player.id)) {
       return false;
+    }
+
+    if (this.manager && typeof this.manager.claimLobbyPlayerColor === 'function') {
+      const assignedColor = this.manager.claimLobbyPlayerColor(this, player, requestedColorId, {
+        allowFallback: true
+      });
+
+      if (!assignedColor) {
+        return false;
+      }
+    } else {
+      player.colorId = null;
+      player.colorHex = null;
     }
 
     player.lobbyId = this.id;
@@ -44,6 +58,12 @@ class Lobby {
     }
 
     this.players.delete(playerId);
+    if (this.manager && typeof this.manager.releaseLobbyPlayerColor === 'function') {
+      this.manager.releaseLobbyPlayerColor(this, player);
+    } else {
+      player.colorId = null;
+      player.colorHex = null;
+    }
     player.lobbyId = null;
     player.connected = isDisconnect ? false : true;
 
@@ -133,12 +153,25 @@ class Lobby {
   }
 
   getPublicState() {
+    const palette = this.manager && typeof this.manager.getPlayerColorCatalog === 'function'
+      ? this.manager.getPlayerColorCatalog().map((colorDefinition) => ({
+          colorId: colorDefinition.colorId,
+          colorHex: colorDefinition.colorHex
+        }))
+      : [];
+
+    const availableColorIds = this.manager && typeof this.manager.getAvailableColorIdsForLobby === 'function'
+      ? this.manager.getAvailableColorIdsForLobby(this)
+      : [];
+
     return {
       lobbyId: this.id,
       status: this.status,
       playerCount: this.players.size,
       maxPlayers: this.maxPlayers,
       players: Array.from(this.players.values()).map((player) => player.getPublicState()),
+      palette,
+      availableColorIds,
       botFillInProgress: this.botFillInProgress,
       countdown: this.countdownRemaining
     };

@@ -17,14 +17,18 @@ function makeLobbyPlayers() {
       displayName: 'Alice',
       lobbyId: 'lobby-1',
       connected: true,
-      score: 5
+      score: 5,
+      colorId: 'violet',
+      colorHex: '#8b5cf6'
     },
     {
       id: 'socket-2',
       displayName: 'Bob',
       lobbyId: 'lobby-1',
       connected: true,
-      score: 1
+      score: 1,
+      colorId: 'sky',
+      colorHex: '#0ea5e9'
     }
   ];
 }
@@ -51,10 +55,17 @@ test('createGame builds the expected initial authoritative state shape', () => {
   assert.equal(game.players.length, 2);
 
   assert.deepEqual(
-    game.players.map((player) => ({ id: player.id, username: player.username, isBot: player.isBot, score: player.score })),
+    game.players.map((player) => ({
+      id: player.id,
+      username: player.username,
+      isBot: player.isBot,
+      score: player.score,
+      colorId: player.colorId,
+      colorHex: player.colorHex
+    })),
     [
-      { id: 'socket-1', username: 'Alice', isBot: false, score: STARTING_SCORE },
-      { id: 'socket-2', username: 'Bob', isBot: false, score: STARTING_SCORE }
+      { id: 'socket-1', username: 'Alice', isBot: false, score: STARTING_SCORE, colorId: 'violet', colorHex: '#8b5cf6' },
+      { id: 'socket-2', username: 'Bob', isBot: false, score: STARTING_SCORE, colorId: 'sky', colorHex: '#0ea5e9' }
     ]
   );
 
@@ -99,6 +110,54 @@ test('mutating game players does not mutate original lobby players', () => {
   assert.equal(lobbyPlayers[0].displayName, 'Alice');
   assert.equal(lobbyPlayers[0].capital, undefined);
   assert.equal(lobbyPlayers[0].score, 5);
+});
+
+test('createGame preserves bot and human lobby colors in authoritative game players', () => {
+  const lobbyPlayers = [
+    {
+      id: 'socket-human',
+      displayName: 'Alice',
+      lobbyId: 'lobby-1',
+      connected: true,
+      isBot: false,
+      colorId: 'violet',
+      colorHex: '#8b5cf6'
+    },
+    {
+      id: 'bot-1',
+      displayName: 'Sky Goose',
+      lobbyId: 'lobby-1',
+      connected: true,
+      isBot: true,
+      colorId: 'sky',
+      colorHex: '#0ea5e9'
+    }
+  ];
+
+  const game = createGame(lobbyPlayers);
+
+  assert.deepEqual(
+    game.players.map((player) => ({
+      id: player.id,
+      isBot: player.isBot,
+      colorId: player.colorId,
+      colorHex: player.colorHex
+    })),
+    [
+      { id: 'socket-human', isBot: false, colorId: 'violet', colorHex: '#8b5cf6' },
+      { id: 'bot-1', isBot: true, colorId: 'sky', colorHex: '#0ea5e9' }
+    ]
+  );
+
+  lobbyPlayers[0].colorId = 'red';
+  lobbyPlayers[0].colorHex = '#ef4444';
+  lobbyPlayers[1].colorId = 'lime';
+  lobbyPlayers[1].colorHex = '#84cc16';
+
+  assert.equal(game.players[0].colorId, 'violet');
+  assert.equal(game.players[0].colorHex, '#8b5cf6');
+  assert.equal(game.players[1].colorId, 'sky');
+  assert.equal(game.players[1].colorHex, '#0ea5e9');
 });
 
 test('two games are independent objects and have different IDs', () => {

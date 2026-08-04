@@ -95,6 +95,165 @@
 				"tmp-flight-filter-diagnose.js"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "validate-color-allocation-tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/game-factory.test.js",
+				"server/tests/game-start-payload.test.js",
+				"server/tests/lobby-bot-fill.test.js",
+				"server/tests/player-color-allocation.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-color-allocation-tests-2",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/game-factory.test.js",
+				"server/tests/game-start-payload.test.js",
+				"server/tests/lobby-bot-fill.test.js",
+				"server/tests/player-color-allocation.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-color-allocation-tests-3",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/game-factory.test.js",
+				"server/tests/game-start-payload.test.js",
+				"server/tests/lobby-bot-fill.test.js",
+				"server/tests/player-color-allocation.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-player-color-allocation",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/player-color-allocation.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diag-color-allocation",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tmp-color-diagnose.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-player-color-allocation-2",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/player-color-allocation.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-full-server-suite-colors",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-stage2-color-contract",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-diag-lobby-color-contract",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"diag-lobby-color-contract.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-server-after-client-stage3",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-stage4-color-carryover",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/game-factory.test.js",
+				"server/tests/game-start-payload.test.js",
+				"server/tests/player-color-allocation.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-client-map-syntax-stage5",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--check",
+				"client/map.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-client-map-syntax-stage5-fix",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--check",
+				"client/map.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-client-map-syntax-stage5-leaflet-fix",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--check",
+				"client/map.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-client-map-syntax-flight-owner-colors",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--check",
+				"client/map.js"
+			],
+			"isBackground": false
 		}
 	]
 }

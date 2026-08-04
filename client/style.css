@@ -295,6 +295,112 @@ body {
   font-size: 0.95rem;
 }
 
+.lobby-color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.42rem;
+  margin-top: 0.2rem;
+  padding: 0.55rem 0.6rem 0.6rem;
+  border-radius: 11px;
+  border: 1px solid rgba(71, 85, 105, 0.72);
+  background: rgba(2, 6, 23, 0.28);
+}
+
+.lobby-color-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.lobby-color-picker-title {
+  color: #94a3b8;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+}
+
+.lobby-color-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.15rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) rgba(15, 23, 42, 0.28);
+}
+
+.lobby-color-picker-row::-webkit-scrollbar {
+  height: 7px;
+}
+
+.lobby-color-picker-row::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.26);
+  border-radius: 999px;
+}
+
+.lobby-color-picker-row::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.42);
+  border-radius: 999px;
+}
+
+.lobby-color-tile {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transform: translateY(0);
+  transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, filter 140ms ease, opacity 140ms ease;
+}
+
+.lobby-color-tile:hover:not(:disabled),
+.lobby-color-tile:focus-visible:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: rgba(226, 232, 240, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24), 0 6px 12px rgba(2, 6, 23, 0.45);
+}
+
+.lobby-color-tile:focus-visible {
+  outline: 2px solid rgba(56, 189, 248, 0.7);
+  outline-offset: 1px;
+}
+
+.lobby-color-tile.is-selected {
+  border-color: rgba(248, 250, 252, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(248, 250, 252, 0.5), 0 0 0 1px rgba(248, 250, 252, 0.85);
+}
+
+.lobby-color-tile.is-selected::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  width: 7px;
+  height: 12px;
+  border-right: 2px solid rgba(255, 255, 255, 0.98);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.98);
+  transform: rotate(40deg);
+}
+
+.lobby-color-tile.is-unavailable {
+  opacity: 0.34;
+  cursor: not-allowed;
+  filter: grayscale(0.25);
+}
+
+.lobby-color-picker-hint {
+  margin: 0;
+  min-height: 1.1rem;
+  color: #cbd5e1;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
 .footer-divider {
   width: 100%;
   height: 1px;

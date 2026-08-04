@@ -22,7 +22,9 @@ function createGame(lobbyPlayers) {
     username: player.displayName,
     isBot: Boolean(player && player.isBot),
     capital: STARTING_CAPITAL,
-    score: STARTING_SCORE
+    score: STARTING_SCORE,
+    colorId: player && player.colorId ? player.colorId : null,
+    colorHex: player && player.colorHex ? player.colorHex : null
   }));
 
   return {
