@@ -9,7 +9,6 @@ const gameScreenEl = document.getElementById('gameScreen');
 const capitalHudEl = document.getElementById('capitalHud');
 const lobbyColorPickerEl = document.getElementById('lobbyColorPicker');
 const lobbyColorPickerRowEl = document.getElementById('lobbyColorPickerRow');
-const lobbyColorPickerHintEl = document.getElementById('lobbyColorPickerHint');
 const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
@@ -655,6 +654,7 @@ hudBottomRightStackEl.appendChild(hudIconColumnEl);
 if (capitalHudEl) {
   hudBottomRightStackEl.appendChild(capitalHudEl);
 }
+hudBottomRightStackEl.appendChild(simulationClockHudEl);
 
 const routesModalOverlayEl = document.createElement('div');
 routesModalOverlayEl.className = 'shop-modal-overlay routes-modal-overlay hidden';
@@ -876,7 +876,6 @@ routeAircraftManagementModalDialogEl.appendChild(routeAircraftManagementModalCon
 routeAircraftManagementModalOverlayEl.appendChild(routeAircraftManagementModalDialogEl);
 
 if (gameScreenEl) {
-  gameScreenEl.appendChild(simulationClockHudEl);
   gameScreenEl.appendChild(hudBottomRightStackEl);
   gameScreenEl.appendChild(routesModalOverlayEl);
   gameScreenEl.appendChild(createRouteModalOverlayEl);
@@ -907,6 +906,9 @@ shopModalTitleEl.textContent = 'Shop';
 const shopModalTabsEl = document.createElement('div');
 shopModalTabsEl.className = 'shop-modal-tabs';
 
+const shopTabbedPanelEl = document.createElement('div');
+shopTabbedPanelEl.className = 'shop-tabbed-panel';
+
 const shopAirportsTabButtonEl = document.createElement('button');
 shopAirportsTabButtonEl.type = 'button';
 shopAirportsTabButtonEl.className = 'shop-modal-tab';
@@ -923,7 +925,7 @@ shopModalTabsEl.appendChild(shopAirportsTabButtonEl);
 shopModalTabsEl.appendChild(shopAircraftTabButtonEl);
 
 const shopModalContentEl = document.createElement('div');
-shopModalContentEl.className = 'shop-modal-content';
+shopModalContentEl.className = 'shop-modal-content shop-tab-content';
 
 const shopAirportsPanelEl = document.createElement('div');
 shopAirportsPanelEl.className = 'shop-modal-panel';
@@ -1239,8 +1241,9 @@ shopModalContentEl.appendChild(shopAircraftPanelEl);
 
 shopModalDialogEl.appendChild(shopModalCloseButtonEl);
 shopModalDialogEl.appendChild(shopModalTitleEl);
-shopModalDialogEl.appendChild(shopModalTabsEl);
-shopModalDialogEl.appendChild(shopModalContentEl);
+shopTabbedPanelEl.appendChild(shopModalTabsEl);
+shopTabbedPanelEl.appendChild(shopModalContentEl);
+shopModalDialogEl.appendChild(shopTabbedPanelEl);
 shopModalOverlayEl.appendChild(shopModalDialogEl);
 
 if (gameScreenEl) {
@@ -4090,10 +4093,11 @@ function getPreferredLobbyColorIdForJoin(state) {
 }
 
 function refreshLobbyColorPicker(state) {
-  if (!lobbyColorPickerEl || !lobbyColorPickerRowEl || !lobbyColorPickerHintEl) {
+  if (!lobbyColorPickerEl || !lobbyColorPickerRowEl) {
     return;
   }
 
+  const isLobbyScreen = Boolean(state && state.ui && state.ui.screen === 'lobby');
   const palette = Array.isArray(state && state.lobby && state.lobby.palette) ? state.lobby.palette : [];
   const availableColorIds = new Set(
     Array.isArray(state && state.lobby && state.lobby.availableColorIds) ? state.lobby.availableColorIds : []
@@ -4105,10 +4109,9 @@ function refreshLobbyColorPicker(state) {
   const preferredColorId = state && state.session ? state.session.preferredLobbyColorId : null;
   const selectedColorId = joined ? authoritativeColorId : preferredColorId;
 
-  if (palette.length === 0) {
+  if (!isLobbyScreen || palette.length === 0) {
     lobbyColorPickerEl.classList.add('hidden');
     lobbyColorPickerRowEl.innerHTML = '';
-    lobbyColorPickerHintEl.textContent = 'Waiting for palette...';
     return;
   }
 
@@ -4149,25 +4152,6 @@ function refreshLobbyColorPicker(state) {
   });
 
   lobbyColorPickerRowEl.appendChild(fragment);
-
-  if (joined) {
-    lobbyColorPickerHintEl.textContent = colorRequestPending
-      ? 'Updating color selection...'
-      : 'Choose any available tile to request a color change.';
-    return;
-  }
-
-  if (selectedColorId && !availableColorIds.has(selectedColorId)) {
-    lobbyColorPickerHintEl.textContent = 'Preferred color is no longer available. Join anyway to receive a server fallback.';
-    return;
-  }
-
-  if (selectedColorId) {
-    lobbyColorPickerHintEl.textContent = 'Preferred color will be requested when you join.';
-    return;
-  }
-
-  lobbyColorPickerHintEl.textContent = 'Pick a preferred color before joining.';
 }
 
 function setSimulationClockSnapshotFromGame(authoritativeGame) {
@@ -4279,6 +4263,19 @@ setInterval(() => {
 }, 850);
 
 if (lobbyColorPickerRowEl) {
+  lobbyColorPickerRowEl.addEventListener('wheel', (event) => {
+    if (!event || !Number.isFinite(event.deltaY) || event.deltaY === 0) {
+      return;
+    }
+
+    if (Math.abs(event.deltaY) < Math.abs(event.deltaX)) {
+      return;
+    }
+
+    event.preventDefault();
+    lobbyColorPickerRowEl.scrollLeft += event.deltaY;
+  }, { passive: false });
+
   lobbyColorPickerRowEl.addEventListener('click', (event) => {
     const tileButton = event.target && typeof event.target.closest === 'function'
       ? event.target.closest('.lobby-color-tile')

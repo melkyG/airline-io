@@ -8,6 +8,10 @@
   const AIRPORT_TOOLTIP_OFFSET_Y = -10;
   const AIRPORT_LABEL_ZOOM_IATA = 4.6;
   const AIRPORT_LABEL_ZOOM_NAME = 6.1;
+  const AIRPORT_MARKER_SCALE_MIN = 0.84;
+  const AIRPORT_MARKER_SCALE_MAX = 1.45;
+  const AIRPORT_MARKER_SCALE_MIN_ZOOM = INITIAL_ZOOM;
+  const AIRPORT_MARKER_SCALE_MAX_ZOOM = BASEMAP_MAX_ZOOM;
   const ROUTE_LINE_COLOR = '#000000';
   const ROUTE_LINE_WIDTH = 2;
   const OWNED_AIRPORT_FALLBACK_COLOR = '#0ea5e9';
@@ -73,6 +77,79 @@
       [latLngBounds[1][1], latLngBounds[1][0]]
     ];
   }
+
+  function clampNumber(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function interpolateLinearValue(value, inputMin, inputMax, outputMin, outputMax) {
+    if (!Number.isFinite(value)) {
+      return outputMin;
+    }
+
+    if (inputMax <= inputMin) {
+      return outputMax;
+    }
+
+    const progress = clampNumber((value - inputMin) / (inputMax - inputMin), 0, 1);
+    return outputMin + ((outputMax - outputMin) * progress);
+  }
+
+  function getAirportMarkerScaleForZoom(zoomLevel) {
+    return interpolateLinearValue(
+      zoomLevel,
+      AIRPORT_MARKER_SCALE_MIN_ZOOM,
+      AIRPORT_MARKER_SCALE_MAX_ZOOM,
+      AIRPORT_MARKER_SCALE_MIN,
+      AIRPORT_MARKER_SCALE_MAX
+    );
+  }
+
+  function applyAirportMarkerScaleToElement(markerRootElement, zoomLevel) {
+    if (!markerRootElement || !markerRootElement.style) {
+      return;
+    }
+
+    markerRootElement.style.setProperty('--airport-marker-scale', getAirportMarkerScaleForZoom(zoomLevel).toFixed(3));
+  }
+
+  function applyAirportMarkerScaleInContainer(containerElement, zoomLevel) {
+    if (!containerElement || typeof containerElement.querySelectorAll !== 'function') {
+      return;
+    }
+
+    containerElement
+      .querySelectorAll('.airport-marker-root')
+      .forEach((markerRootElement) => applyAirportMarkerScaleToElement(markerRootElement, zoomLevel));
+  }
+
+  function installLeafletAirportMarkerZoomScaling(leafletNamespace) {
+    if (
+      !leafletNamespace ||
+      !leafletNamespace.Map ||
+      typeof leafletNamespace.Map.addInitHook !== 'function' ||
+      leafletNamespace.Map.prototype.__airportMarkerZoomScalingInstalled
+    ) {
+      return;
+    }
+
+    leafletNamespace.Map.prototype.__airportMarkerZoomScalingInstalled = true;
+    leafletNamespace.Map.addInitHook(function addAirportMarkerZoomScalingHook() {
+      const updateAirportMarkerScale = () => {
+        const containerElement = typeof this.getContainer === 'function' ? this.getContainer() : null;
+        const zoomLevel = typeof this.getZoom === 'function' ? this.getZoom() : INITIAL_ZOOM;
+        applyAirportMarkerScaleInContainer(containerElement, zoomLevel);
+      };
+
+      this.on('zoom zoomend layeradd', updateAirportMarkerScale);
+
+      if (typeof this.whenReady === 'function') {
+        this.whenReady(updateAirportMarkerScale);
+      }
+    });
+  }
+
+  installLeafletAirportMarkerZoomScaling(globalScope.L);
 
   function isTouchDeviceLike() {
     const hasTouchPoints = Number(globalScope.navigator && globalScope.navigator.maxTouchPoints) > 0;
@@ -632,6 +709,17 @@
       });
     }
 
+    function refreshAirportMarkerScales() {
+      if (!mapInstance) {
+        return;
+      }
+
+      const zoom = mapInstance.getZoom();
+      airportMarkersById.forEach((marker) => {
+        applyAirportMarkerScaleToElement(marker.getElement(), zoom);
+      });
+    }
+
     function clearAirportMarkers() {
       airportMarkersById.forEach((marker) => {
         marker.remove();
@@ -951,6 +1039,7 @@
           const existingElement = existingMarker.getElement();
           applyAirportMarkerOwnershipStyling(existingElement, airport, playersById);
           applyAirportMarkerLabel(existingElement, airport, mapInstance.getZoom());
+          applyAirportMarkerScaleToElement(existingElement, mapInstance.getZoom());
           return;
         }
 
@@ -979,6 +1068,7 @@
         airportMarkersById.set(markerId, marker);
         applyAirportMarkerOwnershipStyling(markerElement, airport, playersById);
         applyAirportMarkerLabel(markerElement, airport, mapInstance.getZoom());
+        applyAirportMarkerScaleToElement(markerElement, mapInstance.getZoom());
       });
 
       Array.from(airportMarkersById.entries()).forEach(([markerId, marker]) => {
@@ -1115,6 +1205,7 @@
 
       mapInstance.on('zoom', () => {
         refreshAirportMarkerLabels();
+        refreshAirportMarkerScales();
         refreshAirportTooltip();
       });
 

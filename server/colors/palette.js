@@ -16,7 +16,13 @@ const PLAYER_COLOR_CATALOG = Object.freeze([
   { colorId: 'pink', colorHex: '#ec4899' },
   { colorId: 'rose', colorHex: '#f43f5e' },
   { colorId: 'slate', colorHex: '#64748b' },
-  { colorId: 'stone', colorHex: '#78716c' }
+  { colorId: 'stone', colorHex: '#78716c' },
+  { colorId: 'fuchsia', colorHex: '#d946ef' },
+  { colorId: 'navy', colorHex: '#1e3a8a' },
+  { colorId: 'aqua', colorHex: '#22d3ee' },
+  { colorId: 'mint', colorHex: '#34d399' },
+  { colorId: 'gold', colorHex: '#fbbf24' },
+  { colorId: 'neutral', colorHex: '#a3a3a3' }
 ]);
 
 const PLAYER_COLOR_BY_ID = Object.freeze(
