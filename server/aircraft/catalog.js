@@ -7,7 +7,8 @@ const AIRCRAFT_SCHEMA_KEYS = Object.freeze([
   'model',
   'purchasePrice',
   'rangeKm',
-  'cruiseSpeedKmH'
+  'cruiseSpeedKmH',
+  'baseRevenuePerKm'
 ]);
 
 function assertNonEmptyString(value, fieldName) {
@@ -50,6 +51,7 @@ function validateAircraftCatalogEntry(entry) {
   assertFiniteNonNegativeNumber(entry.purchasePrice, 'purchasePrice');
   assertFiniteNonNegativeNumber(entry.rangeKm, 'rangeKm');
   assertFinitePositiveNumber(entry.cruiseSpeedKmH, 'cruiseSpeedKmH');
+  assertFinitePositiveNumber(entry.baseRevenuePerKm, 'baseRevenuePerKm');
 
   return Object.freeze({
     aircraftCatalogId: entry.aircraftCatalogId.trim(),
@@ -57,7 +59,8 @@ function validateAircraftCatalogEntry(entry) {
     model: entry.model.trim(),
     purchasePrice: entry.purchasePrice,
     rangeKm: entry.rangeKm,
-    cruiseSpeedKmH: entry.cruiseSpeedKmH
+    cruiseSpeedKmH: entry.cruiseSpeedKmH,
+    baseRevenuePerKm: entry.baseRevenuePerKm
   });
 }
 
@@ -68,7 +71,8 @@ const FULL_AIRCRAFT_CATALOG = Object.freeze([
     model: '747',
     purchasePrice: 300000,
     rangeKm: 14000,
-    cruiseSpeedKmH: 900
+    cruiseSpeedKmH: 900,
+    baseRevenuePerKm: 130
   }),
   validateAircraftCatalogEntry({
     aircraftCatalogId: 'BOEING_737',
@@ -76,7 +80,8 @@ const FULL_AIRCRAFT_CATALOG = Object.freeze([
     model: '737',
     purchasePrice: 220000,
     rangeKm: 6500,
-    cruiseSpeedKmH: 840
+    cruiseSpeedKmH: 840,
+    baseRevenuePerKm: 105
   })
 ]);
 

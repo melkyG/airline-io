@@ -80,7 +80,16 @@ test('game:started public payload includes authoritative game wrapper', () => {
         simulationNowGameMs: null
       },
       players: [
-        { id: 'p1', username: 'Alice', isBot: false, capital: 1000000, score: 0, colorId: 'red', colorHex: '#ef4444' }
+        {
+          id: 'p1',
+          username: 'Alice',
+          isBot: false,
+          capital: 1000000,
+          netWorth: 1000000,
+          score: 0,
+          colorId: 'red',
+          colorHex: '#ef4444'
+        }
       ],
       ownedAircraft: [],
       routes: [
@@ -204,6 +213,7 @@ test('game:started public player payload includes only explicit public fields', 
       username: 'Alice',
       isBot: false,
       capital: 1000000,
+      netWorth: 1000000,
       score: 0,
       colorId: 'red',
       colorHex: '#ef4444'
@@ -267,6 +277,7 @@ test('game public player snapshots preserve authoritative bot and human colors a
       username: 'Alice',
       isBot: false,
       capital: 1000000,
+      netWorth: 1000000,
       score: 0,
       colorId: 'violet',
       colorHex: '#8b5cf6'
@@ -276,6 +287,7 @@ test('game public player snapshots preserve authoritative bot and human colors a
       username: 'Sky Goose',
       isBot: true,
       capital: 1000000,
+      netWorth: 1000000,
       score: 0,
       colorId: 'sky',
       colorHex: '#0ea5e9'

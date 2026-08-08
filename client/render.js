@@ -482,8 +482,13 @@
         return String(aircraft.ownerPlayerId) === String(localPlayerId) ? count + 1 : count;
       }, 0);
 
+      const netWorth = Number.isFinite(localPlayer.netWorth)
+        ? localPlayer.netWorth
+        : localPlayer.capital;
+
       capitalHudContentEl.textContent =
         `Capital: ${CAPITAL_FORMATTER.format(localPlayer.capital)}\n` +
+        `Net Worth: ${CAPITAL_FORMATTER.format(netWorth)}\n` +
         `🏢: ${ownedAirportCount} | 🛫: ${ownedAircraftCount}`;
       elements.capitalHud.classList.remove('hidden');
     }

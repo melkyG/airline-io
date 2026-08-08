@@ -10,6 +10,12 @@ const {
   calculateFlightDurationSimulationMs
 } = require('./flights/rules');
 const { createBoundedScheduler } = require('./flights/scheduler');
+const { calculateFlightSettlement } = require('./economy/flightSettlement');
+const {
+  calculateAirportSellToGamePrice,
+  calculateAircraftSellToGamePrice
+} = require('./economy/liquidation');
+const { calculateNetWorthByPlayer } = require('./economy/netWorth');
 
 const AIRPORT_DEFINITIONS_BY_ID = AIRPORT_CATALOG.reduce((lookup, airport) => {
   lookup.set(airport.id, airport);
@@ -17,15 +23,6 @@ const AIRPORT_DEFINITIONS_BY_ID = AIRPORT_CATALOG.reduce((lookup, airport) => {
 }, new Map());
 
 const DEFAULT_SIMULATION_SPEED_MULTIPLIER = 10000;
-
-function calculateAirportSellToGamePrice(basePrice) {
-  const normalizedBasePrice = Number.isFinite(basePrice) ? basePrice : 0;
-  if (normalizedBasePrice < 0) {
-    return 0;
-  }
-
-  return Math.round(normalizedBasePrice * 0.8);
-}
 
 class Game {
   constructor(initialState, manager) {
@@ -446,7 +443,7 @@ class Game {
       const isCatalogMatch = String(aircraft.aircraftCatalogId) === String(context.aircraftDefinition.aircraftCatalogId);
       return isOwnerMatch && isCatalogMatch ? count + 1 : count;
     }, 0);
-    const unitSellPrice = Math.round(context.purchasePrice * 0.8);
+    const unitSellPrice = calculateAircraftSellToGamePrice(context.purchasePrice);
 
     return {
       success: true,
@@ -2002,7 +1999,81 @@ class Game {
       flightIndex,
       route,
       aircraft,
+      aircraftDefinition,
       flightDurationSimulationMs
+    };
+  }
+
+  resolveFlightArrivalSettlementContext(transitionContext) {
+    if (!transitionContext || !transitionContext.flight || !transitionContext.route || !transitionContext.aircraftDefinition) {
+      return {
+        success: false,
+        code: 'FLIGHT_SETTLEMENT_CONTEXT_INVALID',
+        message: 'Flight settlement context is incomplete.'
+      };
+    }
+
+    const sourcePlayers = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const normalizedOwnerPlayerId = String(transitionContext.flight.ownerPlayerId || '').trim();
+    const ownerPlayer = sourcePlayers.find((player) => {
+      return player && String(player.id || '').trim() === normalizedOwnerPlayerId;
+    });
+
+    if (!ownerPlayer) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Flight owner player was not found in authoritative game state.',
+        flightId: transitionContext.flight.flightId,
+        playerId: normalizedOwnerPlayerId || null
+      };
+    }
+
+    const currentCapital = Number(ownerPlayer.capital);
+    if (!Number.isFinite(currentCapital)) {
+      return {
+        success: false,
+        code: 'PLAYER_CAPITAL_INVALID',
+        message: 'Flight owner capital is invalid for settlement.',
+        flightId: transitionContext.flight.flightId,
+        playerId: ownerPlayer.id
+      };
+    }
+
+    const settlementResult = calculateFlightSettlement({
+      baseRevenuePerKm: transitionContext.aircraftDefinition.baseRevenuePerKm,
+      routeDistanceKm: transitionContext.route.distanceKm
+    });
+    if (!settlementResult.success) {
+      return {
+        success: false,
+        code: settlementResult.code,
+        message: settlementResult.message,
+        flightId: transitionContext.flight.flightId,
+        playerId: ownerPlayer.id,
+        routeId: transitionContext.route.routeId,
+        aircraftCatalogId: transitionContext.aircraftDefinition.aircraftCatalogId
+      };
+    }
+
+    const finalRevenue = Number(settlementResult.finalRevenue);
+    if (!Number.isFinite(finalRevenue)) {
+      return {
+        success: false,
+        code: 'FLIGHT_SETTLEMENT_INVALID',
+        message: 'Flight settlement produced an invalid final revenue value.',
+        flightId: transitionContext.flight.flightId,
+        playerId: ownerPlayer.id,
+        routeId: transitionContext.route.routeId,
+        aircraftCatalogId: transitionContext.aircraftDefinition.aircraftCatalogId
+      };
+    }
+
+    return {
+      success: true,
+      ownerPlayer,
+      currentCapital,
+      settlementResult
     };
   }
 
@@ -2033,9 +2104,18 @@ class Game {
     }
 
     if (currentStatus === 'in-flight') {
+      const settlementContext = this.resolveFlightArrivalSettlementContext(context);
+      if (!settlementContext.success) {
+        return settlementContext;
+      }
+
       const arrivalSimulationMs = Number.isFinite(flight.arrivesAtSimulationMs)
         ? flight.arrivesAtSimulationMs
         : Math.min(normalizedDueAtSimulationMs, simulationNowMs);
+
+      settlementContext.ownerPlayer.capital =
+        settlementContext.currentCapital + settlementContext.settlementResult.finalRevenue;
+
       flight.status = 'turnaround';
       flight.departedAtSimulationMs = null;
       flight.arrivesAtSimulationMs = null;
@@ -2157,6 +2237,7 @@ class Game {
 
   createPublicPlayerSnapshot() {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const netWorthByPlayerId = calculateNetWorthByPlayer(this.authoritativeState);
 
     return players.map((player) => ({
       id: player.id,
@@ -2164,6 +2245,12 @@ class Game {
       isBot: Boolean(player && player.isBot),
       score: player.score,
       capital: player.capital,
+      netWorth:
+        netWorthByPlayerId.has(String(player.id))
+          ? netWorthByPlayerId.get(String(player.id))
+          : Number.isFinite(player.capital)
+            ? player.capital
+            : 0,
       colorId: player.colorId ?? null,
       colorHex: player.colorHex ?? null
     }));

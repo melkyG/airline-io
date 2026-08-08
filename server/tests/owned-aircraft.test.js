@@ -29,18 +29,21 @@ test('active aircraft catalog is manually authored with BOEING_747 and BOEING_73
   assert.equal(catalogById.BOEING_747.purchasePrice, 300000);
   assert.equal(catalogById.BOEING_747.rangeKm, 14000);
   assert.equal(catalogById.BOEING_747.cruiseSpeedKmH, 900);
+  assert.equal(catalogById.BOEING_747.baseRevenuePerKm, 130);
 
   assert.equal(catalogById.BOEING_737.manufacturer, 'Boeing');
   assert.equal(catalogById.BOEING_737.model, '737');
   assert.equal(catalogById.BOEING_737.purchasePrice, 220000);
   assert.equal(catalogById.BOEING_737.rangeKm, 6500);
   assert.equal(catalogById.BOEING_737.cruiseSpeedKmH, 840);
+  assert.equal(catalogById.BOEING_737.baseRevenuePerKm, 105);
 
   AIRCRAFT_CATALOG.forEach((entry) => {
     assert.equal('passengerCapacity' in entry, false);
     assert.equal('cruiseSpeedKph' in entry, false);
     assert.deepEqual(Object.keys(entry).sort(), [
       'aircraftCatalogId',
+      'baseRevenuePerKm',
       'cruiseSpeedKmH',
       'manufacturer',
       'model',
@@ -64,7 +67,8 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         model: '747',
         purchasePrice: 300000,
         rangeKm: 14000,
-        cruiseSpeedKmH: 900
+        cruiseSpeedKmH: 900,
+        baseRevenuePerKm: 130
       });
     },
     /aircraftCatalogId must be a non-empty string/
@@ -79,6 +83,7 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         purchasePrice: 300000,
         rangeKm: 14000,
         cruiseSpeedKmH: 900,
+        baseRevenuePerKm: 130,
         speed: 900
       });
     },
@@ -93,7 +98,8 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         model: '747',
         purchasePrice: -1,
         rangeKm: 14000,
-        cruiseSpeedKmH: 900
+        cruiseSpeedKmH: 900,
+        baseRevenuePerKm: 130
       });
     },
     /purchasePrice must be a finite non-negative number/
@@ -107,10 +113,26 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         model: '747',
         purchasePrice: 300000,
         rangeKm: 14000,
-        cruiseSpeedKmH: 0
+        cruiseSpeedKmH: 0,
+        baseRevenuePerKm: 130
       });
     },
     /cruiseSpeedKmH must be a finite positive number/
+  );
+
+  assert.throws(
+    () => {
+      validateAircraftCatalogEntry({
+        aircraftCatalogId: 'BOEING_747',
+        manufacturer: 'Boeing',
+        model: '747',
+        purchasePrice: 300000,
+        rangeKm: 14000,
+        cruiseSpeedKmH: 900,
+        baseRevenuePerKm: 0
+      });
+    },
+    /baseRevenuePerKm must be a finite positive number/
   );
 });
 
