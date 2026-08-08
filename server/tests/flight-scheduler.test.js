@@ -39,7 +39,7 @@ function createBaseState(overrides = {}) {
     simulationStartedAtGameMs: 0,
     simulationSpeedMultiplier: 10000,
     simulationEndedAtGameMs: null,
-    players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+    players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: 'p1', saleListing: null },
       { airportId: 'JFK', ownerPlayerId: 'p1', saleListing: null }
@@ -249,8 +249,8 @@ test('multiple arriving flights in one tick each settle and still emit a single 
   const game = new Game(
     createBaseState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 1000000 }
       ],
       airports: [
         { airportId: 'YYZ', ownerPlayerId: 'p1', saleListing: null },

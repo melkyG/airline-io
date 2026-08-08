@@ -55,7 +55,7 @@ test('client stores authoritative game without leaderboard property', () => {
       endsAt: 1800123,
       durationMs: 1800000,
       scoreToWin: 1000,
-      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
       airports: [],
       ownedAircraft: []
     }

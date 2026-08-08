@@ -43,8 +43,8 @@ function createBaseState(overrides = {}) {
     simulationSpeedMultiplier: 10000,
     simulationEndedAtGameMs: null,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 1000000 }
     ],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null },
@@ -59,7 +59,7 @@ function createBaseState(overrides = {}) {
 
 test('cash-only player net worth equals capital', () => {
   const gameState = createBaseState({
-    players: [{ id: 'p1', username: 'Alice', capital: 1250000, score: 0 }],
+    players: [{ id: 'p1', username: 'Alice', capital: 1250000 }],
     airports: [],
     ownedAircraft: []
   });
@@ -69,7 +69,7 @@ test('cash-only player net worth equals capital', () => {
 
 test('owned airport adds exact market sell-to-game value', () => {
   const gameState = createBaseState({
-    players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+    players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
     airports: [{ airportId: 'YYZ', ownerPlayerId: 'p1', saleListing: null }],
     ownedAircraft: []
   });
@@ -80,7 +80,7 @@ test('owned airport adds exact market sell-to-game value', () => {
 
 test('owned aircraft adds exact market sell-to-game value', () => {
   const gameState = createBaseState({
-    players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+    players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
     airports: [],
     ownedAircraft: [
       {
@@ -100,7 +100,7 @@ test('owned aircraft adds exact market sell-to-game value', () => {
 
 test('multiple assets aggregate correctly, assigned aircraft count, listed airports count by market value', () => {
   const gameState = createBaseState({
-    players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+    players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: 'p1', saleListing: { sellerPlayerId: 'p1', askingPrice: 9999999 } },
       { airportId: 'JFK', ownerPlayerId: 'p1', saleListing: null }
@@ -138,8 +138,8 @@ test('multiple assets aggregate correctly, assigned aircraft count, listed airpo
 test('assets owned by other players do not count toward local player net worth', () => {
   const gameState = createBaseState({
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 1000000 }
     ],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: 'p2', saleListing: null }
@@ -163,7 +163,7 @@ test('flight revenue increases capital and derived net worth by the same amount'
   const { manager } = createManagerWithEmitCapture();
   const game = new Game(
     createBaseState({
-      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
       airports: [
         { airportId: 'YYZ', ownerPlayerId: 'p1', saleListing: null },
         { airportId: 'JFK', ownerPlayerId: 'p1', saleListing: null }
@@ -222,7 +222,7 @@ test('buying and selling aircraft updates derived net worth from authoritative s
   const { manager } = createManagerWithEmitCapture();
   const game = new Game(
     createBaseState({
-      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
       airports: [],
       ownedAircraft: []
     }),
@@ -250,8 +250,8 @@ test('airport ownership transfer updates derived net worth from authoritative st
   const game = new Game(
     createBaseState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 1000000 }
       ],
       airports: [
         {
@@ -283,7 +283,7 @@ test('public player snapshots expose authoritative derived net worth', () => {
   const { manager } = createManagerWithEmitCapture();
   const game = new Game(
     createBaseState({
-      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
       airports: [{ airportId: 'YYZ', ownerPlayerId: 'p1', saleListing: null }],
       ownedAircraft: [
         {
@@ -313,8 +313,8 @@ test('public player snapshots expose authoritative derived net worth', () => {
 test('calculateNetWorthByPlayer returns independent per-player values', () => {
   const gameState = createBaseState({
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-      { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 500000 }
     ],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: 'p1', saleListing: null },

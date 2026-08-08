@@ -114,10 +114,7 @@ const ShopModalState = {
   isOpen: false,
   activeTab: SHOP_MODAL_TAB.AIRPORTS,
   lastActiveTab: SHOP_MODAL_TAB.AIRPORTS,
-  hasOpenedFromHud: false,
-  selectedAircraftCatalogId: null,
-  selectedAirportId: null,
-  openedFrom: null
+  hasOpenedFromHud: false
 };
 
 const RoutesModalState = {
@@ -141,7 +138,6 @@ function setShopActiveTab(activeTab) {
 
 function openShopModal({ openedFrom = SHOP_MODAL_OPENED_FROM.HUD } = {}) {
   ShopModalState.isOpen = true;
-  ShopModalState.openedFrom = openedFrom;
   refreshShopModal(gameState.getState());
 }
 
@@ -273,7 +269,6 @@ function openRouteAircraftManagementModalForRoute(routeId, { openedFrom = ROUTES
 
 function closeShopModal() {
   ShopModalState.isOpen = false;
-  ShopModalState.openedFrom = null;
   isAirportSearchResultsOpen = false;
   isAircraftSearchResultsOpen = false;
   refreshShopModal(gameState.getState());
@@ -343,18 +338,6 @@ function resetRouteAircraftManagementRowCaches() {
   routeAvailableAircraftRowByCatalogId = new Map();
   routeAssignedAircraftRowByCatalogId = new Map();
   lastRenderedRouteAircraftManagementRouteId = null;
-}
-
-function setShopModalOpenedFrom(openedFrom) {
-  ShopModalState.openedFrom = openedFrom;
-}
-
-function setShopModalSelectedAirportId(airportId) {
-  ShopModalState.selectedAirportId = airportId ? String(airportId) : null;
-}
-
-function setShopModalSelectedAircraftCatalogId(aircraftCatalogId) {
-  ShopModalState.selectedAircraftCatalogId = aircraftCatalogId ? String(aircraftCatalogId) : null;
 }
 
 function openShopFromHud() {
@@ -1422,7 +1405,6 @@ function getAircraftCatalogEntries(state) {
 
 function setSelectedAirportId(nextAirportId) {
   selectedAirportId = nextAirportId ? String(nextAirportId) : null;
-  setShopModalSelectedAirportId(selectedAirportId);
 }
 
 function setSelectedAircraftCatalogId(nextAircraftCatalogId) {
@@ -1439,8 +1421,6 @@ function setSelectedAircraftCatalogId(nextAircraftCatalogId) {
     isAircraftSellQuantityEditing = false;
     aircraftSellQuantityRawInput = '';
   }
-
-  setShopModalSelectedAircraftCatalogId(selectedAircraftCatalogId);
 }
 
 function normalizeAircraftPurchaseQuantity(value) {
@@ -2636,32 +2616,7 @@ function isRouteSelectorAirportChoiceValid({
     return true;
   }
 
-  const isDuplicate = existingRouteKeys.has(candidateRouteKey);
-  const shouldDebugRouteFilter = Boolean(window && window.__AIRLINE_ROUTE_FILTER_DEBUG__);
-  if (shouldDebugRouteFilter) {
-    const routesForLocalPlayer = (Array.isArray(routes) ? routes : [])
-      .filter((route) => route && String(route.ownerPlayerId || '') === normalizedLocalPlayerId)
-      .map((route) => ({
-        routeId: route.routeId,
-        ownerPlayerId: route.ownerPlayerId,
-        routeKey: route.routeKey,
-        originAirportId: route.originAirportId,
-        destinationAirportId: route.destinationAirportId
-      }));
-
-    console.log('[RouteFilterDebug]', {
-      localPlayerId: normalizedLocalPlayerId,
-      selectedFromId: selectedFromId == null ? null : String(selectedFromId),
-      selectedToId: selectedToId == null ? null : String(selectedToId),
-      existingRoutes: routesForLocalPlayer,
-      candidateAirportId: normalizedCandidateAirportId,
-      candidateRouteKey,
-      existingRouteKeys: Array.from(existingRouteKeys.values()),
-      isDuplicate
-    });
-  }
-
-  return !isDuplicate;
+  return !existingRouteKeys.has(candidateRouteKey);
 }
 
 function getAirportLookupById(state) {
@@ -3864,7 +3819,6 @@ function openShopFromAirportMarker(airportId) {
 
   setSelectedAirportId(String(airportId));
   setShopActiveTab(SHOP_MODAL_TAB.AIRPORTS);
-  setShopModalOpenedFrom(SHOP_MODAL_OPENED_FROM.AIRPORT_MARKER);
   closeAirportSearchResults({ clearQuery: true });
   openShopModal({ openedFrom: SHOP_MODAL_OPENED_FROM.AIRPORT_MARKER });
 }

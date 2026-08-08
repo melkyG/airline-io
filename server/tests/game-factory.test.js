@@ -16,7 +16,6 @@ function makeLobbyPlayers() {
       displayName: 'Alice',
       lobbyId: 'lobby-1',
       connected: true,
-      score: 5,
       colorId: 'violet',
       colorHex: '#8b5cf6'
     },
@@ -25,7 +24,6 @@ function makeLobbyPlayers() {
       displayName: 'Bob',
       lobbyId: 'lobby-1',
       connected: true,
-      score: 1,
       colorId: 'sky',
       colorHex: '#0ea5e9'
     }
@@ -106,7 +104,7 @@ test('mutating game players does not mutate original lobby players', () => {
 
   assert.equal(lobbyPlayers[0].displayName, 'Alice');
   assert.equal(lobbyPlayers[0].capital, undefined);
-  assert.equal(lobbyPlayers[0].score, 5);
+  assert.equal(lobbyPlayers[0].score, undefined);
 });
 
 test('createGame preserves bot and human lobby colors in authoritative game players', () => {

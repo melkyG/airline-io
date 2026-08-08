@@ -292,16 +292,6 @@
     };
   }
 
-  function darkenHexColor(colorHex, multiplier = 0.45) {
-    const { red, green, blue } = parseHexColorChannels(colorHex);
-    const toHexChannel = (channel) => {
-      const nextChannel = Math.max(0, Math.min(255, Math.round(channel * multiplier)));
-      return nextChannel.toString(16).padStart(2, '0');
-    };
-
-    return `#${toHexChannel(red)}${toHexChannel(green)}${toHexChannel(blue)}`;
-  }
-
   function toRgbaColor(colorHex, alpha = 1) {
     const { red, green, blue } = parseHexColorChannels(colorHex);
     const normalizedAlpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;

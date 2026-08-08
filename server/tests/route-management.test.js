@@ -33,8 +33,8 @@ function createGameState(overrides = {}) {
     durationMs: 60000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 1000000 }
     ],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: 'p1', saleListing: null },
@@ -424,8 +424,8 @@ test('GameManager route socket request handlers validate payloads and delegate w
   const game = new Game(
     createGameState({
       players: [
-        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+        { id: 'socket-1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 1000000 }
       ],
       airports: [
         { airportId: 'YYZ', ownerPlayerId: 'socket-1', saleListing: null },
@@ -534,8 +534,8 @@ test('assignAircraftToRoute validates player/route/aircraft existence, ownership
   const { manager, emitted } = createManagerWithEmitCapture();
   const baseState = createGameState({
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 1000000 }
     ],
     routes: [
       {
@@ -700,8 +700,8 @@ test('unassignAircraftFromRoute validates ownership and assignment preconditions
   const { manager, emitted } = createManagerWithEmitCapture();
   const baseState = createGameState({
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 1000000 }
     ],
     routes: [
       {
@@ -865,8 +865,8 @@ test('GameManager route-aircraft socket handlers validate payloads and delegate 
   const game = new Game(
     createGameState({
       players: [
-        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+        { id: 'socket-1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 1000000 }
       ],
       routes: [
         {

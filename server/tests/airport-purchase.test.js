@@ -30,8 +30,8 @@ function createInitialState(overrides = {}) {
     durationMs: 60000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 1000000 }
     ],
     airports: [
       { airportId: 'YYZ', ownerPlayerId: null, saleListing: null }
@@ -112,7 +112,7 @@ test('purchaseUnownedAirport fails with INSUFFICIENT_CAPITAL and does not mutate
   const { manager, emitted } = createManagerWithEmitCapture();
   const game = new Game(
     createInitialState({
-      players: [{ id: 'p1', username: 'Alice', capital: 200000, score: 0 }]
+      players: [{ id: 'p1', username: 'Alice', capital: 200000 }]
     }),
     manager
   );
@@ -239,7 +239,7 @@ test('GameManager.handleAirportPurchaseSocketRequest emits canonical asset trans
 
   const game = new Game(
     createInitialState({
-      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000 }],
       airports: [{ airportId: 'YYZ', ownerPlayerId: null, saleListing: null }]
     }),
     { io }
@@ -633,7 +633,7 @@ test('GameManager.handleAirportListingSocketRequest emits canonical asset listin
 
   const game = new Game(
     createInitialState({
-      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000 }],
       airports: [
         {
           airportId: 'YYZ',
@@ -704,7 +704,7 @@ test('GameManager.handleAirportListingCancelSocketRequest does not emit game:eve
 
   const game = new Game(
     createInitialState({
-      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000 }],
       airports: [
         {
           airportId: 'YYZ',
@@ -753,8 +753,8 @@ test('GameManager.handleAirportListedPurchaseSocketRequest emits buyer and selle
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'socket-2', username: 'Bob', capital: 500000, score: 0 }
+        { id: 'socket-1', username: 'Alice', capital: 1000000 },
+        { id: 'socket-2', username: 'Bob', capital: 500000 }
       ],
       airports: [
         {
@@ -835,8 +835,8 @@ test('GameManager.handleAirportListedPurchaseSocketRequest emits only buyer even
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'socket-2', username: 'Bob', capital: 500000, score: 0 }
+        { id: 'socket-1', username: 'Alice', capital: 1000000 },
+        { id: 'socket-2', username: 'Bob', capital: 500000 }
       ],
       airports: [
         {
@@ -887,8 +887,8 @@ test('GameManager.handleAirportListedPurchaseSocketRequest does not emit game:ev
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'socket-2', username: 'Bob', capital: 200000, score: 0 }
+        { id: 'socket-1', username: 'Alice', capital: 1000000 },
+        { id: 'socket-2', username: 'Bob', capital: 200000 }
       ],
       airports: [
         {
@@ -916,8 +916,8 @@ test('purchaseListedAirport buys a listed airport from another player and broadc
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 400000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+           { id: 'p2', username: 'Bob', capital: 400000 }
       ],
       airports: [
         {
@@ -955,8 +955,8 @@ test('purchaseListedAirport removes seller routes using sold airport and unassig
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 400000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+           { id: 'p2', username: 'Bob', capital: 400000 }
       ],
       airports: [
         {
@@ -976,7 +976,7 @@ test('purchaseListedAirport removes seller routes using sold airport and unassig
           ownerPlayerId: 'p1',
           originAirportId: 'YYZ',
           destinationAirportId: 'JFK',
-          routeKey: 'JFK:YYZ',
+          routeKey: 'JFK::YYZ',
           distanceKm: 550,
           assignedAircraftInstanceIds: ['acft-1']
         }
@@ -1032,8 +1032,8 @@ test('purchaseListedAirport is atomic when route cleanup validation fails', () =
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 400000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 400000 }
       ],
       airports: [
         {
@@ -1053,7 +1053,7 @@ test('purchaseListedAirport is atomic when route cleanup validation fails', () =
           ownerPlayerId: 'p1',
           originAirportId: 'YYZ',
           destinationAirportId: 'JFK',
-          routeKey: 'JFK:YYZ',
+          routeKey: 'JFK::YYZ',
           distanceKm: 550,
           assignedAircraftInstanceIds: ['acft-missing']
         }
@@ -1129,8 +1129,8 @@ test('purchaseListedAirport validates in order and does not mutate or broadcast 
       name: 'INSUFFICIENT_CAPITAL',
       buyerPlayerId: 'p2',
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 100000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+           { id: 'p2', username: 'Bob', capital: 100000 }
       ],
       airportState: {
         airportId: 'YYZ',
@@ -1146,8 +1146,8 @@ test('purchaseListedAirport validates in order and does not mutate or broadcast 
     const game = new Game(
       createInitialState({
         players: failureCase.players || [
-          { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-          { id: 'p2', username: 'Bob', capital: 400000, score: 0 }
+          { id: 'p1', username: 'Alice', capital: 1000000 },
+          { id: 'p2', username: 'Bob', capital: 400000 }
         ],
         airports: [failureCase.airportState]
       }),
@@ -1230,8 +1230,8 @@ test('GameManager.handleAirportListedPurchaseSocketRequest handles malformed pay
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'socket-2', username: 'Bob', capital: 400000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+        { id: 'socket-2', username: 'Bob', capital: 400000 }
       ],
       airports: [
         {
@@ -1264,8 +1264,8 @@ test('sellAirportToGame refunds 80 percent of basePrice, clears ownership/listin
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+           { id: 'p2', username: 'Bob', capital: 400000 }
       ],
       airports: [
         {
@@ -1300,8 +1300,8 @@ test('sellAirportToGame removes owner routes using sold airport and unassigns th
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+           { id: 'p2', username: 'Bob', capital: 400000 }
       ],
       airports: [
         {
@@ -1321,7 +1321,7 @@ test('sellAirportToGame removes owner routes using sold airport and unassigns th
           ownerPlayerId: 'p1',
           originAirportId: 'YYZ',
           destinationAirportId: 'JFK',
-          routeKey: 'JFK:YYZ',
+          routeKey: 'JFK::YYZ',
           distanceKm: 550,
           assignedAircraftInstanceIds: ['acft-1']
         }
@@ -1375,8 +1375,8 @@ test('sellAirportToGame is atomic when route cleanup validation fails', () => {
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+           { id: 'p2', username: 'Bob', capital: 400000 }
       ],
       airports: [
         {
@@ -1396,7 +1396,7 @@ test('sellAirportToGame is atomic when route cleanup validation fails', () => {
           ownerPlayerId: 'p1',
           originAirportId: 'YYZ',
           destinationAirportId: 'JFK',
-          routeKey: 'JFK:YYZ',
+          routeKey: 'JFK::YYZ',
           distanceKm: 550,
           assignedAircraftInstanceIds: ['acft-1']
         }
@@ -1464,8 +1464,8 @@ test('sellAirportToGame validates in order and does not mutate or broadcast on f
     const game = new Game(
       createInitialState({
         players: [
-          { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-          { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+          { id: 'p1', username: 'Alice', capital: 1000000 },
+          { id: 'p2', username: 'Bob', capital: 500000 }
         ],
         airports: [failureCase.airportState]
       }),
@@ -1546,8 +1546,8 @@ test('GameManager.handleAirportSellToGameSocketRequest handles malformed payload
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+        { id: 'socket-1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 500000 }
       ],
       airports: [
         {
@@ -1597,8 +1597,8 @@ test('GameManager.handleAirportSellToGameSocketRequest emits canonical asset tra
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+        { id: 'socket-1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 500000 }
       ],
       airports: [
         {

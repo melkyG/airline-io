@@ -31,8 +31,8 @@ test('game ends by score threshold and records endReason/endedAt once', () => {
     durationMs: 60000,
     scoreToWin: 100,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 100, debugScoreOffset: 100 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 20, debugScoreOffset: 20 }
+      { id: 'p1', username: 'Alice', capital: 1000000, debugScoreOffset: 100 },
+      { id: 'p2', username: 'Bob', capital: 1000000, debugScoreOffset: 20 }
     ],
     airports: []
   };
@@ -71,7 +71,7 @@ test('game ends by time expiration and records time end reason', () => {
     durationMs: 60000,
     scoreToWin: 999,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 }
     ],
     airports: []
   };
@@ -101,7 +101,7 @@ test('dispose clears pending expiration timeout for active game', () => {
     durationMs: 60000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 }
     ],
     airports: []
   };
@@ -126,8 +126,8 @@ test('addDebugScoreOffset updates authoritative debug score offset and broadcast
     durationMs: 60000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 10 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 20 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 1000000 }
     ],
     airports: []
   };
@@ -157,7 +157,7 @@ test('addDebugScoreOffset can end the game via score win condition', () => {
     durationMs: 60000,
     scoreToWin: 500,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 10 }
+      { id: 'p1', username: 'Alice', capital: 1000000 }
     ],
     airports: []
   };
@@ -186,7 +186,7 @@ test('game:started is emitted only once at initialization while later updates us
     durationMs: 60000,
     scoreToWin: 5000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 10 }
+      { id: 'p1', username: 'Alice', capital: 1000000 }
     ],
     airports: []
   };
@@ -316,8 +316,8 @@ test('exact score and capital ties use server-side random tie-break and results 
       durationMs: 60000,
       scoreToWin: 100,
       players: [
-        { id: 'p1', username: 'Alpha', capital: 700, score: 100, debugScoreOffset: 100 },
-        { id: 'p2', username: 'Bravo', capital: 700, score: 100, debugScoreOffset: 100 }
+        { id: 'p1', username: 'Alpha', capital: 700, debugScoreOffset: 100 },
+        { id: 'p2', username: 'Bravo', capital: 700, debugScoreOffset: 100 }
       ],
       airports: []
     };
@@ -414,7 +414,7 @@ test('win condition uses centralized derived score path from net worth', () => {
       endsAt: Date.now() + 60000,
       durationMs: 60000,
       scoreToWin: 500,
-      players: [{ id: 'p1', username: 'Alice', capital: 100_000_000_000, score: 0 }],
+      players: [{ id: 'p1', username: 'Alice', capital: 100_000_000_000 }],
       airports: []
     },
     manager

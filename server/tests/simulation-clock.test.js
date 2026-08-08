@@ -29,7 +29,7 @@ function createActiveInitialState(overrides = {}) {
     endsAt: Date.now() + 60000,
     durationMs: 60000,
     scoreToWin: 1000,
-    players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+    players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
     airports: [],
     ownedAircraft: [],
     routes: [],

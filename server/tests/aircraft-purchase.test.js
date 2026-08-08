@@ -30,8 +30,8 @@ function createInitialState(overrides = {}) {
     durationMs: 60000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-      { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 },
+      { id: 'p2', username: 'Bob', capital: 1000000 }
     ],
     airports: [],
     ownedAircraft: [],
@@ -44,8 +44,8 @@ test('purchaseAircraftFromGame buys aircraft from authoritative catalog price an
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 50000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 50000000 },
+        { id: 'p2', username: 'Bob', capital: 1000000 }
       ]
     }),
     manager
@@ -86,8 +86,8 @@ test('purchaseAircraftFromGame buys multiple aircraft atomically with unique ins
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 1000000 }
       ]
     }),
     manager
@@ -151,7 +151,7 @@ test('purchaseAircraftFromGame fails with INSUFFICIENT_CAPITAL and does not muta
   const { manager, emitted } = createManagerWithEmitCapture();
   const game = new Game(
     createInitialState({
-      players: [{ id: 'p1', username: 'Alice', capital: 100000, score: 0 }]
+      players: [{ id: 'p1', username: 'Alice', capital: 100000 }]
     }),
     manager
   );
@@ -196,7 +196,7 @@ test('purchaseAircraftFromGame fails with INSUFFICIENT_CAPITAL for bulk purchase
   const { manager, emitted } = createManagerWithEmitCapture();
   const game = new Game(
     createInitialState({
-      players: [{ id: 'p1', username: 'Alice', capital: 500000, score: 0 }]
+      players: [{ id: 'p1', username: 'Alice', capital: 500000 }]
     }),
     manager
   );
@@ -378,7 +378,7 @@ test('GameManager.handleAircraftPurchaseSocketRequest passes quantity through an
 
   const game = new Game(
     createInitialState({
-      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000, score: 0 }]
+      players: [{ id: 'socket-1', username: 'Alice', capital: 1000000 }]
     }),
     { io }
   );
@@ -444,7 +444,7 @@ test('GameManager.handleAircraftPurchaseSocketRequest supports quoteOnly with au
 
   const game = new Game(
     createInitialState({
-      players: [{ id: 'socket-1', username: 'Alice', capital: 650000, score: 0 }]
+      players: [{ id: 'socket-1', username: 'Alice', capital: 650000 }]
     }),
     { io }
   );
@@ -474,8 +474,8 @@ test('getAircraftSellQuote returns authoritative model quote from owned instance
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 1000000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 1000000 }
       ],
       ownedAircraft: [
         {
@@ -552,8 +552,8 @@ test('sellAircraftToGame sells deterministically by model and owner, refunds onc
   const game = new Game(
     createInitialState({
       players: [
-        { id: 'p1', username: 'Alice', capital: 1000000, score: 0 },
-        { id: 'p2', username: 'Bob', capital: 500000, score: 0 }
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 500000 }
       ],
       ownedAircraft: [
         {
@@ -627,7 +627,7 @@ test('sellAircraftToGame selects available first, then assigned in stable author
   const { manager, emitted } = createManagerWithEmitCapture();
   const game = new Game(
     createInitialState({
-      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
       routes: [
         {
           routeId: 'route-1',
@@ -757,7 +757,7 @@ test('sellAircraftToGame aborts atomically when any selected assigned-aircraft d
   const { manager, emitted } = createManagerWithEmitCapture();
   const game = new Game(
     createInitialState({
-      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
       routes: [
         {
           routeId: 'route-1',
@@ -848,7 +848,7 @@ test('sellAircraftToGame is atomic on failures (invalid quantity or oversell) wi
   const { manager, emitted } = createManagerWithEmitCapture();
   const game = new Game(
     createInitialState({
-      players: [{ id: 'p1', username: 'Alice', capital: 1000000, score: 0 }],
+      players: [{ id: 'p1', username: 'Alice', capital: 1000000 }],
       ownedAircraft: [
         {
           aircraftInstanceId: 'acft-1',
@@ -901,7 +901,7 @@ test('GameManager.handleAircraftSellSocketRequest supports quoteOnly and sale mo
 
   const game = new Game(
     createInitialState({
-      players: [{ id: 'socket-1', username: 'Alice', capital: 650000, score: 0 }],
+      players: [{ id: 'socket-1', username: 'Alice', capital: 650000 }],
       ownedAircraft: [
         {
           aircraftInstanceId: 'acft-test-1',

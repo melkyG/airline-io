@@ -13,7 +13,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
     durationMs: 1800000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0, colorId: 'red', colorHex: '#ef4444', internalOnlyField: 'secret' }
+      { id: 'p1', username: 'Alice', capital: 1000000, colorId: 'red', colorHex: '#ef4444', internalOnlyField: 'secret' }
     ],
     ownedAircraft: [],
     routes: [
@@ -182,7 +182,6 @@ test('game:started public player payload includes only explicit public fields', 
         id: 'p1',
         username: 'Alice',
         capital: 1000000,
-        score: 0,
         colorId: 'red',
         colorHex: '#ef4444',
         internalOnlyField: 'hidden-value'
@@ -238,7 +237,6 @@ test('game public player snapshots preserve authoritative bot and human colors a
         username: 'Alice',
         isBot: false,
         capital: 1000000,
-        score: 0,
         colorId: 'violet',
         colorHex: '#8b5cf6'
       },
@@ -247,7 +245,6 @@ test('game public player snapshots preserve authoritative bot and human colors a
         username: 'Sky Goose',
         isBot: true,
         capital: 1000000,
-        score: 0,
         colorId: 'sky',
         colorHex: '#0ea5e9'
       }
@@ -324,7 +321,7 @@ test('game:started public payload includes airport definition plus game-owned mu
     durationMs: 1800000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0, colorId: null, colorHex: null }
+      { id: 'p1', username: 'Alice', capital: 1000000, colorId: null, colorHex: null }
     ],
     ownedAircraft: [],
     routes: [],
@@ -377,7 +374,7 @@ test('unknown airport IDs in game state are skipped with warning during public p
     durationMs: 1800000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0, colorId: null, colorHex: null }
+      { id: 'p1', username: 'Alice', capital: 1000000, colorId: null, colorHex: null }
     ],
     ownedAircraft: [],
     routes: [],
@@ -428,7 +425,7 @@ test('airport saleListing is projected as a new object when present', () => {
     durationMs: 1800000,
     scoreToWin: 1000,
     players: [
-      { id: 'p1', username: 'Alice', capital: 1000000, score: 0 }
+      { id: 'p1', username: 'Alice', capital: 1000000 }
     ],
     ownedAircraft: [],
     routes: [],
