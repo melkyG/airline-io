@@ -38,6 +38,10 @@
     currency: 'USD',
     maximumFractionDigits: 0
   });
+  const buildGreatCircleRouteSegments =
+    globalScope.createRouteGeometry && typeof globalScope.createRouteGeometry.buildGreatCircleRouteSegments === 'function'
+      ? globalScope.createRouteGeometry.buildGreatCircleRouteSegments
+      : null;
   const AIRPORT_MARKER_INNER_HTML =
     `<div class="airport-marker-content">` +
     `<span class="airport-marker-ownership-badge" aria-hidden="true"></span>` +
@@ -88,6 +92,37 @@
 
   function clampNumber(value, min, max) {
     return Math.min(max, Math.max(min, value));
+  }
+
+  function normalizeLongitude(lng) {
+    const numericLng = Number(lng);
+    if (!Number.isFinite(numericLng)) {
+      return null;
+    }
+
+    const normalizedLng = ((((numericLng + 180) % 360) + 360) % 360) - 180;
+    return normalizedLng === -180 && numericLng > 0 ? 180 : normalizedLng;
+  }
+
+  function unwrapLongitude(lng, previousLng) {
+    let unwrappedLng = normalizeLongitude(lng);
+    if (!Number.isFinite(unwrappedLng)) {
+      return null;
+    }
+
+    if (!Number.isFinite(previousLng)) {
+      return unwrappedLng;
+    }
+
+    while (unwrappedLng - previousLng > 180) {
+      unwrappedLng -= 360;
+    }
+
+    while (unwrappedLng - previousLng < -180) {
+      unwrappedLng += 360;
+    }
+
+    return unwrappedLng;
   }
 
   function interpolateLinearValue(value, inputMin, inputMax, outputMin, outputMax) {
@@ -424,7 +459,286 @@
     ];
   }
 
-  function getDrawableFlights(gameSnapshot, realNowMs = Date.now()) {
+  function buildRouteLegKey(originAirportId, destinationAirportId) {
+    return `${String(originAirportId || '').trim()}->${String(destinationAirportId || '').trim()}`;
+  }
+
+  function reverseRouteGeometrySegments(routeGeometrySegments) {
+    if (!Array.isArray(routeGeometrySegments) || routeGeometrySegments.length < 1) {
+      return [];
+    }
+
+    return routeGeometrySegments
+      .slice()
+      .reverse()
+      .map((segmentCoordinates) => {
+        if (!Array.isArray(segmentCoordinates)) {
+          return [];
+        }
+
+        return segmentCoordinates
+          .slice()
+          .reverse()
+          .map((coordinatePair) => [coordinatePair[0], coordinatePair[1]]);
+      });
+  }
+
+  function buildRenderableRouteGeometryLookup(renderableRoutes) {
+    const lookupByLeg = new Map();
+    const lookupByRouteId = new Map();
+
+    (Array.isArray(renderableRoutes) ? renderableRoutes : []).forEach((routeEntry) => {
+      const routeId = String(routeEntry && routeEntry.routeId || '').trim();
+      const originAirportId = String(routeEntry && routeEntry.originAirportId || '').trim();
+      const destinationAirportId = String(routeEntry && routeEntry.destinationAirportId || '').trim();
+      const routeGeometrySegments = Array.isArray(routeEntry && routeEntry.segments) ? routeEntry.segments : [];
+
+      if (routeGeometrySegments.length < 1) {
+        return;
+      }
+
+      const normalizedRouteEntry = {
+        routeId,
+        originAirportId,
+        destinationAirportId,
+        segments: routeGeometrySegments,
+        reverseSegments: reverseRouteGeometrySegments(routeGeometrySegments)
+      };
+
+      if (routeId) {
+        lookupByRouteId.set(routeId, normalizedRouteEntry);
+      }
+
+      if (!originAirportId || !destinationAirportId) {
+        return;
+      }
+
+      lookupByLeg.set(buildRouteLegKey(originAirportId, destinationAirportId), {
+        routeEntry: normalizedRouteEntry,
+        direction: 'forward'
+      });
+      lookupByLeg.set(buildRouteLegKey(destinationAirportId, originAirportId), {
+        routeEntry: normalizedRouteEntry,
+        direction: 'reverse'
+      });
+    });
+
+    return {
+      byLeg: lookupByLeg,
+      byRouteId: lookupByRouteId
+    };
+  }
+
+  function resolveFlightRouteGeometrySegments(flight, routeGeometryLookup) {
+    const lookupByLeg = routeGeometryLookup && routeGeometryLookup.byLeg instanceof Map
+      ? routeGeometryLookup.byLeg
+      : new Map();
+    const lookupByRouteId = routeGeometryLookup && routeGeometryLookup.byRouteId instanceof Map
+      ? routeGeometryLookup.byRouteId
+      : new Map();
+
+    const originAirportId = String(flight && flight.originAirportId || '').trim();
+    const destinationAirportId = String(flight && flight.destinationAirportId || '').trim();
+    const routeId = String(flight && flight.routeId || '').trim();
+    const direction = String(flight && flight.direction || '').trim().toLowerCase();
+
+    const byRouteIdMatch = lookupByRouteId.get(routeId);
+    if (byRouteIdMatch && Array.isArray(byRouteIdMatch.segments) && byRouteIdMatch.segments.length > 0) {
+      if (direction === 'inbound') {
+        const reverseSegments = Array.isArray(byRouteIdMatch.reverseSegments) && byRouteIdMatch.reverseSegments.length > 0
+          ? byRouteIdMatch.reverseSegments
+          : reverseRouteGeometrySegments(byRouteIdMatch.segments);
+
+        return {
+          segments: reverseSegments
+        };
+      }
+
+      if (
+        byRouteIdMatch.originAirportId &&
+        byRouteIdMatch.destinationAirportId &&
+        originAirportId &&
+        destinationAirportId &&
+        originAirportId === byRouteIdMatch.destinationAirportId &&
+        destinationAirportId === byRouteIdMatch.originAirportId
+      ) {
+        const reverseSegments = Array.isArray(byRouteIdMatch.reverseSegments) && byRouteIdMatch.reverseSegments.length > 0
+          ? byRouteIdMatch.reverseSegments
+          : reverseRouteGeometrySegments(byRouteIdMatch.segments);
+
+        return {
+          segments: reverseSegments
+        };
+      }
+
+      return {
+        segments: byRouteIdMatch.segments
+      };
+    }
+
+    const byLegMatch = lookupByLeg.get(buildRouteLegKey(originAirportId, destinationAirportId));
+    if (
+      byLegMatch &&
+      byLegMatch.routeEntry &&
+      Array.isArray(byLegMatch.routeEntry.segments) &&
+      byLegMatch.routeEntry.segments.length > 0
+    ) {
+      const routeEntry = byLegMatch.routeEntry;
+      const segments = byLegMatch.direction === 'reverse'
+        ? (Array.isArray(routeEntry.reverseSegments) && routeEntry.reverseSegments.length > 0
+          ? routeEntry.reverseSegments
+          : reverseRouteGeometrySegments(routeEntry.segments))
+        : routeEntry.segments;
+
+      return {
+        segments
+      };
+    }
+
+    return {
+      segments: null
+    };
+  }
+
+  function getFlightPositionAlongRouteGeometry(routeGeometrySegments, progress) {
+    const segments = Array.isArray(routeGeometrySegments) ? routeGeometrySegments : [];
+    if (segments.length < 1) {
+      return null;
+    }
+
+    const orderedPoints = [];
+    segments.forEach((segmentCoordinates) => {
+      if (!Array.isArray(segmentCoordinates)) {
+        return;
+      }
+
+      segmentCoordinates.forEach((coordinatePair) => {
+        if (!Array.isArray(coordinatePair) || coordinatePair.length < 2) {
+          return;
+        }
+
+        const lng = Number(coordinatePair[0]);
+        const lat = Number(coordinatePair[1]);
+        if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+          return;
+        }
+
+        const previousPoint = orderedPoints[orderedPoints.length - 1];
+        if (previousPoint && previousPoint[0] === lng && previousPoint[1] === lat) {
+          return;
+        }
+
+        orderedPoints.push([lng, lat]);
+      });
+    });
+
+    if (orderedPoints.length < 1) {
+      return null;
+    }
+
+    if (orderedPoints.length === 1) {
+      return {
+        lng: orderedPoints[0][0],
+        lat: orderedPoints[0][1]
+      };
+    }
+
+    const unwrappedPoints = [];
+    orderedPoints.forEach((point, index) => {
+      if (index === 0) {
+        unwrappedPoints.push([point[0], point[1]]);
+        return;
+      }
+
+      const previousUnwrappedPoint = unwrappedPoints[unwrappedPoints.length - 1];
+      const unwrappedLng = unwrapLongitude(point[0], previousUnwrappedPoint[0]);
+      if (!Number.isFinite(unwrappedLng)) {
+        return;
+      }
+
+      unwrappedPoints.push([unwrappedLng, point[1]]);
+    });
+
+    if (unwrappedPoints.length < 1) {
+      return null;
+    }
+
+    if (unwrappedPoints.length === 1) {
+      return {
+        lng: normalizeLongitude(unwrappedPoints[0][0]),
+        lat: unwrappedPoints[0][1]
+      };
+    }
+
+    const clampedProgress = clamp01(progress);
+    if (clampedProgress <= 0) {
+      return {
+        lng: normalizeLongitude(unwrappedPoints[0][0]),
+        lat: unwrappedPoints[0][1]
+      };
+    }
+
+    if (clampedProgress >= 1) {
+      const finalPoint = unwrappedPoints[unwrappedPoints.length - 1];
+      return {
+        lng: normalizeLongitude(finalPoint[0]),
+        lat: finalPoint[1]
+      };
+    }
+
+    const cumulativeSegmentLengths = [0];
+    let totalPathLength = 0;
+
+    for (let index = 1; index < unwrappedPoints.length; index += 1) {
+      const previousPoint = unwrappedPoints[index - 1];
+      const currentPoint = unwrappedPoints[index];
+      const deltaLng = currentPoint[0] - previousPoint[0];
+      const deltaLat = currentPoint[1] - previousPoint[1];
+      const segmentLength = Math.hypot(deltaLng, deltaLat);
+      totalPathLength += segmentLength;
+      cumulativeSegmentLengths.push(totalPathLength);
+    }
+
+    if (!(totalPathLength > 0)) {
+      return {
+        lng: normalizeLongitude(unwrappedPoints[0][0]),
+        lat: unwrappedPoints[0][1]
+      };
+    }
+
+    const targetPathLength = totalPathLength * clampedProgress;
+
+    for (let index = 1; index < unwrappedPoints.length; index += 1) {
+      const segmentStartLength = cumulativeSegmentLengths[index - 1];
+      const segmentEndLength = cumulativeSegmentLengths[index];
+
+      if (targetPathLength > segmentEndLength && index < unwrappedPoints.length - 1) {
+        continue;
+      }
+
+      const segmentLength = segmentEndLength - segmentStartLength;
+      const segmentProgress = segmentLength > 0
+        ? (targetPathLength - segmentStartLength) / segmentLength
+        : 0;
+      const startPoint = unwrappedPoints[index - 1];
+      const endPoint = unwrappedPoints[index];
+      const lng = startPoint[0] + ((endPoint[0] - startPoint[0]) * segmentProgress);
+      const lat = startPoint[1] + ((endPoint[1] - startPoint[1]) * segmentProgress);
+
+      return {
+        lng: normalizeLongitude(lng),
+        lat
+      };
+    }
+
+    const fallbackPoint = unwrappedPoints[unwrappedPoints.length - 1];
+    return {
+      lng: normalizeLongitude(fallbackPoint[0]),
+      lat: fallbackPoint[1]
+    };
+  }
+
+  function getDrawableFlights(gameSnapshot, renderableRoutes = [], realNowMs = Date.now()) {
     const game = gameSnapshot && typeof gameSnapshot === 'object' ? gameSnapshot : null;
     if (!game) {
       return [];
@@ -438,6 +752,7 @@
       ? game.simulationClock
       : game;
     const simulationNowGameMs = deriveSimulationNowGameMs(simulationClock, realNowMs);
+    const routeGeometryLookup = buildRenderableRouteGeometryLookup(renderableRoutes);
     if (!Number.isFinite(simulationNowGameMs)) {
       return [];
     }
@@ -489,8 +804,66 @@
       const easedProgress = easeFlightProgress(rawProgress);
       const colorHex = resolvePlayerColorHexById(flight.ownerPlayerId, playersById, FLIGHT_DOT_COLOR);
 
-      const lng = originLng + ((destinationLng - originLng) * easedProgress);
-      const lat = originLat + ((destinationLat - originLat) * easedProgress);
+      let lng = originLng + ((destinationLng - originLng) * easedProgress);
+      let lat = originLat + ((destinationLat - originLat) * easedProgress);
+
+      if (easedProgress <= 0) {
+        lng = originLng;
+        lat = originLat;
+      } else if (easedProgress >= 1) {
+        lng = destinationLng;
+        lat = destinationLat;
+      } else {
+        let fallbackUsed = false;
+
+        try {
+          const lookupResult = resolveFlightRouteGeometrySegments(flight, routeGeometryLookup);
+          const routeGeometrySegments =
+            lookupResult && Array.isArray(lookupResult.segments) && lookupResult.segments.length > 0
+              ? lookupResult.segments
+              : (typeof buildGreatCircleRouteSegments === 'function'
+                ? buildGreatCircleRouteSegments(
+                    { lat: originLat, lng: originLng },
+                    { lat: destinationLat, lng: destinationLng }
+                  )
+                : []);
+          const routePosition = getFlightPositionAlongRouteGeometry(routeGeometrySegments, easedProgress);
+
+          if (routePosition && Number.isFinite(routePosition.lng) && Number.isFinite(routePosition.lat)) {
+            lng = routePosition.lng;
+            lat = routePosition.lat;
+          } else {
+            fallbackUsed = true;
+          }
+        } catch (error) {
+          fallbackUsed = true;
+          if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+            const routeId = String(flight.routeId || '').trim();
+            const errorMessage = error && typeof error === 'object' && 'message' in error
+              ? String(error.message)
+              : String(error);
+
+            console.warn('[flight-route-geometry:fallback]', {
+              flightId,
+              routeId,
+              originAirportId,
+              destinationAirportId,
+              reason: errorMessage
+            });
+          }
+        }
+
+        if (fallbackUsed) {
+          lng = originLng + ((destinationLng - originLng) * easedProgress);
+          lat = originLat + ((destinationLat - originLat) * easedProgress);
+        }
+      }
+
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+        lng = originLng + ((destinationLng - originLng) * easedProgress);
+        lat = originLat + ((destinationLat - originLat) * easedProgress);
+      }
+
       drawableFlights.push({
         flightId,
         colorHex,
@@ -532,10 +905,22 @@
         return segments;
       }
 
+      const routeSegments = typeof buildGreatCircleRouteSegments === 'function'
+        ? buildGreatCircleRouteSegments(
+            { lat: originLat, lng: originLng },
+            { lat: destinationLat, lng: destinationLng }
+          )
+        : [[[originLng, originLat], [destinationLng, destinationLat]]];
+
+      if (!Array.isArray(routeSegments) || routeSegments.length < 1) {
+        return segments;
+      }
+
       segments.push({
         routeId: String(route.routeId),
-        from: [originLng, originLat],
-        to: [destinationLng, destinationLat]
+        originAirportId: String(route.originAirportId),
+        destinationAirportId: String(route.destinationAirportId),
+        segments: routeSegments
       });
       return segments;
     }, []);
@@ -963,7 +1348,7 @@
         return 0;
       }
 
-      const drawableFlights = getDrawableFlights(latestGameSnapshot, realNowMs);
+      const drawableFlights = getDrawableFlights(latestGameSnapshot, routeCollection, realNowMs);
       const flightFeatureCollection = {
         type: 'FeatureCollection',
         features: drawableFlights.map((flight) => ({
@@ -1060,16 +1445,20 @@
 
       const routeFeatureCollection = {
         type: 'FeatureCollection',
-        features: routeSegments.map((routeSegment) => ({
-          type: 'Feature',
-          properties: {
-            routeId: routeSegment.routeId
-          },
-          geometry: {
-            type: 'LineString',
-            coordinates: [routeSegment.from, routeSegment.to]
-          }
-        }))
+        features: routeSegments.flatMap((routeSegment) => {
+          const routeGeometrySegments = Array.isArray(routeSegment.segments) ? routeSegment.segments : [];
+          return routeGeometrySegments.map((segmentCoordinates, segmentIndex) => ({
+            type: 'Feature',
+            properties: {
+              routeId: routeSegment.routeId,
+              segmentIndex
+            },
+            geometry: {
+              type: 'LineString',
+              coordinates: segmentCoordinates
+            }
+          }));
+        })
       };
 
       const existingSource = mapInstance.getSource(MAPLIBRE_ROUTE_SOURCE_ID);
@@ -1429,6 +1818,7 @@
     let lastKnownContainerHeight = null;
     const markerCollection = [];
     const routeCollection = [];
+    const routeGeometryCollection = [];
     const airportMarkersById = new Map();
     const airportMarkerMetadataById = new Map();
     const flightMarkersById = new Map();
@@ -1685,7 +2075,7 @@
         return 0;
       }
 
-      const drawableFlights = getDrawableFlights(latestGameSnapshot, realNowMs);
+      const drawableFlights = getDrawableFlights(latestGameSnapshot, routeGeometryCollection, realNowMs);
       const radiusPx = getFlightDotRadiusPxForZoom(
         map.getZoom(),
         Number.isFinite(viewportMinZoom) ? viewportMinZoom : FLIGHT_DOT_RADIUS_MIN_ZOOM,
@@ -1788,22 +2178,26 @@
 
     function syncRouteLines(map, routes, airports) {
       clearRouteLines(map);
+      routeGeometryCollection.length = 0;
 
       const routeSegments = getRenderableRouteSegments(routes, airports);
       routeSegments.forEach((routeSegment) => {
-        const routeLineLayer = globalScope.L.polyline(
-          [
-            [routeSegment.from[1], routeSegment.from[0]],
-            [routeSegment.to[1], routeSegment.to[0]]
-          ],
-          {
-            color: ROUTE_LINE_COLOR,
-            weight: ROUTE_LINE_WIDTH,
-            opacity: 1,
-            interactive: false
-          }
-        ).addTo(map);
-        routeCollection.push(routeLineLayer);
+        routeGeometryCollection.push(routeSegment);
+      });
+      routeSegments.forEach((routeSegment) => {
+        const routeGeometrySegments = Array.isArray(routeSegment.segments) ? routeSegment.segments : [];
+        routeGeometrySegments.forEach((segmentCoordinates) => {
+          const routeLineLayer = globalScope.L.polyline(
+            segmentCoordinates.map((coordinatePair) => [coordinatePair[1], coordinatePair[0]]),
+            {
+              color: ROUTE_LINE_COLOR,
+              weight: ROUTE_LINE_WIDTH,
+              opacity: 1,
+              interactive: false
+            }
+          ).addTo(map);
+          routeCollection.push(routeLineLayer);
+        });
       });
     }
 

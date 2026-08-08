@@ -505,6 +505,56 @@
 				"const H=60*60*1000, HD=24, DM=30, DY=DM*12; const pad=(v)=>String(Math.max(0, Number(v)||0)).padStart(2,'0'); const f=(elapsedMs)=>{const h=Math.floor(Math.max(0,elapsedMs)/H); const d=Math.floor(h/HD); const hour=h%HD; if(d<DM){return `Day ${pad(d+1)}, Hour ${pad(hour)}`;} if(d<DY){const m=Math.floor(d/DM); const dom=(d%DM)+1; return `Month ${m}, Day ${pad(dom)}, Hour ${pad(hour)}`;} const y=Math.floor(d/DY); const yoff=d%DY; const m=Math.floor(yoff/DM)+1; const dom=(yoff%DM)+1; return `Year ${y}, Month ${m}, Day ${pad(dom)}, Hour ${pad(hour)}`;}; [[0,'start'],[2*H,'+2h'],[24*H,'+24h'],[30*24*H,'+30d']].forEach(([ms,n])=>console.log(n+': '+f(ms)));"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "run-route-geometry-tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/route-geometry.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-render-leaderboard-regression",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/render-leaderboard.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-route-geometry-tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/route-geometry.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-full-server-suite-after-route-geometry",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "diagnose-great-circle-routes",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const { AIRPORT_CATALOG } = require('./server/airports/catalog'); const { calculateRouteDistanceKm } = require('./server/routes'); const { buildGreatCircleRouteSegments } = require('./client/routeGeometry'); const byId = new Map(AIRPORT_CATALOG.map(a=>[a.id,a])); function toRad(d){return d*Math.PI/180;} function angDeg(a,b){const oLat=toRad(a.lat), oLng=toRad(a.lng), dLat=toRad(b.lat), dLng=toRad(b.lng); const ox=Math.cos(oLat)*Math.cos(oLng), oy=Math.cos(oLat)*Math.sin(oLng), oz=Math.sin(oLat); const dx=Math.cos(dLat)*Math.cos(dLng), dy=Math.cos(dLat)*Math.sin(dLng), dz=Math.sin(dLat); const dot=Math.max(-1,Math.min(1,ox*dx+oy*dy+oz*dz)); return Math.acos(dot)*180/Math.PI; } function analyze(idA,idB){const a=byId.get(idA), b=byId.get(idB); const segs=buildGreatCircleRouteSegments({lat:a.lat,lng:a.lng},{lat:b.lat,lng:b.lng}); const pts=segs.flat(); let maxLat=-Infinity,minLat=Infinity; for(const p of pts){maxLat=Math.max(maxLat,p[1]); minLat=Math.min(minLat,p[1]);} let hasJump=false, maxAbsDelta=0; for(const seg of segs){ for(let i=1;i<seg.length;i++){ const d=Math.abs(seg[i][0]-seg[i-1][0]); maxAbsDelta=Math.max(maxAbsDelta,d); if(d>180.000001) hasJump=true; }} const crossesAntimeridian = segs.length>1 || segs.some(seg=>seg.some(p=>Math.abs(Math.abs(p[0])-180)<1e-9)); const rawDelta=Math.abs(b.lng-a.lng); console.log(JSON.stringify({route:`${idA}->${idB}`,origin:{id:a.id,lat:a.lat,lng:a.lng},destination:{id:b.id,lat:b.lat,lng:b.lng},distanceKm:calculateRouteDistanceKm(a,b),angularSeparationDeg:angDeg(a,b),rawAbsLngDelta:rawDelta,sampledMaxLat:maxLat,sampledMinLat:minLat,segments:segs.length,points:pts.length,crossesAntimeridian,hasLargeLngJumpWithinSegment:hasJump,maxAbsLngDeltaWithinSegment:maxAbsDelta,firstPoint:pts[0],lastPoint:pts[pts.length-1]})); }\nanalyze('JFK','HND'); analyze('JFK','LAX'); analyze('HND','ANC'); analyze('YYZ','JFK');"
+			],
+			"isBackground": false
 		}
 	]
 }
