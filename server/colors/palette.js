@@ -22,7 +22,7 @@ const PLAYER_COLOR_CATALOG = Object.freeze([
   { colorId: 'aqua', colorHex: '#22d3ee' },
   { colorId: 'mint', colorHex: '#34d399' },
   { colorId: 'gold', colorHex: '#fbbf24' },
-  { colorId: 'neutral', colorHex: '#a3a3a3' }
+  { colorId: 'neutral', colorHex: '#c2410c' }
 ]);
 
 const PLAYER_COLOR_BY_ID = Object.freeze(

@@ -8,17 +8,20 @@
   const AIRPORT_TOOLTIP_OFFSET_Y = -10;
   const AIRPORT_LABEL_ZOOM_IATA = 4.6;
   const AIRPORT_LABEL_ZOOM_NAME = 6.1;
-  const AIRPORT_MARKER_SCALE_MIN = 0.84;
+  const AIRPORT_MARKER_SCALE_MIN = 0.42;
   const AIRPORT_MARKER_SCALE_MAX = 1.45;
   const AIRPORT_MARKER_SCALE_MIN_ZOOM = INITIAL_ZOOM;
   const AIRPORT_MARKER_SCALE_MAX_ZOOM = BASEMAP_MAX_ZOOM;
   const ROUTE_LINE_COLOR = '#000000';
-  const ROUTE_LINE_WIDTH = 2;
+  const ROUTE_LINE_WIDTH = 1.5;
   const OWNED_AIRPORT_FALLBACK_COLOR = '#0ea5e9';
   const MAPLIBRE_ROUTE_SOURCE_ID = 'airline-routes-source';
   const MAPLIBRE_ROUTE_LAYER_ID = 'airline-routes-layer';
   const MAPLIBRE_FLIGHT_SOURCE_ID = 'airline-flights-source';
   const MAPLIBRE_FLIGHT_LAYER_ID = 'airline-flights-layer';
+  const MAPLIBRE_AIRPORT_BADGE_SOURCE_ID = 'airline-airport-badge-source';
+  const MAPLIBRE_AIRPORT_BADGE_LAYER_ID = 'airline-airport-badge-layer';
+  const MAPLIBRE_AIRPORT_BADGE_BEFORE_LAYER_ID = 'place_city';
   const FLIGHT_DOT_COLOR = '#0e7ccf';
   const FLIGHT_DOT_RADIUS_MIN_PX = 4;
   const FLIGHT_DOT_RADIUS_MAX_PX = 7;
@@ -26,6 +29,10 @@
   const FLIGHT_DOT_RADIUS_MAX_ZOOM = BASEMAP_MAX_ZOOM;
   const FLIGHT_DOT_STROKE_COLOR = '#ffffff';
   const FLIGHT_DOT_STROKE_WIDTH_PX = 1.2;
+  const AIRPORT_BADGE_FILL_OPACITY = 0.85;
+  const AIRPORT_BADGE_UNOWNED_FILL_COLOR = '#ffffff';
+  const AIRPORT_BADGE_STROKE_COLOR = '#000000';
+  const AIRPORT_BADGE_STROKE_WIDTH_PX = 2;
   const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -33,6 +40,7 @@
   });
   const AIRPORT_MARKER_INNER_HTML =
     `<div class="airport-marker-content">` +
+    `<span class="airport-marker-ownership-badge" aria-hidden="true"></span>` +
     `<div class="airport-marker airport-marker-visual airport-marker--control-tower-svg">` +
     `<svg class="airport-marker-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
     `<rect class="airport-marker-base" x="5.5" y="18" width="13" height="3" rx="1.6"/>` +
@@ -103,6 +111,27 @@
       AIRPORT_MARKER_SCALE_MIN,
       AIRPORT_MARKER_SCALE_MAX
     );
+  }
+
+  function getAirportBadgeDiameterPxForZoom(zoomLevel) {
+    const markerSizePx = 26;
+    const badgeExtraPx = 8;
+    return (markerSizePx + badgeExtraPx) * getAirportMarkerScaleForZoom(zoomLevel);
+  }
+
+  function getMapLibreAirportBadgeRadiusExpression() {
+    const minRadiusPx = getAirportBadgeDiameterPxForZoom(AIRPORT_MARKER_SCALE_MIN_ZOOM) / 2;
+    const maxRadiusPx = getAirportBadgeDiameterPxForZoom(AIRPORT_MARKER_SCALE_MAX_ZOOM) / 2;
+
+    return [
+      'interpolate',
+      ['linear'],
+      ['zoom'],
+      AIRPORT_MARKER_SCALE_MIN_ZOOM,
+      minRadiusPx,
+      AIRPORT_MARKER_SCALE_MAX_ZOOM,
+      maxRadiusPx
+    ];
   }
 
   function applyAirportMarkerScaleToElement(markerRootElement, zoomLevel) {
@@ -238,6 +267,12 @@
     return `#${toHexChannel(red)}${toHexChannel(green)}${toHexChannel(blue)}`;
   }
 
+  function toRgbaColor(colorHex, alpha = 1) {
+    const { red, green, blue } = parseHexColorChannels(colorHex);
+    const normalizedAlpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
+    return `rgba(${red}, ${green}, ${blue}, ${normalizedAlpha})`;
+  }
+
   function resolvePlayerColorHexById(playerId, playersById, fallbackColor = null) {
     const normalizedPlayerId = playerId != null ? String(playerId).trim() : '';
     if (!normalizedPlayerId) {
@@ -264,6 +299,23 @@
     return resolvePlayerColorHexById(ownerPlayerId, playersById, OWNED_AIRPORT_FALLBACK_COLOR);
   }
 
+  function resolveAirportBadgeColorHex(airport, playersById) {
+    const listingSellerPlayerId =
+      airport &&
+      airport.saleListing &&
+      typeof airport.saleListing === 'object' &&
+      Number.isFinite(airport.saleListing.askingPrice) &&
+      airport.saleListing.sellerPlayerId != null
+        ? String(airport.saleListing.sellerPlayerId).trim()
+        : '';
+
+    if (listingSellerPlayerId) {
+      return resolvePlayerColorHexById(listingSellerPlayerId, playersById, OWNED_AIRPORT_FALLBACK_COLOR);
+    }
+
+    return resolveAirportOwnerColorHex(airport, playersById);
+  }
+
   function applyAirportMarkerOwnershipStyling(markerElement, airport, playersById) {
     if (!markerElement) {
       return;
@@ -281,18 +333,20 @@
     markerElement.setAttribute('data-owned', ownerPlayerId == null ? 'false' : 'true');
     markerElement.setAttribute('data-listed', hasListing ? 'true' : 'false');
 
-    if (!colorTargetElement) {
-      return;
+    if (colorTargetElement) {
+      // Keep the airport icon styling static; ownership color is shown only in the badge fill.
+      colorTargetElement.style.removeProperty('--airport-marker-room-fill');
+      colorTargetElement.style.removeProperty('--airport-marker-stroke');
     }
 
     if (!ownerColorHex) {
-      colorTargetElement.style.removeProperty('--airport-marker-room-fill');
-      colorTargetElement.style.removeProperty('--airport-marker-stroke');
+      markerElement.style.removeProperty('--airport-marker-badge-ring');
+      markerElement.style.removeProperty('--airport-marker-badge-fill');
       return;
     }
 
-    colorTargetElement.style.setProperty('--airport-marker-room-fill', ownerColorHex);
-    colorTargetElement.style.setProperty('--airport-marker-stroke', darkenHexColor(ownerColorHex));
+    markerElement.style.setProperty('--airport-marker-badge-ring', ownerColorHex);
+    markerElement.style.setProperty('--airport-marker-badge-fill', toRgbaColor(ownerColorHex, AIRPORT_BADGE_FILL_OPACITY));
   }
 
   function deriveSimulationNowGameMs(snapshot, realNowMs = Date.now()) {
@@ -756,6 +810,108 @@
       }
     }
 
+    function getEmptyAirportBadgeFeatureCollection() {
+      return {
+        type: 'FeatureCollection',
+        features: []
+      };
+    }
+
+    function ensureAirportBadgeLayer() {
+      if (!mapInstance) {
+        return false;
+      }
+
+      try {
+        if (!mapInstance.getSource(MAPLIBRE_AIRPORT_BADGE_SOURCE_ID)) {
+          mapInstance.addSource(MAPLIBRE_AIRPORT_BADGE_SOURCE_ID, {
+            type: 'geojson',
+            data: getEmptyAirportBadgeFeatureCollection()
+          });
+        }
+
+        if (!mapInstance.getLayer(MAPLIBRE_AIRPORT_BADGE_LAYER_ID)) {
+          const badgeLayerDefinition = {
+            id: MAPLIBRE_AIRPORT_BADGE_LAYER_ID,
+            type: 'circle',
+            source: MAPLIBRE_AIRPORT_BADGE_SOURCE_ID,
+            paint: {
+              'circle-radius': getMapLibreAirportBadgeRadiusExpression(),
+              'circle-color': ['coalesce', ['get', 'badgeFillColor'], toRgbaColor(AIRPORT_BADGE_UNOWNED_FILL_COLOR, AIRPORT_BADGE_FILL_OPACITY)],
+              'circle-stroke-color': AIRPORT_BADGE_STROKE_COLOR,
+              'circle-stroke-width': AIRPORT_BADGE_STROKE_WIDTH_PX,
+              'circle-opacity': 1
+            }
+          };
+
+          if (mapInstance.getLayer(MAPLIBRE_AIRPORT_BADGE_BEFORE_LAYER_ID)) {
+            mapInstance.addLayer(badgeLayerDefinition, MAPLIBRE_AIRPORT_BADGE_BEFORE_LAYER_ID);
+          } else {
+            mapInstance.addLayer(badgeLayerDefinition);
+          }
+        }
+      } catch (_error) {
+        return false;
+      }
+
+      return true;
+    }
+
+    function syncAirportBadges(airports, players) {
+      if (!mapInstance) {
+        return;
+      }
+
+      if (!ensureAirportBadgeLayer()) {
+        return;
+      }
+
+      const sourceAirports = Array.isArray(airports) ? airports : [];
+      const playersById = createPlayersById(players);
+      const badgeFeatureCollection = {
+        type: 'FeatureCollection',
+        features: sourceAirports.reduce((features, airport, index) => {
+          const lat = Number(airport && airport.lat);
+          const lng = Number(airport && airport.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return features;
+          }
+
+          const markerId = getAirportMarkerId(airport, index);
+          const badgeColorHex = resolveAirportBadgeColorHex(airport, playersById) || AIRPORT_BADGE_UNOWNED_FILL_COLOR;
+          features.push({
+            type: 'Feature',
+            properties: {
+              markerId,
+              badgeFillColor: toRgbaColor(badgeColorHex, AIRPORT_BADGE_FILL_OPACITY)
+            },
+            geometry: {
+              type: 'Point',
+              coordinates: [lng, lat]
+            }
+          });
+
+          return features;
+        }, [])
+      };
+
+      const source = mapInstance.getSource(MAPLIBRE_AIRPORT_BADGE_SOURCE_ID);
+      if (source && typeof source.setData === 'function') {
+        source.setData(badgeFeatureCollection);
+      }
+    }
+
+    function clearAirportBadges() {
+      if (!mapInstance) {
+        return;
+      }
+
+      const source = mapInstance.getSource(MAPLIBRE_AIRPORT_BADGE_SOURCE_ID);
+      if (source && typeof source.setData === 'function') {
+        source.setData(getEmptyAirportBadgeFeatureCollection());
+      }
+    }
+
     function getEmptyFlightFeatureCollection() {
       return {
         type: 'FeatureCollection',
@@ -1188,6 +1344,8 @@
 
       mapInstance.once('load', () => {
         mapLoaded = true;
+        ensureAirportBadgeLayer();
+        syncAirportBadges(latestGameSnapshot && latestGameSnapshot.airports, latestGameSnapshot && latestGameSnapshot.players);
         globalScope.requestAnimationFrame(() => {
           if (!mapInstance) {
             return;
@@ -1231,6 +1389,7 @@
         clearNativeDraggingState('screen-hidden');
         if (mapInstance) {
           clearAirportMarkers();
+          clearAirportBadges();
           clearRouteLines();
           clearNativeFlightDots();
         }
@@ -1246,6 +1405,7 @@
       latestGameSnapshot = state.game || null;
   resizeMapIfNeeded();
       applyInitialCameraSetupIfReady();
+      syncAirportBadges(state.game && state.game.airports, state.game && state.game.players);
       syncAirportMarkers(state.game && state.game.airports, state.game && state.game.players);
       syncRouteLines(state.game && state.game.routes, state.game && state.game.airports);
       ensureNativeFlightAnimationState();

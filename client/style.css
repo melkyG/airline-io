@@ -814,6 +814,8 @@ body {
 .airport-marker-root {
   --airport-marker-size: 26px;
   --airport-marker-scale: 1;
+  --airport-marker-badge-ring: #64748b;
+  --airport-marker-badge-fill: rgba(255, 255, 255, 0.85);
   pointer-events: auto;
   overflow: visible;
 }
@@ -828,6 +830,20 @@ body {
   transition: transform 140ms ease-out;
 }
 
+.airport-marker-ownership-badge {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--airport-marker-size) + 8px);
+  height: calc(var(--airport-marker-size) + 8px);
+  border-radius: 999px;
+  border: 2px solid #000;
+  background: var(--airport-marker-badge-fill);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
 .airport-marker {
   position: relative;
   display: grid;
@@ -839,12 +855,12 @@ body {
   overflow: visible;
   background: transparent;
   border: 0;
-  --airport-marker-stroke: #475569;
-  --airport-marker-room-fill: #64748b;
-  --airport-marker-shaft-fill: #334155;
-  --airport-marker-base-fill: #1f2937;
-  --airport-marker-window-fill: #f8fafc;
-  --airport-marker-antenna-fill: #475569;
+  --airport-marker-stroke: #000000;
+  --airport-marker-room-fill: #000000;
+  --airport-marker-shaft-fill: #000000;
+  --airport-marker-base-fill: #000000;
+  --airport-marker-window-fill: #ffffff;
+  --airport-marker-antenna-fill: #000000;
 }
 
 .airport-marker-visual {
@@ -852,11 +868,13 @@ body {
   height: var(--airport-marker-size);
   display: grid;
   place-items: center;
+  position: relative;
+  z-index: 1;
 }
 
 .airport-marker-label {
   position: absolute;
-  top: calc(100% - 1px);
+  top: calc(100% + 3px);
   left: 50%;
   transform: translateX(-50%);
   max-width: 160px;
@@ -875,6 +893,7 @@ body {
   pointer-events: none;
   opacity: 0;
   transition: opacity 160ms ease, transform 180ms ease;
+  z-index: 2;
 }
 
 .airport-marker-root[data-label-mode="iata"] .airport-marker-label,
