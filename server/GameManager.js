@@ -1087,7 +1087,7 @@ class GameManager {
         lobbyId: null,
         status: 'waiting',
         playerCount: 0,
-        maxPlayers: 5,
+        maxPlayers: 10,
         players: [],
         palette,
         availableColorIds: palette.map((entry) => entry.colorId),

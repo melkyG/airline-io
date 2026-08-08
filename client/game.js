@@ -60,7 +60,6 @@ let shopAirportSearchQuery = '';
 let isAirportSearchResultsOpen = false;
 let shopAircraftSearchQuery = '';
 let isAircraftSearchResultsOpen = false;
-let shouldIgnoreNextOverlayClick = false;
 let selectedRouteOriginAirportId = null;
 let selectedRouteDestinationAirportId = null;
 let routeOriginSearchQuery = '';
@@ -378,7 +377,7 @@ function getEmptyLobbyState() {
     lobbyId: null,
     status: 'waiting',
     playerCount: 0,
-    maxPlayers: 5,
+    maxPlayers: 10,
     players: [],
     palette: [],
     availableColorIds: [],
@@ -3941,11 +3940,6 @@ routeAircraftManagementModalDialogEl.addEventListener('click', (event) => {
 });
 
 shopModalOverlayEl.addEventListener('click', (event) => {
-  if (shouldIgnoreNextOverlayClick) {
-    shouldIgnoreNextOverlayClick = false;
-    return;
-  }
-
   if (event.target !== shopModalOverlayEl) {
     return;
   }
@@ -3997,7 +3991,7 @@ shopAircraftSearchInputEl.addEventListener('keydown', (event) => {
   refreshShopAircraftInteractionPanel(gameState.getState());
 });
 
-document.addEventListener('mousedown', (event) => {
+document.addEventListener('click', (event) => {
   const isAnyShopSearchOpen = isAirportSearchResultsOpen || isAircraftSearchResultsOpen;
   const isAnyRouteSearchOpen = isRouteOriginDropdownOpen || isRouteDestinationDropdownOpen;
 
@@ -4012,10 +4006,6 @@ document.addEventListener('mousedown', (event) => {
     const isInsideAircraftSearch = shopAircraftSearchContainerEl.contains(event.target);
 
     if (!isInsideAirportSearch && !isInsideAircraftSearch) {
-      if (shopModalDialogEl.contains(event.target)) {
-        shouldIgnoreNextOverlayClick = true;
-      }
-
       if (isAirportSearchResultsOpen) {
         closeAirportSearchResults();
       }
@@ -4848,6 +4838,12 @@ socket.on('route:create:result', (result = {}) => {
     return;
   }
 
+  const shouldReturnToRoutesAfterSuccess =
+    RoutesModalState.childModalReturnContext === ROUTE_CHILD_MODAL_RETURN_CONTEXT.SHOP &&
+    RoutesModalState.isStandaloneChildModal;
+  const retainedEntryAirportId = RoutesModalState.entryAirportId;
+  const retainedOpenedFrom = RoutesModalState.openedFrom;
+
   isRouteCreatePending = false;
 
   if (!result.success) {
@@ -4863,6 +4859,15 @@ socket.on('route:create:result', (result = {}) => {
   routeDestinationSearchQuery = '';
   isRouteOriginDropdownOpen = false;
   isRouteDestinationDropdownOpen = false;
+
+  if (shouldReturnToRoutesAfterSuccess) {
+    openRoutesModal({
+      openedFrom: retainedOpenedFrom || ROUTES_MODAL_OPENED_FROM.SHOP_AIRPORT_PANEL,
+      entryAirportId: retainedEntryAirportId
+    });
+    return;
+  }
+
   closeCreateRouteModal();
 });
 

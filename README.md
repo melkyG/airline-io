@@ -128,19 +128,19 @@ Notes:
 
 ### Test 1: Visitor does not automatically join
 - Open one browser tab.
-- Confirm the page shows 0/5.
+- Confirm the page shows 0/10.
 - Confirm no lobby is created until Join is clicked.
 
 ### Test 2: One player joins
 - Click Join.
 - Confirm a lobby is created.
 - Confirm the button changes to Joined.
-- Confirm the count becomes 1/5.
+- Confirm the count becomes 1/10.
 
 ### Test 3: Multiple players join the same lobby
 - Open additional tabs.
 - Click Join in each.
-- Confirm counts update to 2/5, 3/5, and 4/5.
+- Confirm counts update to 2/10, 3/10, and 4/10.
 
 ### Test 4: Countdown begins
 - Add the fifth player.
@@ -155,7 +155,7 @@ Notes:
 
 ### Test 6: Sixth visitor while countdown is running
 - Open another tab while the countdown is active.
-- Confirm the visitor sees 0/5 and no new lobby is created.
+- Confirm the visitor sees 0/10 and no new lobby is created.
 
 ### Test 7: Disconnect during countdown
 - Disconnect one joined player before countdown completion.

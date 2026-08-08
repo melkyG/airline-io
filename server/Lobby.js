@@ -2,7 +2,7 @@ class Lobby {
   constructor(id, manager) {
     this.id = id;
     this.status = 'waiting';
-    this.maxPlayers = 5;
+    this.maxPlayers = 10;
     this.players = new Map();
     this.colorAssignments = new Map();
     this.botFillInProgress = false;
