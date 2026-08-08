@@ -17,7 +17,6 @@ class Player {
     this.displayName = options.displayName || `Player ${this.id.slice(0, 4)}`;
     this.joinedAt = Date.now();
     this.connected = options.connected == null ? true : Boolean(options.connected);
-    this.score = 0;
     this.colorId = options.colorId || null;
     this.colorHex = options.colorHex || null;
     this.socket = socket;

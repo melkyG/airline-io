@@ -16,6 +16,7 @@ const {
   calculateAircraftSellToGamePrice
 } = require('./economy/liquidation');
 const { calculateNetWorthByPlayer } = require('./economy/netWorth');
+const { calculateScoreByPlayer } = require('./economy/score');
 
 const AIRPORT_DEFINITIONS_BY_ID = AIRPORT_CATALOG.reduce((lookup, airport) => {
   lookup.set(airport.id, airport);
@@ -206,9 +207,10 @@ class Game {
     }
 
     const sourcePlayers = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const scoreByPlayerId = calculateScoreByPlayer(this.authoritativeState);
     const rankedPlayers = sourcePlayers
       .map((player) => {
-        const score = Number.isFinite(player.score) ? player.score : 0;
+        const score = scoreByPlayerId.has(String(player.id)) ? scoreByPlayerId.get(String(player.id)) : 0;
         const capital = Number.isFinite(player.capital) ? player.capital : 0;
         return {
           id: player.id,
@@ -260,8 +262,9 @@ class Game {
 
     const scoreToWin = this.authoritativeState.scoreToWin;
     if (Number.isFinite(scoreToWin) && scoreToWin > 0) {
+      const scoreByPlayerId = calculateScoreByPlayer(this.authoritativeState);
       const scoreReached = this.authoritativeState.players.some((player) => {
-        const playerScore = Number.isFinite(player.score) ? player.score : 0;
+        const playerScore = scoreByPlayerId.has(String(player.id)) ? scoreByPlayerId.get(String(player.id)) : 0;
         return playerScore >= scoreToWin;
       });
 
@@ -281,7 +284,7 @@ class Game {
     return this.checkWinConditions();
   }
 
-  addScore(playerId, amount) {
+  addDebugScoreOffset(playerId, amount) {
     if (this.status !== 'active') {
       return false;
     }
@@ -296,13 +299,13 @@ class Game {
       return false;
     }
 
-    const currentScore = Number.isFinite(targetPlayer.score) ? targetPlayer.score : 0;
-    targetPlayer.score = currentScore + delta;
+    const currentDebugScoreOffset = Number.isFinite(targetPlayer.debugScoreOffset) ? targetPlayer.debugScoreOffset : 0;
+    targetPlayer.debugScoreOffset = currentDebugScoreOffset + delta;
 
     const runtimePlayer = this.players.get(playerId);
     if (runtimePlayer) {
-      const runtimeScore = Number.isFinite(runtimePlayer.score) ? runtimePlayer.score : 0;
-      runtimePlayer.score = runtimeScore + delta;
+      const runtimeDebugScoreOffset = Number.isFinite(runtimePlayer.debugScoreOffset) ? runtimePlayer.debugScoreOffset : 0;
+      runtimePlayer.debugScoreOffset = runtimeDebugScoreOffset + delta;
     }
 
     const ended = this.checkWinConditions();
@@ -2238,12 +2241,13 @@ class Game {
   createPublicPlayerSnapshot() {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
     const netWorthByPlayerId = calculateNetWorthByPlayer(this.authoritativeState);
+    const scoreByPlayerId = calculateScoreByPlayer(this.authoritativeState);
 
     return players.map((player) => ({
       id: player.id,
       username: player.username,
       isBot: Boolean(player && player.isBot),
-      score: player.score,
+      score: scoreByPlayerId.has(String(player.id)) ? scoreByPlayerId.get(String(player.id)) : 0,
       capital: player.capital,
       netWorth:
         netWorthByPlayerId.has(String(player.id))

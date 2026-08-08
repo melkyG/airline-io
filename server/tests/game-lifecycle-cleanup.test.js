@@ -87,7 +87,7 @@ function createManagedGame({
   botCount,
   scoreToWin = 1000,
   endsAt = Date.now() + 60000,
-  humanScores = []
+  playerDebugScoreOffsets = []
 }) {
   const humans = [];
   const bots = [];
@@ -120,7 +120,7 @@ function createManagedGame({
       username: player.displayName,
       isBot: Boolean(player.isBot),
       capital: 1000000,
-      score: Number.isFinite(humanScores[index]) ? humanScores[index] : 0
+      debugScoreOffset: Number.isFinite(playerDebugScoreOffsets[index]) ? playerDebugScoreOffsets[index] : 0
     })),
     airports: [],
     ownedAircraft: []
@@ -256,7 +256,7 @@ test('score-based completion retains ended game and schedules retention', () => 
     connectedHumanCount: 1,
     botCount: 1,
     scoreToWin: 100,
-    humanScores: [100]
+    playerDebugScoreOffsets: [100]
   });
 
   game.initialize();
@@ -277,7 +277,7 @@ test('ended game is destroyed when final human explicitly leaves', () => {
     connectedHumanCount: 1,
     botCount: 2,
     scoreToWin: 100,
-    humanScores: [100]
+    playerDebugScoreOffsets: [100]
   });
 
   game.initialize();
@@ -299,7 +299,7 @@ test('ended game is destroyed when final human disconnects', () => {
     connectedHumanCount: 1,
     botCount: 2,
     scoreToWin: 100,
-    humanScores: [100]
+    playerDebugScoreOffsets: [100]
   });
 
   game.initialize();
@@ -319,7 +319,7 @@ test('ended game survives while at least one connected human remains before rete
     connectedHumanCount: 2,
     botCount: 1,
     scoreToWin: 100,
-    humanScores: [100, 0]
+    playerDebugScoreOffsets: [100, 0]
   });
 
   game.initialize();
@@ -341,7 +341,7 @@ test('ended game disconnect removes only the departed real player from live play
     connectedHumanCount: 2,
     botCount: 1,
     scoreToWin: 100,
-    humanScores: [100, 0]
+    playerDebugScoreOffsets: [100, 0]
   });
 
   game.initialize();
@@ -393,7 +393,7 @@ test('five-minute retention expiry destroys ended game', () => {
     connectedHumanCount: 1,
     botCount: 1,
     scoreToWin: 100,
-    humanScores: [100]
+    playerDebugScoreOffsets: [100]
   });
 
   game.initialize();

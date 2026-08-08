@@ -4,6 +4,12 @@ const assert = require('node:assert/strict');
 function createClassList() {
   return {
     values: new Set(),
+    add(name) {
+      this.values.add(name);
+    },
+    remove(name) {
+      this.values.delete(name);
+    },
     toggle(name, enabled) {
       if (enabled) {
         this.values.add(name);
@@ -22,6 +28,7 @@ function createMockElement() {
     innerHTML: '',
     children: [],
     classList: createClassList(),
+    setAttribute() {},
     appendChild(node) {
       if (node && node.__isFragment && Array.isArray(node.children)) {
         this.children.push(...node.children);
@@ -46,7 +53,11 @@ function createMockDocument() {
     lobbyScreen: createMockElement(),
     gameScreen: createMockElement(),
     gameStatus: createMockElement(),
-    leaderboard: createMockElement()
+    leaderboard: createMockElement(),
+    resultsOverlay: createMockElement(),
+    resultsWinner: createMockElement(),
+    resultsStandingsHeader: createMockElement(),
+    resultsStandings: createMockElement()
   };
 
   return {
@@ -142,6 +153,81 @@ test('renderer derives leaderboard from game players sorted by descending score'
   ]);
 
   assert.deepEqual(players.map((player) => player.id), beforeOrder);
+
+  delete global.window;
+});
+
+test('renderer rounds leaderboard score display to whole integers', () => {
+  const { renderer, elements } = createRendererUnderTest();
+  const players = [
+    { id: 'p1', username: 'Alice', capital: 1000000, score: 1000.49 },
+    { id: 'p2', username: 'Bob', capital: 1000000, score: 20000.5 },
+    { id: 'p3', username: 'Charlie', capital: 1000000, score: -1.6 }
+  ];
+
+  renderer.render({
+    connection: { status: 'connected' },
+    session: { joinPending: false, joined: true },
+    lobby: { playerCount: 3, maxPlayers: 5, players: [], status: 'waiting', countdownSeconds: null },
+    ui: { errorMessage: null, screen: 'game' },
+    game: {
+      id: 'game-2',
+      status: 'active',
+      createdAt: 123,
+      players,
+      airports: []
+    },
+    waitingAnimation: { step: 0 }
+  });
+
+  const renderedScores = elements.leaderboard.children.map((item) => {
+    const content = Array.isArray(item.children) ? item.children[0] : null;
+    const scoreEl = content && Array.isArray(content.children) ? content.children[2] : null;
+    return scoreEl && typeof scoreEl.textContent === 'string' ? scoreEl.textContent : '';
+  });
+
+  assert.deepEqual(renderedScores, ['20,001', '1,000', '-2']);
+
+  delete global.window;
+});
+
+test('renderer rounds and comma-formats results standings scores', () => {
+  const { renderer, elements } = createRendererUnderTest();
+
+  renderer.render({
+    connection: { status: 'connected' },
+    session: { joinPending: false, joined: true },
+    lobby: { playerCount: 2, maxPlayers: 5, players: [], status: 'waiting', countdownSeconds: null },
+    ui: { errorMessage: null, screen: 'game' },
+    game: {
+      id: 'game-results-1',
+      status: 'ended',
+      createdAt: 123,
+      endedAt: 456,
+      players: [
+        { id: 'p1', username: 'Alice', isBot: false },
+        { id: 'p2', username: 'Bob', isBot: false }
+      ],
+      results: {
+        generatedAt: 789,
+        winner: { id: 'p1', username: 'Alice', score: 1000.49 },
+        standings: [
+          { id: 'p1', username: 'Alice', score: 1000.49 },
+          { id: 'p2', username: 'Bob', score: 20000.5 }
+        ]
+      },
+      airports: []
+    },
+    waitingAnimation: { step: 0 }
+  });
+
+  const renderedScores = elements.resultsStandings.children.map((item) => {
+    const content = Array.isArray(item.children) ? item.children[0] : null;
+    const scoreEl = content && Array.isArray(content.children) ? content.children[2] : null;
+    return scoreEl && typeof scoreEl.textContent === 'string' ? scoreEl.textContent : '';
+  });
+
+  assert.deepEqual(renderedScores, ['1,000', '20,001']);
 
   delete global.window;
 });

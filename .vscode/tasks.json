@@ -254,6 +254,257 @@
 				"client/map.js"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "run-derived-score-migration-tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/game-win-conditions.test.js",
+				"server/tests/score-derived.test.js",
+				"server/tests/game-start-payload.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-server-tests-full-derived-check",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-server-tests-dot-reporter",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"--test-reporter=dot",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-server-tests-tap-reporter",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"--test-reporter=tap",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-lifecycle-tests-only",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/game-lifecycle-cleanup.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-server-tests-once-final",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-previously-flaky-suites",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/lobby-bot-fill.test.js",
+				"server/tests/net-worth.test.js",
+				"server/tests/player-color-allocation.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-net-worth-tests-only",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/net-worth.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-lobby-bot-fill-tests-only",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/lobby-bot-fill.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-server-tests-once-temp",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-score-migration-tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/game-factory.test.js",
+				"server/tests/game-start-payload.test.js",
+				"server/tests/game-win-conditions.test.js",
+				"server/tests/game-lifecycle-cleanup.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-net-worth-score-tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/score.test.js",
+				"server/tests/game-win-conditions.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-server-tests-post-net-worth-score",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "print-net-worth-score-samples",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const B=1_000_000,T=100_000_000_000,P=350; const f=(n)=>n<=B?0:P*(n-B)/(T-B); [1_000_000,1_000_000_000,10_000_000_000,50_000_000_000,100_000_000_000].forEach((n)=>console.log(n+':'+f(n)));"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-score-calibration-focused-tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/score.test.js",
+				"server/tests/game-win-conditions.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "print-score-calibration-samples",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const B=1_000_000,T=100_000_000_000,P=500; const f=(n)=>n<=B?0:P*(n-B)/(T-B); [1_000_000,1_000_000_000,10_000_000_000,50_000_000_000,100_000_000_000].forEach((n)=>console.log(n+':'+f(n)));"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-render-leaderboard-test",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/render-leaderboard.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-render-formatting-tests",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/render-leaderboard.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-render-formatting-tests-retry",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/render-leaderboard.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-render-regression-after-simhud",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/render-leaderboard.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-server-tests-after-simhud",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/*.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "check-simulation-hud-boundaries",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const H=60*60*1000, HD=24, DM=30, MY=12, DY=DM*MY; const f=(elapsedMs)=>{const totalElapsedHours=Math.floor(Math.max(0,elapsedMs)/H); const elapsedCompleteDays=Math.floor(totalElapsedHours/HD); const hourOfDay=totalElapsedHours%HD; if(elapsedCompleteDays<DM){return `Day ${elapsedCompleteDays+1}, Hour ${hourOfDay}`;} if(elapsedCompleteDays<DY){const monthNumber=Math.floor(elapsedCompleteDays/DM); const dayOfMonth=(elapsedCompleteDays%DM)+1; return `Month ${monthNumber}, Day ${dayOfMonth}, Hour ${hourOfDay}`;} const yearNumber=Math.floor(elapsedCompleteDays/DY); const dayOffsetInYear=elapsedCompleteDays%DY; const monthOfYear=Math.floor(dayOffsetInYear/DM)+1; const dayOfMonth=(dayOffsetInYear%DM)+1; return `Year ${yearNumber}, Month ${monthOfYear}, Day ${dayOfMonth}, Hour ${hourOfDay}`; }; const cases=[[0,'start'],[5*H,'+5h'],[23*H,'+23h'],[24*H,'+24h'],[30*24*H,'+30d']]; cases.forEach(([ms,name])=>console.log(name+': '+f(ms)));"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-render-regression-after-hour-fix",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"--test",
+				"server/tests/render-leaderboard.test.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "check-simulation-hud-padding",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"-e",
+				"const H=60*60*1000, HD=24, DM=30, DY=DM*12; const pad=(v)=>String(Math.max(0, Number(v)||0)).padStart(2,'0'); const f=(elapsedMs)=>{const h=Math.floor(Math.max(0,elapsedMs)/H); const d=Math.floor(h/HD); const hour=h%HD; if(d<DM){return `Day ${pad(d+1)}, Hour ${pad(hour)}`;} if(d<DY){const m=Math.floor(d/DM); const dom=(d%DM)+1; return `Month ${m}, Day ${pad(dom)}, Hour ${pad(hour)}`;} const y=Math.floor(d/DY); const yoff=d%DY; const m=Math.floor(yoff/DM)+1; const dom=(yoff%DM)+1; return `Year ${y}, Month ${m}, Day ${pad(dom)}, Hour ${pad(hour)}`;}; [[0,'start'],[2*H,'+2h'],[24*H,'+24h'],[30*24*H,'+30d']].forEach(([ms,n])=>console.log(n+': '+f(ms)));"
+			],
+			"isBackground": false
 		}
 	]
 }

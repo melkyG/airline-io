@@ -1144,7 +1144,7 @@ class GameManager {
       return false;
     }
 
-    return game.addScore(player.id, amount);
+    return game.addDebugScoreOffset(player.id, amount);
   }
 
   handleAirportPurchaseRequest(socketId, airportId) {

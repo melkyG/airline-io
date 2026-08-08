@@ -149,7 +149,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
   assert.notEqual(payload.game.players[0], game.authoritativeState.players[0]);
   assert.equal(game.authoritativeState.players[0].username, 'Alice');
   assert.equal(game.authoritativeState.players[0].capital, 1000000);
-  assert.equal(game.authoritativeState.players[0].score, 0);
+  assert.equal(game.getPublicState().game.players[0].score, 0);
   assert.equal('internalOnlyField' in payload.game.players[0], false);
   assert.equal(game.authoritativeState.airports[0].ownerPlayerId, null);
   assert.notEqual(payload.game.routes[0], game.authoritativeState.routes[0]);
@@ -294,8 +294,11 @@ test('game public player snapshots preserve authoritative bot and human colors a
     }
   ]);
 
-  game.addScore('p1', 50);
+  game.addDebugScoreOffset('p1', 50);
   const statePayload = game.getPublicState();
+
+  assert.equal(statePayload.game.players[0].score, 50);
+  assert.equal(statePayload.game.players[1].score, 0);
 
   assert.deepEqual(
     statePayload.game.players.map((player) => ({

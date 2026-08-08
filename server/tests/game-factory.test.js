@@ -3,7 +3,6 @@ const assert = require('node:assert/strict');
 const {
   createGame,
   STARTING_CAPITAL,
-  STARTING_SCORE,
   GAME_DURATION_MS,
   SCORE_TO_WIN,
   SIMULATION_SPEED_MULTIPLIER
@@ -59,13 +58,12 @@ test('createGame builds the expected initial authoritative state shape', () => {
       id: player.id,
       username: player.username,
       isBot: player.isBot,
-      score: player.score,
       colorId: player.colorId,
       colorHex: player.colorHex
     })),
     [
-      { id: 'socket-1', username: 'Alice', isBot: false, score: STARTING_SCORE, colorId: 'violet', colorHex: '#8b5cf6' },
-      { id: 'socket-2', username: 'Bob', isBot: false, score: STARTING_SCORE, colorId: 'sky', colorHex: '#0ea5e9' }
+      { id: 'socket-1', username: 'Alice', isBot: false, colorId: 'violet', colorHex: '#8b5cf6' },
+      { id: 'socket-2', username: 'Bob', isBot: false, colorId: 'sky', colorHex: '#0ea5e9' }
     ]
   );
 
@@ -105,7 +103,6 @@ test('mutating game players does not mutate original lobby players', () => {
 
   game.players[0].username = 'Changed';
   game.players[0].capital = 0;
-  game.players[0].score = 99;
 
   assert.equal(lobbyPlayers[0].displayName, 'Alice');
   assert.equal(lobbyPlayers[0].capital, undefined);

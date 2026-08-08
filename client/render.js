@@ -5,6 +5,9 @@
     currency: 'USD',
     maximumFractionDigits: 0
   });
+  const SCORE_FORMATTER = new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 0
+  });
   const EVENT_LOG_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
     hour: '2-digit',
     minute: '2-digit',
@@ -88,6 +91,15 @@
     }
 
     return 'Asset';
+  }
+
+  function formatScore(scoreValue) {
+    const score = Number(scoreValue);
+    if (!Number.isFinite(score)) {
+      return '0';
+    }
+
+    return SCORE_FORMATTER.format(Math.round(score));
   }
 
   function formatAssetTransactionLogEntry({
@@ -424,7 +436,7 @@
 
         const scoreValue = documentRef.createElement('span');
         scoreValue.className = 'leaderboard-score';
-        scoreValue.textContent = String(score);
+        scoreValue.textContent = formatScore(score);
 
         content.appendChild(playerName);
         content.appendChild(spacer);
@@ -669,7 +681,7 @@
 
         const scoreValue = documentRef.createElement('span');
         scoreValue.className = 'results-standing-score';
-        scoreValue.textContent = String(score);
+        scoreValue.textContent = formatScore(score);
 
         content.appendChild(playerName);
         content.appendChild(dots);

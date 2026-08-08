@@ -18,18 +18,11 @@ const INTEGER_FORMATTER = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0
 });
 const SIMULATION_CLOCK_TICK_MS = 750;
-const SIMULATION_DATE_FORMATTER = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'UTC',
-  month: 'long',
-  day: 'numeric',
-  year: 'numeric'
-});
-const SIMULATION_TIME_FORMATTER = new Intl.DateTimeFormat('en-US', {
-  timeZone: 'UTC',
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false
-});
+const SIMULATION_HOUR_MS = 60 * 60 * 1000;
+const SIMULATION_HOURS_PER_DAY = 24;
+const SIMULATION_DAYS_PER_MONTH = 30;
+const SIMULATION_MONTHS_PER_YEAR = 12;
+const SIMULATION_DAYS_PER_YEAR = SIMULATION_DAYS_PER_MONTH * SIMULATION_MONTHS_PER_YEAR;
 let gameCountdownIntervalId = null;
 let simulationClockIntervalId = null;
 let simulationClockSnapshot = {
@@ -4394,6 +4387,55 @@ function renderSimulationClockText(dateText, timeText) {
   }
 }
 
+function formatElapsedSimulationClockText(snapshot, simulationNowGameMs) {
+  const formatDayOrHour = (value) => String(Math.max(0, Number(value) || 0)).padStart(2, '0');
+
+  if (!Number.isFinite(simulationNowGameMs) || !snapshot || !Number.isFinite(snapshot.simulationStartedAtGameMs)) {
+    return {
+      primaryText: '--',
+      secondaryText: ''
+    };
+  }
+
+  const elapsedSimulationMs = Math.max(0, simulationNowGameMs - snapshot.simulationStartedAtGameMs);
+  const totalElapsedHours = Math.floor(elapsedSimulationMs / SIMULATION_HOUR_MS);
+  const elapsedCompleteDays = Math.floor(totalElapsedHours / SIMULATION_HOURS_PER_DAY);
+  const hourOfDay = totalElapsedHours % SIMULATION_HOURS_PER_DAY;
+
+  if (elapsedCompleteDays < SIMULATION_DAYS_PER_MONTH) {
+    const dayNumber = elapsedCompleteDays + 1;
+    return {
+      primaryText: `Day ${formatDayOrHour(dayNumber)}, Hour ${formatDayOrHour(hourOfDay)}`,
+      secondaryText: ''
+    };
+  }
+
+  if (elapsedCompleteDays < SIMULATION_DAYS_PER_YEAR) {
+    const monthNumber = Math.floor(elapsedCompleteDays / SIMULATION_DAYS_PER_MONTH);
+    const dayOfMonth = (elapsedCompleteDays % SIMULATION_DAYS_PER_MONTH) + 1;
+    return {
+      primaryText:
+        `Month ${INTEGER_FORMATTER.format(monthNumber)}, ` +
+        `Day ${formatDayOrHour(dayOfMonth)}, ` +
+        `Hour ${formatDayOrHour(hourOfDay)}`,
+      secondaryText: ''
+    };
+  }
+
+  const yearNumber = Math.floor(elapsedCompleteDays / SIMULATION_DAYS_PER_YEAR);
+  const dayOffsetInYear = elapsedCompleteDays % SIMULATION_DAYS_PER_YEAR;
+  const monthOfYear = Math.floor(dayOffsetInYear / SIMULATION_DAYS_PER_MONTH) + 1;
+  const dayOfMonth = (dayOffsetInYear % SIMULATION_DAYS_PER_MONTH) + 1;
+  return {
+    primaryText:
+      `Year ${INTEGER_FORMATTER.format(yearNumber)}, ` +
+      `Month ${INTEGER_FORMATTER.format(monthOfYear)}, ` +
+      `Day ${formatDayOrHour(dayOfMonth)}, ` +
+      `Hour ${formatDayOrHour(hourOfDay)}`,
+    secondaryText: ''
+  };
+}
+
 function updateSimulationClockDisplay() {
   if (!simulationClockHudEl || !simulationClockDateEl || !simulationClockTimeEl) {
     return false;
@@ -4413,16 +4455,8 @@ function updateSimulationClockDisplay() {
   simulationClockHudEl.classList.remove('hidden');
 
   const simulationNowGameMs = deriveSimulationNowGameMs(simulationClockSnapshot);
-  if (!Number.isFinite(simulationNowGameMs)) {
-    renderSimulationClockText('--', '--:--');
-    return true;
-  }
-
-  const simulationNowDate = new Date(simulationNowGameMs);
-  renderSimulationClockText(
-    SIMULATION_DATE_FORMATTER.format(simulationNowDate),
-    SIMULATION_TIME_FORMATTER.format(simulationNowDate)
-  );
+  const elapsedClockText = formatElapsedSimulationClockText(simulationClockSnapshot, simulationNowGameMs);
+  renderSimulationClockText(elapsedClockText.primaryText, elapsedClockText.secondaryText);
   return true;
 }
 
