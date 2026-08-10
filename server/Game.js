@@ -586,11 +586,8 @@ class Game {
     const isOwnerMatch =
       String(flight.ownerPlayerId || '').trim() === String(route.ownerPlayerId || '').trim() &&
       String(flight.ownerPlayerId || '').trim() === String(aircraft.ownerPlayerId || '').trim();
-    const isOriginMatch = String(flight.originAirportId || '').trim() === String(route.originAirportId || '').trim();
-    const isDestinationMatch =
-      String(flight.destinationAirportId || '').trim() === String(route.destinationAirportId || '').trim();
 
-    if (!isRouteMatch || !isOwnerMatch || !isOriginMatch || !isDestinationMatch) {
+    if (!isRouteMatch || !isOwnerMatch) {
       return {
         success: false,
         code: 'FLIGHT_ASSIGNMENT_MISMATCH',
@@ -1207,36 +1204,6 @@ class Game {
       });
 
       if (routeFlights.length !== assignedAircraftIds.length) {
-        console.error('[FLIGHT_ASSIGNMENT_MISMATCH DIAGNOSTIC]', {
-          routeId: route.routeId,
-          assignedAircraftInstanceIds: route.assignedAircraftInstanceIds,
-          assignedAircraftIdsLength: assignedAircraftIds.length,
-          routeFlightsLength: routeFlights.length,
-          ownedAircraftReferencingRoute: ownedAircraft
-            .filter(a => String(a.assignedRouteId || '') === String(route.routeId))
-            .map(a => ({
-              instanceId: a.aircraftInstanceId,
-              assignedRouteId: a.assignedRouteId,
-              status: a.status
-            })),
-          flightsReferencingRoute: routeFlights.map(f => ({
-            flightId: f.flightId,
-            aircraftInstanceId: f.aircraftInstanceId,
-            routeId: f.routeId,
-            status: f.status,
-            direction: f.direction
-            })),
-          uniqueFlightAircraftInstanceIds: [...new Set(routeFlights.map(f => String(f.aircraftInstanceId || '')))],
-          duplicateFlightAircraftInstanceIds: routeFlights
-            .map(f => String(f.aircraftInstanceId || ''))
-            .filter((id, index, arr) => arr.indexOf(id) !== index),
-          assignedAircraftWithNoFlight: assignedAircraftIds.filter(id =>
-            !routeFlights.some(f => String(f.aircraftInstanceId || '') === id)
-          ),
-          flightsWithUnassignedAircraft: routeFlights
-            .filter(f => !assignedAircraftIdSet.has(String(f.aircraftInstanceId || '')))
-            .map(f => f.aircraftInstanceId)
-        });
         return {
           success: false,
           code: 'FLIGHT_ASSIGNMENT_MISMATCH',
