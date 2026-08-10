@@ -124,7 +124,8 @@ const RoutesModalState = {
   openedFrom: null,
   isStandaloneChildModal: false,
   childModalReturnContext: ROUTE_CHILD_MODAL_RETURN_CONTEXT.ROUTES,
-  entryAirportId: null
+  entryAirportId: null,
+  airportFilterId: null
 };
 
 // Pointer interaction tracking for deferred authoritative refreshes
@@ -260,13 +261,14 @@ function openShopModal({ openedFrom = SHOP_MODAL_OPENED_FROM.HUD } = {}) {
   refreshShopModal(gameState.getState());
 }
 
-function openRoutesModal({ openedFrom = ROUTES_MODAL_OPENED_FROM.HUD, entryAirportId = null } = {}) {
+function openRoutesModal({ openedFrom = ROUTES_MODAL_OPENED_FROM.HUD, entryAirportId = null, airportFilterId = null } = {}) {
   RoutesModalState.isOpen = true;
   RoutesModalState.isCreateRouteOpen = false;
   RoutesModalState.isAircraftManagementOpen = false;
   RoutesModalState.isStandaloneChildModal = false;
   RoutesModalState.childModalReturnContext = ROUTE_CHILD_MODAL_RETURN_CONTEXT.ROUTES;
   RoutesModalState.entryAirportId = entryAirportId ? String(entryAirportId).trim() || null : null;
+  RoutesModalState.airportFilterId = airportFilterId ? String(airportFilterId).trim() || null : null;
   selectedRouteAircraftManagementRouteId = null;
   routeAircraftAssignQuantityByCatalogId = new Map();
   routeAircraftUnassignQuantityByCatalogId = new Map();
@@ -400,11 +402,11 @@ function closeRoutesModal() {
   RoutesModalState.isStandaloneChildModal = false;
   RoutesModalState.childModalReturnContext = ROUTE_CHILD_MODAL_RETURN_CONTEXT.ROUTES;
   RoutesModalState.entryAirportId = null;
+  RoutesModalState.airportFilterId = null;
   selectedRouteAircraftManagementRouteId = null;
   pendingRouteAircraftAssignAircraftInstanceId = null;
   pendingRouteAircraftUnassignAircraftInstanceId = null;
   routeAircraftManagementErrorMessage = '';
-  routeAircraftManagementFeedbackKind = 'error';
   routeAircraftAssignQuantityByCatalogId = new Map();
   routeAircraftUnassignQuantityByCatalogId = new Map();
   routeAircraftAssignQuantityInputByCatalogId = new Map();
@@ -2036,7 +2038,18 @@ function refreshRoutesModal(state = gameState.getState()) {
   }
 
   const airportLookupById = getAirportLookupById(normalizedState);
-  const localPlayerRoutes = getLocalPlayerRoutes(normalizedState);
+  let localPlayerRoutes = getLocalPlayerRoutes(normalizedState);
+
+  if (RoutesModalState.airportFilterId) {
+    const filterAirportId = String(RoutesModalState.airportFilterId);
+    localPlayerRoutes = localPlayerRoutes.filter(route => {
+      if (!route) return false;
+      const originMatches = String(route.originAirportId || '') === filterAirportId;
+      const destinationMatches = String(route.destinationAirportId || '') === filterAirportId;
+      return originMatches || destinationMatches;
+    });
+  }
+
   const sortedLocalPlayerRoutes = localPlayerRoutes.slice().sort((leftRoute, rightRoute) => {
     const leftOrigin = String((leftRoute && leftRoute.originAirportId) || '');
     const leftDestination = String((leftRoute && leftRoute.destinationAirportId) || '');
@@ -2892,7 +2905,8 @@ function openRouteContextForAirport(airportId) {
 
   openRoutesModal({
     openedFrom: ROUTES_MODAL_OPENED_FROM.SHOP_AIRPORT_PANEL,
-    entryAirportId: normalizedAirportId
+    entryAirportId: normalizedAirportId,
+    airportFilterId: normalizedAirportId
   });
 }
 
@@ -4570,7 +4584,7 @@ function formatElapsedSimulationClockText(snapshot, simulationNowGameMs) {
     const dayOfMonth = (elapsedCompleteDays % SIMULATION_DAYS_PER_MONTH) + 1;
     return {
       primaryText:
-        `Month ${INTEGER_FORMATTER.format(monthNumber)}, ` +
+        `Month ${formatDayOrHour(monthNumber)}, ` +
         `Day ${formatDayOrHour(dayOfMonth)}, ` +
         `Hour ${formatDayOrHour(hourOfDay)}`,
       secondaryText: ''
@@ -4584,7 +4598,7 @@ function formatElapsedSimulationClockText(snapshot, simulationNowGameMs) {
   return {
     primaryText:
       `Year ${INTEGER_FORMATTER.format(yearNumber)}, ` +
-      `Month ${INTEGER_FORMATTER.format(monthOfYear)}, ` +
+      `Month ${formatDayOrHour(monthOfYear)}, ` +
       `Day ${formatDayOrHour(dayOfMonth)}, ` +
       `Hour ${formatDayOrHour(hourOfDay)}`,
     secondaryText: ''
