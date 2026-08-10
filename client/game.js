@@ -127,6 +127,125 @@ const RoutesModalState = {
   entryAirportId: null
 };
 
+// Pointer interaction tracking for deferred authoritative refreshes
+let activePointerId = null;
+let isPointerInteractionActive = false;
+let pendingAuthoritativeState = null;
+let pointerEmergencyTimeoutId = null;
+let deferredFlushTimeoutId = null;
+const POINTER_EMERGENCY_TIMEOUT_MS = 30000;
+
+// Debug flags (set to true to enable specific debug logging)
+const DEBUG_ROUTE_AIRCRAFT_FOCUS = false;
+
+// Route list row tracking for DOM reconciliation
+const routeListRowByRouteId = new Map();
+
+function startPointerInteraction(pointerId) {
+  if (isPointerInteractionActive) {
+    return;
+  }
+  
+  isPointerInteractionActive = true;
+  activePointerId = pointerId;
+  pendingAuthoritativeState = null;
+  
+  if (pointerEmergencyTimeoutId) {
+    clearTimeout(pointerEmergencyTimeoutId);
+  }
+  
+  if (deferredFlushTimeoutId) {
+    clearTimeout(deferredFlushTimeoutId);
+    deferredFlushTimeoutId = null;
+  }
+  
+  pointerEmergencyTimeoutId = setTimeout(() => {
+    forceFlushPendingAuthoritativeRefresh();
+  }, POINTER_EMERGENCY_TIMEOUT_MS);
+}
+
+function endPointerInteraction(pointerId) {
+  if (!isPointerInteractionActive || activePointerId !== pointerId) {
+    return;
+  }
+  
+  if (pointerEmergencyTimeoutId) {
+    clearTimeout(pointerEmergencyTimeoutId);
+    pointerEmergencyTimeoutId = null;
+  }
+  
+  isPointerInteractionActive = false;
+  activePointerId = null;
+  
+  if (deferredFlushTimeoutId) {
+    clearTimeout(deferredFlushTimeoutId);
+  }
+  
+  deferredFlushTimeoutId = setTimeout(() => {
+    deferredFlushTimeoutId = null;
+    if (pendingAuthoritativeState) {
+      const stateToRefresh = pendingAuthoritativeState;
+      pendingAuthoritativeState = null;
+      refreshShopModal(stateToRefresh);
+      refreshRoutesModal(stateToRefresh);
+    }
+  }, 0);
+}
+
+function flushPendingAuthoritativeRefresh() {
+  if (!isPointerInteractionActive) {
+    return;
+  }
+  
+  isPointerInteractionActive = false;
+  activePointerId = null;
+  
+  if (pointerEmergencyTimeoutId) {
+    clearTimeout(pointerEmergencyTimeoutId);
+    pointerEmergencyTimeoutId = null;
+  }
+  
+  if (deferredFlushTimeoutId) {
+    clearTimeout(deferredFlushTimeoutId);
+    deferredFlushTimeoutId = null;
+  }
+  
+  if (pendingAuthoritativeState) {
+    const stateToRefresh = pendingAuthoritativeState;
+    pendingAuthoritativeState = null;
+    refreshShopModal(stateToRefresh);
+    refreshRoutesModal(stateToRefresh);
+  }
+}
+
+function forceFlushPendingAuthoritativeRefresh() {
+  isPointerInteractionActive = false;
+  activePointerId = null;
+  
+  if (pointerEmergencyTimeoutId) {
+    clearTimeout(pointerEmergencyTimeoutId);
+    pointerEmergencyTimeoutId = null;
+  }
+  
+  if (deferredFlushTimeoutId) {
+    clearTimeout(deferredFlushTimeoutId);
+    deferredFlushTimeoutId = null;
+  }
+  
+  if (pendingAuthoritativeState) {
+    const stateToRefresh = pendingAuthoritativeState;
+    pendingAuthoritativeState = null;
+    refreshShopModal(stateToRefresh);
+    refreshRoutesModal(stateToRefresh);
+  }
+}
+
+function handleWindowBlurOrVisibilityChange() {
+  if (isPointerInteractionActive) {
+    forceFlushPendingAuthoritativeRefresh();
+  }
+}
+
 function setShopActiveTab(activeTab) {
   if (activeTab !== SHOP_MODAL_TAB.AIRPORTS && activeTab !== SHOP_MODAL_TAB.AIRCRAFT) {
     return;
@@ -593,9 +712,14 @@ const renderer = window.createRenderer(document);
 gameState.subscribe((state) => {
   renderer.render(state);
   refreshLobbyColorPicker(state);
-  refreshShopModal(state);
   refreshRoutesHudButton(state);
-  refreshRoutesModal(state);
+  
+  if (isPointerInteractionActive) {
+    pendingAuthoritativeState = state;
+  } else {
+    refreshShopModal(state);
+    refreshRoutesModal(state);
+  }
 });
 renderer.render(gameState.getState());
 
@@ -844,9 +968,19 @@ routesListFeedbackEl.className = 'airport-interaction-row routes-list-feedback h
 const routesListContainerEl = document.createElement('div');
 routesListContainerEl.className = 'routes-list-container';
 
+const routesListEl = document.createElement('div');
+routesListEl.className = 'routes-list';
+
+const routesListEmptyEl = document.createElement('p');
+routesListEmptyEl.className = 'shop-airport-results-empty';
+routesListEmptyEl.textContent = 'No routes yet. Create one to get started.';
+
 routesListSectionEl.appendChild(routesListTitleEl);
 routesListSectionEl.appendChild(routesListFeedbackEl);
 routesListSectionEl.appendChild(routesListContainerEl);
+routesListContainerEl.appendChild(routesListEl);
+routesListContainerEl.appendChild(routesListEmptyEl);
+routesListEmptyEl.classList.add('hidden');
 
 routesModalContentEl.appendChild(routesListSectionEl);
 routesModalContentEl.appendChild(routesOpenCreateModalButtonEl);
@@ -953,7 +1087,31 @@ if (gameScreenEl) {
   gameScreenEl.appendChild(routesModalOverlayEl);
   gameScreenEl.appendChild(createRouteModalOverlayEl);
   gameScreenEl.appendChild(routeAircraftManagementModalOverlayEl);
+  
+  routesModalDialogEl.addEventListener('pointerdown', (e) => {
+    startPointerInteraction(e.pointerId);
+  });
+  
+  createRouteModalDialogEl.addEventListener('pointerdown', (e) => {
+    startPointerInteraction(e.pointerId);
+  });
+  
+  routeAircraftManagementModalDialogEl.addEventListener('pointerdown', (e) => {
+    startPointerInteraction(e.pointerId);
+  });
 }
+
+window.addEventListener('pointerup', (e) => {
+  endPointerInteraction(e.pointerId);
+});
+
+window.addEventListener('pointercancel', (e) => {
+  endPointerInteraction(e.pointerId);
+});
+
+window.addEventListener('blur', handleWindowBlurOrVisibilityChange);
+
+document.addEventListener('visibilitychange', handleWindowBlurOrVisibilityChange);
 
 isRoutesModalDomReady = Boolean(gameScreenEl);
 
@@ -1366,6 +1524,10 @@ shopModalOverlayEl.appendChild(shopModalDialogEl);
 
 if (gameScreenEl) {
   gameScreenEl.appendChild(shopModalOverlayEl);
+  
+  shopModalDialogEl.addEventListener('pointerdown', (e) => {
+    startPointerInteraction(e.pointerId);
+  });
 }
 
 function formatCurrencyValue(value) {
@@ -1748,6 +1910,98 @@ function refreshRoutesHudButton(state = gameState.getState()) {
   }
 }
 
+function createRouteListRow(routeId, originCode, destinationCode, isInActiveGame) {
+  const routeItemEl = document.createElement('div');
+  routeItemEl.className = 'routes-list-item';
+  routeItemEl.dataset.routeId = routeId;
+
+  const routeMainEl = document.createElement('div');
+  routeMainEl.className = 'routes-list-main';
+
+  const routeTitleEl = document.createElement('p');
+  routeTitleEl.className = 'routes-list-route';
+  routeTitleEl.textContent = `${originCode} → ${destinationCode}`;
+
+  const routeMetaEl = document.createElement('p');
+  routeMetaEl.className = 'routes-list-meta';
+
+  const routeDistanceMetaEl = document.createElement('span');
+  routeDistanceMetaEl.className = 'routes-list-meta-metric';
+
+  const routeActiveFlightsMetaEl = document.createElement('span');
+  routeActiveFlightsMetaEl.className = 'routes-list-meta-metric';
+
+  routeMetaEl.appendChild(routeDistanceMetaEl);
+  routeMetaEl.appendChild(routeActiveFlightsMetaEl);
+
+  routeMainEl.appendChild(routeTitleEl);
+  routeMainEl.appendChild(routeMetaEl);
+
+  const routeActionsEl = document.createElement('div');
+  routeActionsEl.className = 'routes-list-actions';
+
+  const manageAircraftButtonEl = document.createElement('button');
+  manageAircraftButtonEl.type = 'button';
+  manageAircraftButtonEl.className = 'hud-icon-button routes-aircraft-launch-button';
+  manageAircraftButtonEl.title = 'Manage aircraft';
+  manageAircraftButtonEl.textContent = '✈+';
+  manageAircraftButtonEl.disabled = !isInActiveGame;
+  manageAircraftButtonEl.addEventListener('click', () => {
+    if (!isInActiveGame) {
+      return;
+    }
+    openRouteAircraftManagementModal(routeId);
+  });
+
+  const removeButtonEl = document.createElement('button');
+  removeButtonEl.type = 'button';
+  removeButtonEl.className = 'airport-interaction-action-button shop-aircraft-sell-button routes-remove-button';
+  removeButtonEl.addEventListener('click', () => {
+    if (!isInActiveGame || pendingRouteRemoveRouteId != null) {
+      return;
+    }
+    pendingRouteRemoveRouteId = routeId;
+    routeRemoveErrorMessage = '';
+    refreshRoutesModal(gameState.getState());
+    emitRouteRemoveRequest(routeId);
+  });
+
+  routeActionsEl.appendChild(manageAircraftButtonEl);
+  routeActionsEl.appendChild(removeButtonEl);
+
+  routeItemEl.appendChild(routeMainEl);
+  routeItemEl.appendChild(routeActionsEl);
+
+  return {
+    routeItemEl,
+    routeTitleEl,
+    routeDistanceMetaEl,
+    routeActiveFlightsMetaEl,
+    manageAircraftButtonEl,
+    removeButtonEl
+  };
+}
+
+function updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, activeFlightsCount, isInActiveGame) {
+  const {
+    routeTitleEl,
+    routeDistanceMetaEl,
+    routeActiveFlightsMetaEl,
+    manageAircraftButtonEl,
+    removeButtonEl
+  } = rowElements;
+
+  routeTitleEl.textContent = `${originCode} → ${destinationCode}`;
+  routeDistanceMetaEl.textContent = `Distance: ${distanceText}`;
+  routeActiveFlightsMetaEl.textContent = `Active Flights: ${INTEGER_FORMATTER.format(activeFlightsCount)}`;
+  manageAircraftButtonEl.disabled = !isInActiveGame;
+  manageAircraftButtonEl.setAttribute('aria-label', `Manage aircraft for route ${originCode} to ${destinationCode}`);
+
+  const isPendingForRoute = pendingRouteRemoveRouteId && String(pendingRouteRemoveRouteId) === routeId;
+  removeButtonEl.textContent = isPendingForRoute ? 'Removing...' : 'Remove';
+  removeButtonEl.disabled = !isInActiveGame || (pendingRouteRemoveRouteId != null);
+}
+
 function refreshRoutesModal(state = gameState.getState()) {
   if (!isRoutesModalDomReady) {
     return;
@@ -1793,7 +2047,6 @@ function refreshRoutesModal(state = gameState.getState()) {
     return leftKey.localeCompare(rightKey);
   });
 
-  routesListContainerEl.innerHTML = '';
   if (routeRemoveErrorMessage) {
     routesListFeedbackEl.textContent = routeRemoveErrorMessage;
     routesListFeedbackEl.classList.remove('hidden');
@@ -1802,14 +2055,16 @@ function refreshRoutesModal(state = gameState.getState()) {
     routesListFeedbackEl.classList.add('hidden');
   }
 
+  const currentRouteIds = new Set();
+
   if (sortedLocalPlayerRoutes.length === 0) {
-    const emptyListEl = document.createElement('p');
-    emptyListEl.className = 'shop-airport-results-empty';
-    emptyListEl.textContent = 'No routes yet. Create one to get started.';
-    routesListContainerEl.appendChild(emptyListEl);
+    routesListEl.classList.add('hidden');
+    routesListEmptyEl.classList.remove('hidden');
+    routeListRowByRouteId.clear();
+    routesListEl.innerHTML = '';
   } else {
-    const listEl = document.createElement('div');
-    listEl.className = 'routes-list';
+    routesListEl.classList.remove('hidden');
+    routesListEmptyEl.classList.add('hidden');
 
     sortedLocalPlayerRoutes.forEach((route) => {
       if (!route) {
@@ -1820,6 +2075,8 @@ function refreshRoutesModal(state = gameState.getState()) {
       if (!routeId) {
         return;
       }
+
+      currentRouteIds.add(routeId);
 
       const originAirport = airportLookupById.get(String(route.originAirportId || '')) || null;
       const destinationAirport = airportLookupById.get(String(route.destinationAirportId || '')) || null;
@@ -1832,84 +2089,26 @@ function refreshRoutesModal(state = gameState.getState()) {
         ? Math.max(0, route.activeFlightsCount)
         : 0;
 
-      const routeItemEl = document.createElement('div');
-      routeItemEl.className = 'routes-list-item';
+      let rowElements = routeListRowByRouteId.get(routeId);
 
-      const routeMainEl = document.createElement('div');
-      routeMainEl.className = 'routes-list-main';
+      if (!rowElements) {
+        rowElements = createRouteListRow(routeId, originCode, destinationCode, isInActiveGame);
+        routeListRowByRouteId.set(routeId, rowElements);
+      } else {
+        updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, activeFlightsCount, isInActiveGame);
+      }
 
-      const routeTitleEl = document.createElement('p');
-      routeTitleEl.className = 'routes-list-route';
-      routeTitleEl.textContent = `${originCode} → ${destinationCode}`;
-
-      const routeMetaEl = document.createElement('p');
-      routeMetaEl.className = 'routes-list-meta';
-
-      const routeDistanceMetaEl = document.createElement('span');
-      routeDistanceMetaEl.className = 'routes-list-meta-metric';
-      routeDistanceMetaEl.textContent = `Distance: ${distanceText}`;
-
-      const routeActiveFlightsMetaEl = document.createElement('span');
-      routeActiveFlightsMetaEl.className = 'routes-list-meta-metric';
-      routeActiveFlightsMetaEl.textContent = `Active Flights: ${INTEGER_FORMATTER.format(activeFlightsCount)}`;
-
-      routeMetaEl.appendChild(routeDistanceMetaEl);
-      routeMetaEl.appendChild(routeActiveFlightsMetaEl);
-
-      routeMainEl.appendChild(routeTitleEl);
-      routeMainEl.appendChild(routeMetaEl);
-
-      const routeActionsEl = document.createElement('div');
-      routeActionsEl.className = 'routes-list-actions';
-
-      const manageAircraftButtonEl = document.createElement('button');
-      manageAircraftButtonEl.type = 'button';
-      manageAircraftButtonEl.className = 'hud-icon-button routes-aircraft-launch-button';
-      manageAircraftButtonEl.setAttribute('aria-label', `Manage aircraft for route ${originCode} to ${destinationCode}`);
-      manageAircraftButtonEl.title = 'Manage aircraft';
-      manageAircraftButtonEl.textContent = '✈+';
-      manageAircraftButtonEl.disabled = !isInActiveGame;
-      manageAircraftButtonEl.addEventListener('click', () => {
-        if (!isInActiveGame) {
-          return;
-        }
-
-        openRouteAircraftManagementModal(routeId);
-      });
-
-      const removeButtonEl = document.createElement('button');
-      removeButtonEl.type = 'button';
-      removeButtonEl.className = 'airport-interaction-action-button shop-aircraft-sell-button routes-remove-button';
-
-      const isPendingForRoute = pendingRouteRemoveRouteId && String(pendingRouteRemoveRouteId) === routeId;
-      removeButtonEl.textContent = isPendingForRoute ? 'Removing...' : 'Remove';
-      removeButtonEl.disabled = !isInActiveGame || (pendingRouteRemoveRouteId != null);
-      removeButtonEl.addEventListener('click', () => {
-        if (!isInActiveGame || pendingRouteRemoveRouteId != null) {
-          return;
-        }
-
-        pendingRouteRemoveRouteId = routeId;
-        routeRemoveErrorMessage = '';
-        refreshRoutesModal(gameState.getState());
-        emitRouteRemoveRequest(routeId);
-      });
-
-      routeActionsEl.appendChild(manageAircraftButtonEl);
-      routeActionsEl.appendChild(removeButtonEl);
-
-      routeItemEl.appendChild(routeMainEl);
-      routeItemEl.appendChild(routeActionsEl);
-      listEl.appendChild(routeItemEl);
+      routesListEl.appendChild(rowElements.routeItemEl);
     });
 
-    if (!listEl.childNodes.length) {
-      const emptyListEl = document.createElement('p');
-      emptyListEl.className = 'shop-airport-results-empty';
-      emptyListEl.textContent = 'No routes yet. Create one to get started.';
-      routesListContainerEl.appendChild(emptyListEl);
-    } else {
-      routesListContainerEl.appendChild(listEl);
+    for (const routeId of routeListRowByRouteId.keys()) {
+      if (!currentRouteIds.has(routeId)) {
+        const rowElements = routeListRowByRouteId.get(routeId);
+        if (rowElements && rowElements.routeItemEl) {
+          routesListEl.removeChild(rowElements.routeItemEl);
+        }
+        routeListRowByRouteId.delete(routeId);
+      }
     }
   }
 
@@ -2065,18 +2264,20 @@ function refreshRoutesModal(state = gameState.getState()) {
 
     if (focusedRouteQuantityInputBeforeSync) {
       const focusedRouteQuantityInputAfterSync = document.activeElement;
-      console.debug(
-        '[route-aircraft-focus-check]',
-        focusedRouteQuantityInputBeforeSync === focusedRouteQuantityInputAfterSync,
-        {
-          mode: focusedRouteQuantityInputBeforeSync.closest('[data-mode]')
-            ? focusedRouteQuantityInputBeforeSync.closest('[data-mode]').getAttribute('data-mode')
-            : null,
-          catalogId: focusedRouteQuantityInputBeforeSync.closest('[data-catalog-id]')
-            ? focusedRouteQuantityInputBeforeSync.closest('[data-catalog-id]').getAttribute('data-catalog-id')
-            : null
-        }
-      );
+      if (DEBUG_ROUTE_AIRCRAFT_FOCUS) {
+        console.debug(
+          '[route-aircraft-focus-check]',
+          focusedRouteQuantityInputBeforeSync === focusedRouteQuantityInputAfterSync,
+          {
+            mode: focusedRouteQuantityInputBeforeSync.closest('[data-mode]')
+              ? focusedRouteQuantityInputBeforeSync.closest('[data-mode]').getAttribute('data-mode')
+              : null,
+            catalogId: focusedRouteQuantityInputBeforeSync.closest('[data-catalog-id]')
+              ? focusedRouteQuantityInputBeforeSync.closest('[data-catalog-id]').getAttribute('data-catalog-id')
+              : null
+          }
+        );
+      }
     }
   } else {
     routeAircraftManagementModalTitleEl.textContent = '-';

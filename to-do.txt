@@ -1,1 +1,3 @@
-- in create route modal, "from" and "to" search lists should be scrollable
+- when opening routes modal from shop (after opening shop by clicking an airport) the routes modal should only display routes involved with the selected airport thats in the airport tab of the shop modal.
+otherwise if no airport is selected (like if opened through the routes icon on hud) it should show all routes as it does today
+- add "Month 01" like "Day 01"
