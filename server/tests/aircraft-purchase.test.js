@@ -73,7 +73,9 @@ test('purchaseAircraftFromGame buys aircraft from authoritative catalog price an
     aircraftCatalogId: 'BOEING_747',
     acquisitionPrice: 300000,
     status: 'available',
-    assignedRouteId: null
+    assignedRouteId: null,
+    pendingRouteExitAction: null,
+    pendingSaleRefund: null
   });
 
   assert.equal(emitted.length, 1);

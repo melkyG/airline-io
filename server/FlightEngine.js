@@ -1,9 +1,9 @@
 const { AIRCRAFT_CATALOG_BY_ID } = require('./aircraft/catalog');
 const {
-  TURNAROUND_DURATION_SIMULATION_MS,
   MAX_FLIGHT_TRANSITIONS_PER_TICK,
   MAX_FLIGHT_PROCESSING_REAL_MS,
-  calculateFlightDurationSimulationMs
+  calculateFlightDurationSimulationMs,
+  calculateAircraftTurnaroundSimulationMs
 } = require('./flights/rules');
 const { OWNED_AIRCRAFT_STATUS } = require('./aircraft/ownership');
 
@@ -70,11 +70,35 @@ class FlightEngine {
 
   collectDueFlightTransitions(simulationNowMs) {
     const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft) ? this.authoritativeState.ownedAircraft : [];
 
     return flights
       .map((flight) => {
         if (!flight || !flight.flightId) {
           return null;
+        }
+
+        const currentStatus = String(flight.status || '').trim();
+        const currentDirection = String(flight.direction || '').trim();
+
+        if (currentStatus === 'ready' && currentDirection === 'outbound') {
+          const route = routes.find((candidate) => candidate && String(candidate.routeId || '').trim() === String(flight.routeId || '').trim());
+          if (route) {
+            const reconfiguringModelCatalogIds = Array.isArray(route.reconfiguringModelCatalogIds)
+              ? route.reconfiguringModelCatalogIds
+              : [];
+            const aircraft = ownedAircraft.find((candidate) => candidate && String(candidate.aircraftInstanceId || '').trim() === String(flight.aircraftInstanceId || '').trim());
+            if (aircraft && reconfiguringModelCatalogIds.length > 0) {
+              const aircraftCatalogId = String(aircraft.aircraftCatalogId || '').trim();
+              const isModelReconfiguring = reconfiguringModelCatalogIds.some((modelId) => {
+                return String(modelId || '').trim() === aircraftCatalogId;
+              });
+              if (isModelReconfiguring) {
+                return null;
+              }
+            }
+          }
         }
 
         const dueAtSimulationMs = this.getFlightTransitionDueSimulationTimestamp(flight);
@@ -251,8 +275,8 @@ class FlightEngine {
       flight,
       flightIndex,
       route,
-      aircraft,
       aircraftDefinition,
+      aircraft,
       flightDurationSimulationMs
     };
   }
@@ -263,13 +287,26 @@ class FlightEngine {
       return context;
     }
 
-    const { flight, route, flightDurationSimulationMs } = context;
+    const { flight, route, flightDurationSimulationMs, aircraftDefinition, aircraft } = context;
+    const cruiseSpeedKmH = aircraftDefinition ? Number(aircraftDefinition.cruiseSpeedKmH) : null;
     const currentStatus = String(flight.status || '').trim();
     const normalizedDueAtSimulationMs = Number.isFinite(transition.dueAtSimulationMs)
       ? transition.dueAtSimulationMs
       : simulationNowMs;
 
     if (currentStatus === 'ready') {
+      const reconfiguringModelCatalogIds = Array.isArray(route.reconfiguringModelCatalogIds)
+        ? route.reconfiguringModelCatalogIds
+        : [];
+      const aircraftCatalogId = String(aircraft.aircraftCatalogId || '').trim();
+      const isModelReconfiguring = reconfiguringModelCatalogIds.some((modelId) => {
+        return String(modelId || '').trim() === aircraftCatalogId;
+      });
+
+      if (isModelReconfiguring) {
+        return { success: true, changed: false };
+      }
+
       const departureSimulationMs = Number.isFinite(normalizedDueAtSimulationMs)
         ? Math.min(normalizedDueAtSimulationMs, simulationNowMs)
         : simulationNowMs;
@@ -278,6 +315,7 @@ class FlightEngine {
       flight.originAirportId = route.originAirportId;
       flight.destinationAirportId = route.destinationAirportId;
       flight.departedAtSimulationMs = departureSimulationMs;
+      flight.lastOutboundDepartedAtSimulationMs = departureSimulationMs;
       flight.arrivesAtSimulationMs = departureSimulationMs + flightDurationSimulationMs;
       flight.nextTransitionAtSimulationMs = flight.arrivesAtSimulationMs;
       return { success: true, changed: true };
@@ -293,24 +331,63 @@ class FlightEngine {
         ? flight.arrivesAtSimulationMs
         : Math.min(normalizedDueAtSimulationMs, simulationNowMs);
 
+      const turnaroundDurationSimulationMs = calculateAircraftTurnaroundSimulationMs(cruiseSpeedKmH);
+      if (!Number.isFinite(turnaroundDurationSimulationMs) || turnaroundDurationSimulationMs <= 0) {
+        return {
+          success: false,
+          code: 'TURNAROUND_DURATION_INVALID',
+          message: 'Turnaround duration could not be calculated from aircraft speed.',
+          flightId: transition.flightId
+        };
+      }
+
       settlementContext.ownerPlayer.capital =
         settlementContext.currentCapital + settlementContext.settlementResult.finalRevenue;
 
       flight.status = 'turnaround';
       flight.departedAtSimulationMs = null;
       flight.arrivesAtSimulationMs = null;
-      flight.nextTransitionAtSimulationMs = arrivalSimulationMs + TURNAROUND_DURATION_SIMULATION_MS;
+      flight.nextTransitionAtSimulationMs = arrivalSimulationMs + turnaroundDurationSimulationMs;
       return { success: true, changed: true };
     }
 
     if (currentStatus === 'turnaround') {
       const previousDirection = String(flight.direction || '').trim();
-      const nextDirection = previousDirection === 'outbound' ? 'inbound' : 'outbound';
+
+      if (previousDirection === 'inbound') {
+        flight.status = 'ready';
+        flight.direction = 'outbound';
+        flight.originAirportId = route.originAirportId;
+        flight.destinationAirportId = route.destinationAirportId;
+        flight.departedAtSimulationMs = null;
+        flight.arrivesAtSimulationMs = null;
+
+        const lastOutboundDepartedAtSimulationMs = Number(flight.lastOutboundDepartedAtSimulationMs);
+        if (Number.isFinite(lastOutboundDepartedAtSimulationMs)) {
+          const turnaroundDurationSimulationMs = calculateAircraftTurnaroundSimulationMs(cruiseSpeedKmH);
+          if (Number.isFinite(turnaroundDurationSimulationMs) && turnaroundDurationSimulationMs > 0) {
+            const fullRoundTripDurationSimulationMs = (2 * flightDurationSimulationMs) + (2 * turnaroundDurationSimulationMs);
+            if (Number.isFinite(fullRoundTripDurationSimulationMs) && fullRoundTripDurationSimulationMs > 0) {
+              flight.nextTransitionAtSimulationMs = lastOutboundDepartedAtSimulationMs + fullRoundTripDurationSimulationMs;
+            } else {
+              flight.nextTransitionAtSimulationMs = null;
+            }
+          } else {
+            flight.nextTransitionAtSimulationMs = null;
+          }
+        } else {
+          flight.nextTransitionAtSimulationMs = null;
+        }
+
+        return { success: true, changed: true };
+      }
+
+      const nextDirection = 'inbound';
       const departureSimulationMs = Math.min(normalizedDueAtSimulationMs, simulationNowMs);
 
       flight.direction = nextDirection;
-      flight.originAirportId = nextDirection === 'outbound' ? route.originAirportId : route.destinationAirportId;
-      flight.destinationAirportId = nextDirection === 'outbound' ? route.destinationAirportId : route.originAirportId;
+      flight.originAirportId = route.destinationAirportId;
+      flight.destinationAirportId = route.originAirportId;
       flight.status = 'in-flight';
       flight.departedAtSimulationMs = departureSimulationMs;
       flight.arrivesAtSimulationMs = departureSimulationMs + flightDurationSimulationMs;

@@ -830,6 +830,16 @@ body {
   transition: transform 140ms ease-out;
 }
 
+.airport-marker-pulse-wrapper {
+  position: relative;
+  width: var(--airport-marker-size);
+  height: var(--airport-marker-size);
+  display: grid;
+  place-items: center;
+  transform-origin: center center;
+  transition: transform 0.3s ease-out;
+}
+
 .airport-marker-ownership-badge {
   position: absolute;
   left: 50%;
@@ -870,6 +880,26 @@ body {
   place-items: center;
   position: relative;
   z-index: 1;
+}
+
+@keyframes airport-reconfiguration-pulse {
+  0% {
+    transform: scale(1);
+    animation-timing-function: ease-out;
+  }
+
+  22% {
+    transform: scale(1.60);
+    animation-timing-function: ease-in-out;
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.airport-marker-pulse-wrapper--reconfiguring {
+  animation: airport-reconfiguration-pulse 1.7s infinite;
 }
 
 .airport-marker-label {

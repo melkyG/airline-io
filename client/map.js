@@ -44,6 +44,7 @@
       : null;
   const AIRPORT_MARKER_INNER_HTML =
     `<div class="airport-marker-content">` +
+    `<div class="airport-marker-pulse-wrapper">` +
     `<span class="airport-marker-ownership-badge" aria-hidden="true"></span>` +
     `<div class="airport-marker airport-marker-visual airport-marker--control-tower-svg">` +
     `<svg class="airport-marker-svg" viewBox="0 0 24 24" aria-hidden="true" focusable="false">` +
@@ -53,6 +54,7 @@
     `<rect class="airport-marker-window" x="8" y="6.2" width="8" height="2" rx="0.8"/>` +
     `<rect class="airport-marker-antenna" x="11.55" y="2" width="1" height="2.4" rx="0.45"/>` +
     `</svg>` +
+    `</div>` +
     `</div>` +
     `<div class="airport-marker-label" aria-hidden="true"></div>` +
     `</div>`;
@@ -372,6 +374,28 @@
 
     markerElement.style.setProperty('--airport-marker-badge-ring', ownerColorHex);
     markerElement.style.setProperty('--airport-marker-badge-fill', toRgbaColor(ownerColorHex, AIRPORT_BADGE_FILL_OPACITY));
+  }
+
+  function applyAirportMarkerReconfigurationPulse(markerElement, airportId, routes) {
+    if (!markerElement) {
+      return;
+    }
+
+    const normalizedAirportId = String(airportId || '').trim();
+    const pulseWrapperElement = markerElement.querySelector('.airport-marker-pulse-wrapper');
+    if (!pulseWrapperElement) {
+      return;
+    }
+
+    const hasReconfiguringOriginRoute = Array.isArray(routes) && routes.some((route) => {
+      return String(route.originAirportId || '').trim() === normalizedAirportId && route.isReconfiguring === true;
+    });
+
+    if (hasReconfiguringOriginRoute) {
+      pulseWrapperElement.classList.add('airport-marker-pulse-wrapper--reconfiguring');
+    } else {
+      pulseWrapperElement.classList.remove('airport-marker-pulse-wrapper--reconfiguring');
+    }
   }
 
   function deriveSimulationNowGameMs(snapshot, realNowMs = Date.now()) {
@@ -1506,6 +1530,13 @@
       const contentElement = documentRef.createElement('div');
       contentElement.className = 'airport-marker-content';
 
+      const pulseWrapperElement = documentRef.createElement('div');
+      pulseWrapperElement.className = 'airport-marker-pulse-wrapper';
+
+      const ownershipBadgeElement = documentRef.createElement('span');
+      ownershipBadgeElement.className = 'airport-marker-ownership-badge';
+      ownershipBadgeElement.setAttribute('aria-hidden', 'true');
+
       const visualElement = documentRef.createElement('div');
       visualElement.className = 'airport-marker airport-marker-visual airport-marker--control-tower-svg';
 
@@ -1541,19 +1572,22 @@
       labelElement.className = 'airport-marker-label';
       labelElement.setAttribute('aria-hidden', 'true');
 
-      contentElement.appendChild(visualElement);
+      pulseWrapperElement.appendChild(ownershipBadgeElement);
+      pulseWrapperElement.appendChild(visualElement);
+      contentElement.appendChild(pulseWrapperElement);
       contentElement.appendChild(labelElement);
       markerElement.appendChild(contentElement);
       return markerElement;
     }
 
-    function syncAirportMarkers(airports, players) {
+    function syncAirportMarkers(airports, players, routes) {
       if (!mapInstance) {
         return;
       }
 
       const sourceAirports = Array.isArray(airports) ? airports : [];
       const playersById = createPlayersById(players);
+      const sourceRoutes = Array.isArray(routes) ? routes : [];
       const activeMarkerIds = new Set();
 
       sourceAirports.forEach((airport, index) => {
@@ -1573,6 +1607,7 @@
           existingMarker.setLngLat([lng, lat]);
           const existingElement = existingMarker.getElement();
           applyAirportMarkerOwnershipStyling(existingElement, airport, playersById);
+          applyAirportMarkerReconfigurationPulse(existingElement, airport.id, sourceRoutes);
           applyAirportMarkerLabel(existingElement, airport, mapInstance.getZoom());
           applyAirportMarkerScaleToElement(existingElement, mapInstance.getZoom());
           return;
@@ -1785,7 +1820,7 @@
   resizeMapIfNeeded();
       applyInitialCameraSetupIfReady();
       syncAirportBadges(state.game && state.game.airports, state.game && state.game.players);
-      syncAirportMarkers(state.game && state.game.airports, state.game && state.game.players);
+      syncAirportMarkers(state.game && state.game.airports, state.game && state.game.players, state.game && state.game.routes);
       syncRouteLines(state.game && state.game.routes, state.game && state.game.airports);
       ensureNativeFlightAnimationState();
       refreshAirportTooltip();
@@ -2191,9 +2226,10 @@
       });
     }
 
-    function syncAirportMarkers(map, airports, players) {
+    function syncAirportMarkers(map, airports, players, routes) {
       const sourceAirports = Array.isArray(airports) ? airports : [];
       const playersById = createPlayersById(players);
+      const sourceRoutes = Array.isArray(routes) ? routes : [];
       const activeMarkerIds = new Set();
 
       sourceAirports.forEach((airport, index) => {
@@ -2212,6 +2248,7 @@
         if (existingMarker) {
           existingMarker.setLatLng([lat, lng]);
           applyAirportMarkerOwnershipStyling(existingMarker.getElement(), airport, playersById);
+          applyAirportMarkerReconfigurationPulse(existingMarker.getElement(), airport.id, sourceRoutes);
           applyAirportMarkerLabel(existingMarker, airport, map.getZoom());
           return;
         }
@@ -2383,7 +2420,7 @@
       invalidateMapSizeIfNeeded(map);
       updateViewportMinZoom(map, { forceFit: !hasFittedWorld });
       syncRouteLines(map, state.game && state.game.routes, state.game && state.game.airports);
-      syncAirportMarkers(map, state.game && state.game.airports, state.game && state.game.players);
+      syncAirportMarkers(map, state.game && state.game.airports, state.game && state.game.players, state.game && state.game.routes);
       ensureLeafletFlightAnimationState(map);
       refreshAirportTooltip(map);
       hasFittedWorld = true;

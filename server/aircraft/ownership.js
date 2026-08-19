@@ -35,7 +35,9 @@ function createOwnedAircraftInstance({
     aircraftCatalogId: normalizedAircraftCatalogId,
     acquisitionPrice,
     status,
-    assignedRouteId
+    assignedRouteId,
+    pendingRouteExitAction: null,
+    pendingSaleRefund: null
   };
 }
 

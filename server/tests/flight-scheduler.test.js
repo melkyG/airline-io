@@ -4,8 +4,7 @@ const assert = require('node:assert/strict');
 const Game = require('../Game');
 const { AIRCRAFT_CATALOG_BY_ID } = require('../aircraft/catalog');
 const {
-  MIN_FLIGHT_DURATION_SIMULATION_MS,
-  TURNAROUND_DURATION_SIMULATION_MS,
+  calculateAircraftTurnaroundSimulationMs,
   calculateFlightDurationSimulationMs
 } = require('../flights/rules');
 
@@ -84,15 +83,36 @@ function createBaseState(overrides = {}) {
   };
 }
 
-test('flight rules calculate duration from distance and speed with centralized minimum', () => {
+test('flight rules calculate duration from distance and speed without minimum clamp', () => {
   const veryShortRouteDuration = calculateFlightDurationSimulationMs(50, 900);
-  assert.equal(veryShortRouteDuration, MIN_FLIGHT_DURATION_SIMULATION_MS);
+  const expectedShortDuration = (50 / 900) * 60 * 60 * 1000;
+  assert.equal(veryShortRouteDuration, expectedShortDuration);
 
   const longRouteDuration = calculateFlightDurationSimulationMs(9000, 900);
   assert.equal(longRouteDuration, 10 * 60 * 60 * 1000);
 
   assert.equal(calculateFlightDurationSimulationMs(1000, 0), null);
   assert.equal(calculateFlightDurationSimulationMs(-1, 900), null);
+});
+
+test('aircraft turnaround calculation uses global conversion factor', () => {
+  const boeing747Turnaround = calculateAircraftTurnaroundSimulationMs(900);
+  const expected747Turnaround = (900 * (333 / 900)) * 60 * 1000;
+  assert.equal(boeing747Turnaround, expected747Turnaround);
+  assert.equal(boeing747Turnaround, 333 * 60 * 1000);
+
+  const boeing737Turnaround = calculateAircraftTurnaroundSimulationMs(840);
+  const expected737Turnaround = (840 * (333 / 900)) * 60 * 1000;
+  assert.equal(boeing737Turnaround, expected737Turnaround);
+  assert.equal(boeing737Turnaround, 310.8 * 60 * 1000);
+});
+
+test('aircraft turnaround calculation fails for invalid speeds', () => {
+  assert.equal(calculateAircraftTurnaroundSimulationMs(0), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(-1), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(null), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(undefined), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs('invalid'), null);
 });
 
 test('scheduler processes ready flight into in-flight outbound with authoritative timing', () => {
@@ -110,6 +130,7 @@ test('scheduler processes ready flight into in-flight outbound with authoritativ
   assert.equal(flight.status, 'in-flight');
   assert.equal(flight.direction, 'outbound');
   assert.equal(flight.departedAtSimulationMs, 10000000);
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 10000000);
   assert.equal(flight.arrivesAtSimulationMs, 10000000 + expectedDuration);
   assert.equal(flight.nextTransitionAtSimulationMs, flight.arrivesAtSimulationMs);
   assert.equal(game.authoritativeState.players[0].capital, initialCapital);
@@ -132,6 +153,7 @@ test('scheduler transitions due in-flight arrival into turnaround and clears in-
           direction: 'outbound',
           status: 'in-flight',
           departedAtSimulationMs: 2000,
+          lastOutboundDepartedAtSimulationMs: 2000,
           arrivesAtSimulationMs: 5000,
           nextTransitionAtSimulationMs: 5000
         }
@@ -151,8 +173,10 @@ test('scheduler transitions due in-flight arrival into turnaround and clears in-
   assert.equal(flight.status, 'turnaround');
   assert.equal(flight.direction, 'outbound');
   assert.equal(flight.departedAtSimulationMs, null);
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 2000);
   assert.equal(flight.arrivesAtSimulationMs, null);
-  assert.equal(flight.nextTransitionAtSimulationMs, 5000 + TURNAROUND_DURATION_SIMULATION_MS);
+  const expectedTurnaround = calculateAircraftTurnaroundSimulationMs(900);
+  assert.equal(flight.nextTransitionAtSimulationMs, 5000 + expectedTurnaround);
   assert.equal(owner.capital, 1000000 + expectedRevenue);
   assert.equal(emitted.length, 1);
 });
@@ -172,6 +196,7 @@ test('scheduler completes turnaround by reversing direction and launching next l
           direction: 'outbound',
           status: 'turnaround',
           departedAtSimulationMs: null,
+          lastOutboundDepartedAtSimulationMs: 2000,
           arrivesAtSimulationMs: null,
           nextTransitionAtSimulationMs: 5000
         }
@@ -193,6 +218,7 @@ test('scheduler completes turnaround by reversing direction and launching next l
   assert.equal(flight.originAirportId, 'JFK');
   assert.equal(flight.destinationAirportId, 'YYZ');
   assert.equal(flight.departedAtSimulationMs, 5000);
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 2000);
   assert.equal(flight.arrivesAtSimulationMs, 5000 + expectedDuration);
   assert.equal(flight.nextTransitionAtSimulationMs, flight.arrivesAtSimulationMs);
   assert.equal(game.authoritativeState.players[0].capital, initialCapital);
@@ -453,7 +479,57 @@ test('arrival transition fails atomically with invalid route distance and does n
   assert.equal(tickResult.success, false);
   assert.equal(tickResult.changed, false);
   assert.equal(tickResult.processedTransitions, 0);
-  assert.equal(tickResult.error.code, 'ROUTE_DISTANCE_INVALID');
+  assert.equal(tickResult.error.code, 'FLIGHT_DURATION_INVALID');
+  assert.equal(game.authoritativeState.players[0].capital, capitalBefore);
+  assert.deepEqual(game.authoritativeState.flights[0], flightBefore);
+  assert.equal(emitted.length, 0);
+});
+
+test('arrival transition fails atomically with invalid turnaround speed and does not partially mutate', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'in-flight',
+          departedAtSimulationMs: 2000,
+          arrivesAtSimulationMs: 5000,
+          nextTransitionAtSimulationMs: 5000
+        }
+      ]
+    }),
+    manager
+  );
+
+  const capitalBefore = game.authoritativeState.players[0].capital;
+  const flightBefore = { ...game.authoritativeState.flights[0] };
+
+  const aircraft = game.authoritativeState.ownedAircraft[0];
+  aircraft.aircraftCatalogId = 'INVALID_CATALOG_ID';
+
+  const tickResult = game.processFlightSchedulerTick(5000);
+
+  assert.equal(tickResult.success, false);
+  assert.equal(tickResult.changed, false);
+  assert.equal(tickResult.processedTransitions, 0);
+  assert.equal(tickResult.error.code, 'AIRCRAFT_SPEED_INVALID');
   assert.equal(game.authoritativeState.players[0].capital, capitalBefore);
   assert.deepEqual(game.authoritativeState.flights[0], flightBefore);
   assert.equal(emitted.length, 0);
@@ -538,7 +614,7 @@ test('scheduler catch-up can process multiple overdue transitions for one flight
   assert.equal(flight.departedAtSimulationMs, null);
   assert.equal(flight.arrivesAtSimulationMs, null);
   assert.ok(Number.isFinite(flight.nextTransitionAtSimulationMs));
-  assert.ok(flight.nextTransitionAtSimulationMs > 270000 * 10000);
+  assert.ok(flight.nextTransitionAtSimulationMs > 40000000);
   assert.equal(emitted.length, 1);
 });
 
@@ -558,4 +634,177 @@ test('flight scheduler starts once for active games and stops on end and dispose
   assert.equal(game2.isFlightSchedulerRunning(), true);
   game2.dispose();
   assert.equal(game2.isFlightSchedulerRunning(), false);
+});
+
+test('lastOutboundDepartedAtSimulationMs is set on outbound departure and preserved through round trip', () => {
+  const { manager } = createManagerWithEmitCapture();
+
+  // Test 1: Outbound departure sets the field
+  const game1 = new Game(createBaseState(), manager);
+  game1.processFlightSchedulerTick(1000);
+  let flight = game1.authoritativeState.flights[0];
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 10000000);
+
+  // Test 2: Destination arrival preserves the field
+  const game2 = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'in-flight',
+          departedAtSimulationMs: 2000,
+          lastOutboundDepartedAtSimulationMs: 2000,
+          arrivesAtSimulationMs: 5000,
+          nextTransitionAtSimulationMs: 5000
+        }
+      ]
+    }),
+    manager
+  );
+  game2.processFlightSchedulerTick(1);
+  flight = game2.authoritativeState.flights[0];
+  assert.equal(flight.status, 'turnaround');
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 2000);
+
+  // Test 3: Destination turnaround complete, inbound departure preserves the field
+  const game3 = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'turnaround',
+          departedAtSimulationMs: null,
+          lastOutboundDepartedAtSimulationMs: 2000,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: 5000
+        }
+      ]
+    }),
+    manager
+  );
+  game3.processFlightSchedulerTick(1);
+  flight = game3.authoritativeState.flights[0];
+  assert.equal(flight.status, 'in-flight');
+  assert.equal(flight.direction, 'inbound');
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 2000);
+
+  // Test 4: Inbound flight preserves the field
+  const game4 = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'JFK',
+          destinationAirportId: 'YYZ',
+          direction: 'inbound',
+          status: 'in-flight',
+          departedAtSimulationMs: 5000,
+          lastOutboundDepartedAtSimulationMs: 2000,
+          arrivesAtSimulationMs: 8000,
+          nextTransitionAtSimulationMs: 8000
+        }
+      ]
+    }),
+    manager
+  );
+  flight = game4.authoritativeState.flights[0];
+  assert.equal(flight.status, 'in-flight');
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 2000);
+
+  // Test 5: Origin arrival preserves the field
+  const game5 = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'JFK',
+          destinationAirportId: 'YYZ',
+          direction: 'inbound',
+          status: 'in-flight',
+          departedAtSimulationMs: 5000,
+          lastOutboundDepartedAtSimulationMs: 2000,
+          arrivesAtSimulationMs: 8000,
+          nextTransitionAtSimulationMs: 8000
+        }
+      ]
+    }),
+    manager
+  );
+  game5.processFlightSchedulerTick(1);
+  flight = game5.authoritativeState.flights[0];
+  assert.equal(flight.status, 'turnaround');
+  assert.equal(flight.direction, 'inbound');
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 2000);
+
+  // Test 6: Origin turnaround preserves the field
+  const game6 = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'inbound',
+          status: 'turnaround',
+          departedAtSimulationMs: null,
+          lastOutboundDepartedAtSimulationMs: 2000,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: 10000
+        }
+      ]
+    }),
+    manager
+  );
+  flight = game6.authoritativeState.flights[0];
+  assert.equal(flight.status, 'turnaround');
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 2000);
+
+  // Test 7: Next outbound departure updates the field
+  const game7 = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          lastOutboundDepartedAtSimulationMs: 2000,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ]
+    }),
+    manager
+  );
+  game7.processFlightSchedulerTick(1);
+  flight = game7.authoritativeState.flights[0];
+  assert.equal(flight.status, 'in-flight');
+  assert.equal(flight.direction, 'outbound');
+  assert.equal(flight.lastOutboundDepartedAtSimulationMs, 10000);
 });

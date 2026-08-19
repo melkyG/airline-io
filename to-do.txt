@@ -1,3 +1,6 @@
-- when opening routes modal from shop (after opening shop by clicking an airport) the routes modal should only display routes involved with the selected airport thats in the airport tab of the shop modal.
-otherwise if no airport is selected (like if opened through the routes icon on hud) it should show all routes as it does today
-- add "Month 01" like "Day 01"
+- clicking "Max N" keeps user in the respective input field. pressing enter acts as clicking the corresponding button whos input field the user is in, should apply to assign/unassign in routes modal as well as buy/sell in aircraft tab of shop modal
+- client reconnect (8 sec limit) 
+
+So from the user’s perspective, bulk unassign already behaves correctly, and we don’t gain much by adding a separate atomic bulk-unassign endpoint right now.
+
+The main limitation is atomicity: if one request in the middle of a multi-unassign batch fails, earlier ones may already have succeeded. If that becomes a real gameplay problem later, we can add a true server-side bulk endpoint then.
