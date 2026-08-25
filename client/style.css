@@ -1051,6 +1051,19 @@ body {
   filter: grayscale(0.8) brightness(0.8);
   transform: scale(0.98);
 }
+
+.airport-square-action-button {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  padding: 0;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
 .main-content.game-active .hud-bottom-right-stack {
   position: absolute;
   left: 1rem;
@@ -1116,10 +1129,10 @@ body {
   color: #fee2e2;
 }
 
-.shop-aircraft-list-button {
-  border-color: rgba(251, 191, 36, 0.72);
-  background: rgba(180, 83, 9, 0.82);
-  color: #fff7ed;
+.shop-aircraft-warning-button {
+  border-color: rgba(250, 204, 21, 0.72);
+  background: rgba(202, 138, 4, 0.82);
+  color: #fef9c3;
 }
 
 .aircraft-trade-divider {

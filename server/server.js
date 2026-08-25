@@ -116,6 +116,11 @@ io.on('connection', (socket) => {
     socket.emit('route:aircraft:unassign:result', result);
   });
 
+  socket.on('route:aircraft:unassign:bulk:request', (payload = {}) => {
+    const result = gameManager.handleRouteAircraftUnassignBulkSocketRequest(socket.id, payload);
+    socket.emit('route:aircraft:unassign:bulk:result', result);
+  });
+
   socket.on('aircraft:purchase:request', (payload = {}) => {
     const result = gameManager.handleAircraftPurchaseSocketRequest(socket.id, payload);
     socket.emit('aircraft:purchase:result', result);

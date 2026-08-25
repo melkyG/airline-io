@@ -3319,6 +3319,229 @@ class Game {
     };
   }
 
+  unassignAircraftFromRouteBulk(playerId, routeId, aircraftInstanceIds) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const normalizedRouteId = String(routeId || '').trim();
+
+    const player = players.find((candidate) => candidate.id === playerId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player was not found in authoritative game state.'
+      };
+    }
+
+    const route = routes.find((candidate) => candidate && candidate.routeId === normalizedRouteId);
+    if (!route) {
+      return {
+        success: false,
+        code: 'ROUTE_NOT_FOUND',
+        message: 'Route was not found.'
+      };
+    }
+
+    if (String(route.ownerPlayerId) !== String(player.id)) {
+      return {
+        success: false,
+        code: 'NOT_ROUTE_OWNER',
+        message: 'Player does not own this route.'
+      };
+    }
+
+    if (route.pendingRemoval === true) {
+      return {
+        success: false,
+        code: 'ROUTE_REMOVAL_PENDING',
+        message: 'Route is pending removal and cannot be edited.'
+      };
+    }
+
+    if (!Array.isArray(aircraftInstanceIds) || aircraftInstanceIds.length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_AIRCRAFT_IDS',
+        message: 'Aircraft instance IDs must be a non-empty array.'
+      };
+    }
+
+    const normalizedAircraftInstanceIds = aircraftInstanceIds
+      .map((aircraftInstanceId) => String(aircraftInstanceId || '').trim())
+      .filter((aircraftInstanceId) => aircraftInstanceId.length > 0);
+
+    if (normalizedAircraftInstanceIds.length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_AIRCRAFT_IDS',
+        message: 'Aircraft instance IDs must be a non-empty array.'
+      };
+    }
+
+    if (normalizedAircraftInstanceIds.length !== new Set(normalizedAircraftInstanceIds).size) {
+      return {
+        success: false,
+        code: 'DUPLICATE_AIRCRAFT_IDS',
+        message: 'Aircraft instance IDs must be unique.'
+      };
+    }
+
+    const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
+    const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
+      ? route.assignedAircraftInstanceIds
+      : [];
+    const routeOriginAirportId = String(route.originAirportId || '').trim();
+
+    const validAircraft = [];
+    const seenCatalogIds = new Set();
+
+    for (const normalizedAircraftInstanceId of normalizedAircraftInstanceIds) {
+      const aircraft = ownedAircraft.find(
+        (candidate) => candidate && candidate.aircraftInstanceId === normalizedAircraftInstanceId
+      );
+      if (!aircraft) {
+        return {
+          success: false,
+          code: 'AIRCRAFT_NOT_FOUND',
+          message: 'Aircraft instance was not found.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (String(aircraft.ownerPlayerId) !== String(player.id)) {
+        return {
+          success: false,
+          code: 'NOT_AIRCRAFT_OWNER',
+          message: 'Player does not own this aircraft.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      const assignedRouteId = String(aircraft.assignedRouteId || '').trim();
+      if (assignedRouteId !== normalizedRouteId) {
+        return {
+          success: false,
+          code: 'AIRCRAFT_NOT_ASSIGNED',
+          message: 'Aircraft is not assigned to this route.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (!assignedAircraftInstanceIds.includes(aircraft.aircraftInstanceId)) {
+        return {
+          success: false,
+          code: 'ASSIGNMENT_NOT_FOUND',
+          message: 'Aircraft assignment was not found on the route.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      const pendingAction = String(aircraft.pendingRouteExitAction || '').trim();
+      if (pendingAction === 'unassign') {
+        return {
+          success: false,
+          code: 'UNASSIGN_ALREADY_PENDING',
+          message: 'Aircraft already has a pending unassign action.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (pendingAction && pendingAction !== 'unassign') {
+        return {
+          success: false,
+          code: 'PENDING_EXIT_ACTION_CONFLICT',
+          message: 'Aircraft has a conflicting pending exit action.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      const aircraftFlights = flights.filter((flight) => {
+        if (!flight) {
+          return false;
+        }
+        return (
+          String(flight.aircraftInstanceId || '').trim() === normalizedAircraftInstanceId &&
+          String(flight.routeId || '').trim() === normalizedRouteId
+        );
+      });
+
+      if (aircraftFlights.length === 0) {
+        return {
+          success: false,
+          code: 'FLIGHT_NOT_FOUND',
+          message: 'No valid flight was found for this aircraft on the route.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (aircraftFlights.length > 1) {
+        return {
+          success: false,
+          code: 'FLIGHT_DUPLICATE',
+          message: 'More than one flight exists for this aircraft on the route.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      const flight = aircraftFlights[0];
+      const isHomeReady =
+        String(flight.status || '').trim() === 'ready' &&
+        String(flight.direction || '').trim() === 'outbound' &&
+        String(flight.originAirportId || '').trim() === routeOriginAirportId;
+
+      validAircraft.push({ aircraft, isHomeReady });
+      seenCatalogIds.add(String(aircraft.aircraftCatalogId || '').trim());
+    }
+
+    if (seenCatalogIds.size !== 1) {
+      return {
+        success: false,
+        code: 'MIXED_AIRCRAFT_MODEL',
+        message: 'All requested aircraft must belong to the same model.'
+      };
+    }
+
+    const aircraftCatalogId = Array.from(seenCatalogIds)[0];
+
+    const lockedUntil = Number(route.modelEditLockedUntilRealMs?.[aircraftCatalogId]);
+    if (Number.isFinite(lockedUntil) && Date.now() < lockedUntil) {
+      return {
+        success: false,
+        code: 'MODEL_EDIT_LOCKED',
+        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.'
+      };
+    }
+
+    const beginResult = this.beginModelReconfiguration(route.routeId, aircraftCatalogId);
+    if (!beginResult.success) {
+      return beginResult;
+    }
+
+    for (const { aircraft, isHomeReady } of validAircraft) {
+      if (isHomeReady) {
+        const detachResult = this.detachAircraftFromAssignment(aircraft.aircraftInstanceId);
+        if (!detachResult.success) {
+          return detachResult;
+        }
+      } else {
+        aircraft.pendingRouteExitAction = 'unassign';
+      }
+    }
+
+    this.broadcastState();
+
+    return {
+      success: true,
+      code: 'OK',
+      unassignedCount: validAircraft.length,
+      routeId: route.routeId,
+      unassignedAircraftInstanceIds: normalizedAircraftInstanceIds.slice()
+    };
+  }
+
   startFlightScheduler() {
     return this.flightEngine.startFlightScheduler(this.status);
   }

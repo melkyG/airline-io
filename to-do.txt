@@ -1,8 +1,9 @@
-- clicking "Max N" keeps user in the respective input field. pressing enter acts as clicking the corresponding button whos input field the user is in, should apply to assign/unassign in routes modal as well as buy/sell in aircraft tab of shop modal
-- client reconnect (8 sec limit) 
-- once assign/unassign is clicked, new max n of available aircraft should exclude airports that were just assigned and in reconfiguration. currently max n doesn't update until end of reconfiguration and if user assigns/unassigns again error code pops up
-- route button disappears after listing airport
 
+- client reconnect (8 sec limit) 
+- unasiggning big bulk then exiting modal interferes with processing of bulk. after modal is closed not all aircraft from the bulk got unassigned
+- make route length affect turnaround time
+- fix airport distribution (not all expensive ones)
+- crop map
 
 So from the user’s perspective, bulk unassign already behaves correctly, and we don’t gain much by adding a separate atomic bulk-unassign endpoint right now.
 
