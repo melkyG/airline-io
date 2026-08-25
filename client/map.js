@@ -13,7 +13,7 @@
   const AIRPORT_MARKER_SCALE_MIN_ZOOM = INITIAL_ZOOM;
   const AIRPORT_MARKER_SCALE_MAX_ZOOM = BASEMAP_MAX_ZOOM;
   const ROUTE_LINE_COLOR = '#000000';
-  const ROUTE_LINE_WIDTH = 1.3;
+  const ROUTE_LINE_WIDTH = 1.0;
   const OWNED_AIRPORT_FALLBACK_COLOR = '#0ea5e9';
   const MAPLIBRE_ROUTE_SOURCE_ID = 'airline-routes-source';
   const MAPLIBRE_ROUTE_LAYER_ID = 'airline-routes-layer';
@@ -32,7 +32,7 @@
   const AIRPORT_BADGE_FILL_OPACITY = 0.85;
   const AIRPORT_BADGE_UNOWNED_FILL_COLOR = '#ffffff';
   const AIRPORT_BADGE_STROKE_COLOR = '#000000';
-  const AIRPORT_BADGE_STROKE_WIDTH_PX = 1.8;
+  const AIRPORT_BADGE_STROKE_WIDTH_PX = 1.0;
   const CURRENCY_FORMATTER = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -934,6 +934,7 @@
         routeId: String(route.routeId),
         originAirportId: String(route.originAirportId),
         destinationAirportId: String(route.destinationAirportId),
+        pendingRemoval: Boolean(route.pendingRemoval === true),
         segments: routeSegments
       });
       return segments;
@@ -962,6 +963,10 @@
     let latestGameSnapshot = null;
     let flightAnimationFrameId = null;
     let isFlightAnimationRunning = false;
+    const PENDING_REMOVAL_DASH_SEQUENCE = [[4, 6], [5, 5], [6, 4], [5, 5]];
+    const PENDING_REMOVAL_DASH_UPDATE_INTERVAL_MS = 150;
+    let pendingRemovalDashTimerId = null;
+    let pendingRemovalDashSequenceIndex = 0;
 
     if (tooltipElement) {
       tooltipElement.className = 'airport-tooltip airport-tooltip-hidden';
@@ -1199,6 +1204,7 @@
 
     function clearRouteLines() {
       setNativeRouteCollection([]);
+      stopPendingRemovalDashAnimation();
       if (!mapInstance || !mapLoaded) {
         return;
       }
@@ -1465,7 +1471,8 @@
             type: 'Feature',
             properties: {
               routeId: routeSegment.routeId,
-              segmentIndex
+              segmentIndex,
+              pendingRemoval: Boolean(routeSegment.pendingRemoval === true)
             },
             geometry: {
               type: 'LineString',
@@ -1497,10 +1504,88 @@
           paint: {
             'line-color': ROUTE_LINE_COLOR,
             'line-width': ROUTE_LINE_WIDTH,
-            'line-opacity': 1
+            'line-opacity': 1,
+            'line-dasharray': [
+              'case',
+              ['==', ['get', 'pendingRemoval'], true],
+              ['literal', [2, 2]],
+              ['literal', [1, 0]]
+            ]
           }
         });
       }
+
+      if (hasPendingRemovalRoutes()) {
+        startPendingRemovalDashAnimation();
+      } else {
+        stopPendingRemovalDashAnimation();
+      }
+    }
+
+    function hasPendingRemovalRoutes() {
+      return routeCollection.some((routeSegment) => routeSegment && routeSegment.pendingRemoval === true);
+    }
+
+    function updatePendingRemovalDashPattern() {
+      if (!mapInstance || !mapLoaded) {
+        return;
+      }
+
+      if (!mapInstance.getLayer(MAPLIBRE_ROUTE_LAYER_ID)) {
+        return;
+      }
+
+      pendingRemovalDashSequenceIndex = (pendingRemovalDashSequenceIndex + 1) % PENDING_REMOVAL_DASH_SEQUENCE.length;
+      const currentDashPattern = PENDING_REMOVAL_DASH_SEQUENCE[pendingRemovalDashSequenceIndex];
+
+      mapInstance.setPaintProperty(MAPLIBRE_ROUTE_LAYER_ID, 'line-dasharray', [
+        'case',
+        ['==', ['get', 'pendingRemoval'], true],
+        ['literal', currentDashPattern],
+        ['literal', [1, 0]]
+      ]);
+    }
+
+    function startPendingRemovalDashAnimation() {
+      if (pendingRemovalDashTimerId !== null) {
+        return;
+      }
+
+      if (!hasPendingRemovalRoutes()) {
+        return;
+      }
+
+      pendingRemovalDashTimerId = globalScope.setInterval(() => {
+        if (!hasPendingRemovalRoutes()) {
+          stopPendingRemovalDashAnimation();
+          return;
+        }
+        updatePendingRemovalDashPattern();
+      }, PENDING_REMOVAL_DASH_UPDATE_INTERVAL_MS);
+    }
+
+    function stopPendingRemovalDashAnimation() {
+      if (pendingRemovalDashTimerId !== null) {
+        globalScope.clearInterval(pendingRemovalDashTimerId);
+        pendingRemovalDashTimerId = null;
+      }
+
+      pendingRemovalDashSequenceIndex = 0;
+
+      if (!mapInstance || !mapLoaded) {
+        return;
+      }
+
+      if (!mapInstance.getLayer(MAPLIBRE_ROUTE_LAYER_ID)) {
+        return;
+      }
+
+      mapInstance.setPaintProperty(MAPLIBRE_ROUTE_LAYER_ID, 'line-dasharray', [
+        'case',
+        ['==', ['get', 'pendingRemoval'], true],
+        ['literal', [2, 2]],
+        ['literal', [1, 0]]
+      ]);
     }
 
     function setNativeDraggingClass(isDragging, reason) {

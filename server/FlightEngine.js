@@ -85,6 +85,10 @@ class FlightEngine {
         if (currentStatus === 'ready' && currentDirection === 'outbound') {
           const route = routes.find((candidate) => candidate && String(candidate.routeId || '').trim() === String(flight.routeId || '').trim());
           if (route) {
+            if (route.pendingRemoval === true) {
+              return null;
+            }
+
             const reconfiguringModelCatalogIds = Array.isArray(route.reconfiguringModelCatalogIds)
               ? route.reconfiguringModelCatalogIds
               : [];
@@ -295,6 +299,10 @@ class FlightEngine {
       : simulationNowMs;
 
     if (currentStatus === 'ready') {
+      if (route.pendingRemoval === true) {
+        return { success: true, changed: false };
+      }
+
       const reconfiguringModelCatalogIds = Array.isArray(route.reconfiguringModelCatalogIds)
         ? route.reconfiguringModelCatalogIds
         : [];

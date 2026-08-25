@@ -10,7 +10,8 @@ function createInitialAirportState() {
   return AIRPORT_CATALOG.map((airport) => ({
     airportId: airport.id,
     ownerPlayerId: null,
-    saleListing: null
+    saleListing: null,
+    pendingOwnershipChange: null
   }));
 }
 

@@ -73,6 +73,8 @@ let pendingRouteAircraftAssignAircraftInstanceId = null;
 let pendingRouteAircraftUnassignAircraftInstanceId = null;
 let routeAircraftManagementErrorMessage = '';
 let routeAircraftManagementFeedbackKind = 'error';
+let routeAircraftModelEditLockRefreshTimeoutId = null;
+let lastScheduledModelEditLockRefreshExpiry = null;
 let routeAircraftAssignQuantityByCatalogId = new Map();
 let routeAircraftUnassignQuantityByCatalogId = new Map();
 let routeAircraftAssignQuantityInputByCatalogId = new Map();
@@ -459,6 +461,45 @@ function resetRouteAircraftManagementRowCaches() {
   routeAvailableAircraftRowByCatalogId = new Map();
   routeAssignedAircraftRowByCatalogId = new Map();
   lastRenderedRouteAircraftManagementRouteId = null;
+}
+
+function scheduleRouteAircraftModelEditLockRefresh(modelEditLockedUntilRealMs) {
+  if (routeAircraftModelEditLockRefreshTimeoutId !== null) {
+    clearTimeout(routeAircraftModelEditLockRefreshTimeoutId);
+    routeAircraftModelEditLockRefreshTimeoutId = null;
+  }
+
+  const lockEntries = modelEditLockedUntilRealMs && typeof modelEditLockedUntilRealMs === 'object'
+    ? Object.entries(modelEditLockedUntilRealMs)
+    : [];
+  const now = Date.now();
+  let earliestExpiry = null;
+
+  for (const [, expiryRawValue] of lockEntries) {
+    const expiryMs = Number(expiryRawValue);
+    if (Number.isFinite(expiryMs) && now < expiryMs) {
+      if (earliestExpiry === null || expiryMs < earliestExpiry) {
+        earliestExpiry = expiryMs;
+      }
+    }
+  }
+
+  if (earliestExpiry === null) {
+    lastScheduledModelEditLockRefreshExpiry = null;
+    return;
+  }
+
+  if (lastScheduledModelEditLockRefreshExpiry === earliestExpiry) {
+    return;
+  }
+
+  lastScheduledModelEditLockRefreshExpiry = earliestExpiry;
+  const delayMs = Math.max(0, earliestExpiry - now);
+  routeAircraftModelEditLockRefreshTimeoutId = setTimeout(() => {
+    routeAircraftModelEditLockRefreshTimeoutId = null;
+    lastScheduledModelEditLockRefreshExpiry = null;
+    refreshRoutesModal(gameState.getState());
+  }, delayMs + 10);
 }
 
 function openShopFromHud() {
@@ -1912,7 +1953,7 @@ function refreshRoutesHudButton(state = gameState.getState()) {
   }
 }
 
-function createRouteListRow(routeId, originCode, destinationCode, isInActiveGame) {
+function createRouteListRow(routeId, originCode, destinationCode, isInActiveGame, pendingRemoval) {
   const routeItemEl = document.createElement('div');
   routeItemEl.className = 'routes-list-item';
   routeItemEl.dataset.routeId = routeId;
@@ -1958,6 +1999,7 @@ function createRouteListRow(routeId, originCode, destinationCode, isInActiveGame
   const removeButtonEl = document.createElement('button');
   removeButtonEl.type = 'button';
   removeButtonEl.className = 'airport-interaction-action-button shop-aircraft-sell-button routes-remove-button';
+  removeButtonEl.disabled = !isInActiveGame || pendingRemoval === true;
   removeButtonEl.addEventListener('click', () => {
     if (!isInActiveGame || pendingRouteRemoveRouteId != null) {
       return;
@@ -1984,7 +2026,7 @@ function createRouteListRow(routeId, originCode, destinationCode, isInActiveGame
   };
 }
 
-function updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, activeFlightsCount, isInActiveGame) {
+function updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, activeFlightsCount, isInActiveGame, pendingRemoval) {
   const {
     routeTitleEl,
     routeDistanceMetaEl,
@@ -2001,7 +2043,7 @@ function updateRouteListRow(rowElements, routeId, originCode, destinationCode, d
 
   const isPendingForRoute = pendingRouteRemoveRouteId && String(pendingRouteRemoveRouteId) === routeId;
   removeButtonEl.textContent = isPendingForRoute ? 'Removing...' : 'Remove';
-  removeButtonEl.disabled = !isInActiveGame || (pendingRouteRemoveRouteId != null);
+  removeButtonEl.disabled = !isInActiveGame || (pendingRouteRemoveRouteId != null) || pendingRemoval === true;
 }
 
 function refreshRoutesModal(state = gameState.getState()) {
@@ -2105,10 +2147,10 @@ function refreshRoutesModal(state = gameState.getState()) {
       let rowElements = routeListRowByRouteId.get(routeId);
 
       if (!rowElements) {
-        rowElements = createRouteListRow(routeId, originCode, destinationCode, isInActiveGame);
+        rowElements = createRouteListRow(routeId, originCode, destinationCode, isInActiveGame, route.pendingRemoval);
         routeListRowByRouteId.set(routeId, rowElements);
       } else {
-        updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, activeFlightsCount, isInActiveGame);
+        updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, activeFlightsCount, isInActiveGame, route.pendingRemoval);
       }
 
       routesListEl.appendChild(rowElements.routeItemEl);
@@ -2219,7 +2261,8 @@ function refreshRoutesModal(state = gameState.getState()) {
 
     const assignedAircraft = localOwnedAircraft.filter((aircraft) => {
       const assignedRouteId = String(aircraft.assignedRouteId || '').trim();
-      return assignedRouteId.length > 0 && assignedRouteId === selectedRouteId;
+      const isPendingUnassign = Boolean(aircraft.isPendingUnassign === true);
+      return assignedRouteId.length > 0 && assignedRouteId === selectedRouteId && !isPendingUnassign;
     });
 
     const groupedAvailableAircraft = groupRouteAircraftByCatalog(availableAircraft, aircraftCatalogLookupById);
@@ -2264,7 +2307,8 @@ function refreshRoutesModal(state = gameState.getState()) {
       groups: groupedAvailableAircraft,
       listEl: routeAvailableAircraftListEl,
       emptyMessage: 'No range-compatible available aircraft for this route.',
-      isInActiveGame
+      isInActiveGame,
+      modelEditLockedUntilRealMs: selectedRouteForAircraftModal.modelEditLockedUntilRealMs
     });
 
     syncRouteAircraftGroupRows({
@@ -2272,8 +2316,11 @@ function refreshRoutesModal(state = gameState.getState()) {
       groups: groupedAssignedAircraft,
       listEl: routeAssignedAircraftListEl,
       emptyMessage: 'No aircraft currently assigned to this route.',
-      isInActiveGame
+      isInActiveGame,
+      modelEditLockedUntilRealMs: selectedRouteForAircraftModal.modelEditLockedUntilRealMs
     });
+
+    scheduleRouteAircraftModelEditLockRefresh(selectedRouteForAircraftModal.modelEditLockedUntilRealMs);
 
     if (focusedRouteQuantityInputBeforeSync) {
       const focusedRouteQuantityInputAfterSync = document.activeElement;
@@ -2585,7 +2632,7 @@ function emitAirportListRequestWithPrompt(airportId) {
   socket.emit('airport:list:request', { airportId, askingPrice });
 }
 
-function createAirportActionButton(label, onClick, { variant = 'default' } = {}) {
+function createAirportActionButton(label, onClick, { variant = 'default', isDisabled = false } = {}) {
   const button = document.createElement('button');
   button.type = 'button';
   const classNames = ['airport-interaction-action-button'];
@@ -2603,6 +2650,7 @@ function createAirportActionButton(label, onClick, { variant = 'default' } = {})
 
   button.className = classNames.join(' ');
   button.textContent = label;
+  button.disabled = Boolean(isDisabled);
   button.addEventListener('click', onClick);
   return button;
 }
@@ -3398,7 +3446,14 @@ function createRouteAircraftGroupRow(mode, catalogId) {
   };
 }
 
-function syncRouteAircraftGroupRows({ mode, groups, listEl, emptyMessage, isInActiveGame }) {
+function syncRouteAircraftGroupRows({
+  mode,
+  groups,
+  listEl,
+  emptyMessage,
+  isInActiveGame,
+  modelEditLockedUntilRealMs
+}) {
   const rowLookup = getRouteAircraftRowLookupByMode(mode);
   const currentCatalogIds = new Set();
   const isBulkAssignInProgress = routeAircraftBulkOperation && routeAircraftBulkOperation.mode === 'assign';
@@ -3467,6 +3522,9 @@ function syncRouteAircraftGroupRows({ mode, groups, listEl, emptyMessage, isInAc
       ? isBulkAssignInProgress && Boolean(aircraftInstanceIdToMutate)
       : isBulkUnassignInProgress && Boolean(aircraftInstanceIdToMutate);
 
+    const lockedUntil = Number(modelEditLockedUntilRealMs?.[catalogId]);
+    const isModelEditLocked = Number.isFinite(lockedUntil) && Date.now() < lockedUntil;
+
     row.actionButtonEl.textContent = mode === 'assign'
       ? (isPendingForGroup ? 'Assigning...' : 'Assign')
       : (isPendingForGroup ? 'Unassigning...' : 'Unassign');
@@ -3474,7 +3532,8 @@ function syncRouteAircraftGroupRows({ mode, groups, listEl, emptyMessage, isInAc
       !isInActiveGame ||
       hasPendingAircraftMutation ||
       !aircraftInstanceIdsToMutate.length ||
-      (mode === 'assign' ? isBulkUnassignInProgress : isBulkAssignInProgress);
+      (mode === 'assign' ? isBulkUnassignInProgress : isBulkAssignInProgress) ||
+      isModelEditLocked;
     row.quantityInputEl.disabled = !isInActiveGame || hasPendingAircraftMutation || maxQuantity < 1;
     row.quantityMaxButtonEl.disabled = !isInActiveGame || hasPendingAircraftMutation || maxQuantity < 1;
   });
@@ -3736,11 +3795,19 @@ function renderAirportInteractionActions(state, airport, actionsEl) {
   const hasOwner = ownerPlayerId != null;
   const isOwnedByLocalPlayer = isAirportOwnedByLocalPlayer(state, airport);
   const hasListing = !!(airport.saleListing && typeof airport.saleListing === 'object' && Number.isFinite(airport.saleListing.askingPrice));
+  const isOwnershipChangePending = airport.isOwnershipChangePending === true;
   const airportId = String(airport.id || airport.iata);
 
+  const localPlayerId = state && state.session ? state.session.playerId : null;
+  const localPlayer = getAuthoritativePlayerById(state, localPlayerId);
+  const capital = Number.isFinite(localPlayer && localPlayer.capital) ? localPlayer.capital : null;
+
   if (!hasOwner) {
+    const purchasePrice = Number.isFinite(airport.basePrice) ? airport.basePrice : null;
+    const cannotAfford = capital !== null && purchasePrice !== null && capital < purchasePrice;
+    const isBuyDisabled = !isInActiveGame || isOwnershipChangePending || cannotAfford;
     actionsEl.appendChild(
-      createAirportActionButton('Buy', () => emitAirportPurchaseUnownedRequest(airportId), { variant: 'buy' })
+      createAirportActionButton('Buy', () => emitAirportPurchaseUnownedRequest(airportId), { variant: 'buy', isDisabled: isBuyDisabled })
     );
     return;
   }
@@ -3780,8 +3847,11 @@ function renderAirportInteractionActions(state, airport, actionsEl) {
   }
 
   if (hasListing) {
+    const purchasePrice = airport.saleListing.askingPrice;
+    const cannotAfford = capital !== null && Number.isFinite(purchasePrice) && capital < purchasePrice;
+    const isBuyDisabled = !isInActiveGame || isOwnershipChangePending || cannotAfford;
     actionsEl.appendChild(
-      createAirportActionButton('Buy', () => emitAirportPurchaseListedRequest(airportId), { variant: 'buy' })
+      createAirportActionButton('Buy', () => emitAirportPurchaseListedRequest(airportId), { variant: 'buy', isDisabled: isBuyDisabled })
     );
   }
 }

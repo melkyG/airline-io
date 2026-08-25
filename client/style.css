@@ -827,7 +827,7 @@ body {
   overflow: visible;
   transform: scale(var(--airport-marker-scale));
   transform-origin: center center;
-  transition: transform 140ms ease-out;
+  transition: transform 180ms ease-out;
 }
 
 .airport-marker-pulse-wrapper {
@@ -837,6 +837,15 @@ body {
   display: grid;
   place-items: center;
   transform-origin: center center;
+  transition: transform 0.3s ease-out;
+}
+
+.airport-marker-root:hover .airport-marker-pulse-wrapper {
+  transform: scale(1.4);
+  transition: transform 0.12s ease-out;
+}
+
+.airport-marker-root:not(:hover) .airport-marker-pulse-wrapper {
   transition: transform 0.3s ease-out;
 }
 
@@ -902,6 +911,12 @@ body {
   animation: airport-reconfiguration-pulse 1.7s infinite;
 }
 
+.airport-marker-root:hover .airport-marker-pulse-wrapper--reconfiguring {
+  animation: none;
+  transform: scale(1.4);
+  transition: transform 0.12s ease-out;
+}
+
 .airport-marker-label {
   position: absolute;
   top: calc(100% + 3px);
@@ -962,7 +977,7 @@ body {
   display: none;
 }
 
-.airport-tooltip-code {
+.airport-tooltip-code { 
   font-weight: 700;
   color: #f8fafc;
 }
@@ -1026,8 +1041,15 @@ body {
   cursor: pointer;
 }
 
-.airport-interaction-action-button:hover {
+.airport-interaction-action-button:hover:not(:disabled) {
   filter: brightness(1.08);
+}
+
+.airport-interaction-action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: grayscale(0.8) brightness(0.8);
+  transform: scale(0.98);
 }
 .main-content.game-active .hud-bottom-right-stack {
   position: absolute;

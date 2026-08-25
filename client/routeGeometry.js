@@ -2,7 +2,7 @@
   const MIN_SAMPLE_POINTS = 8;
   const MAX_SAMPLE_POINTS = 96;
   const SAMPLE_DEGREES_PER_POINT = 2.5;
-  const ROUTE_CURVE_STRENGTH = 0.3;
+  const ROUTE_CURVE_STRENGTH = 0.7;
 
   function toRadians(degrees) {
     return (degrees * Math.PI) / 180;

@@ -1326,6 +1326,82 @@ class Game {
     };
   }
 
+  initiateAirportRouteShutdowns(playerId, airportId) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const airports = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const normalizedPlayerId = String(playerId || '').trim();
+    const normalizedAirportId = String(airportId || '').trim();
+
+    const player = players.find((candidate) => candidate.id === normalizedPlayerId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player was not found in authoritative game state.'
+      };
+    }
+
+    const airportState = airports.find((candidate) => candidate.airportId === normalizedAirportId);
+    const airportDefinition = AIRPORT_DEFINITIONS_BY_ID.get(normalizedAirportId);
+    if (!airportState || !airportDefinition) {
+      return {
+        success: false,
+        code: 'AIRPORT_NOT_FOUND',
+        message: 'Airport was not found.'
+      };
+    }
+
+    if (airportState.ownerPlayerId !== player.id) {
+      return {
+        success: false,
+        code: 'NOT_AIRPORT_OWNER',
+        message: 'Player does not own this airport.'
+      };
+    }
+
+    const affectedRoutes = routes.filter((route) => {
+      if (!route) {
+        return false;
+      }
+
+      if (String(route.ownerPlayerId || '') !== normalizedPlayerId) {
+        return false;
+      }
+
+      return (
+        String(route.originAirportId || '') === normalizedAirportId ||
+        String(route.destinationAirportId || '') === normalizedAirportId
+      );
+    });
+
+    const affectedRouteIds = [];
+    let changed = false;
+
+    for (const route of affectedRoutes) {
+      if (!route || !route.routeId) {
+        continue;
+      }
+
+      if (route.pendingRemoval === true) {
+        affectedRouteIds.push(route.routeId);
+        continue;
+      }
+
+      route.pendingRemoval = true;
+      route.reconfiguringModelCatalogIds = [];
+      route.reconfigurationReferenceAircraftInstanceIds = {};
+      affectedRouteIds.push(route.routeId);
+      changed = true;
+    }
+
+    return {
+      success: true,
+      changed,
+      affectedRouteIds
+    };
+  }
+
   purchaseListedAirport(buyerPlayerId, airportId) {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
     const airports = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
@@ -1386,29 +1462,71 @@ class Game {
       };
     }
 
-    const sellerRoutesUsingAirport = this.getOwnedRoutesContainingAirport(seller.id, airportDefinition.id);
-    const cleanupResult = this.removeRoutesWithAircraftCleanup(sellerRoutesUsingAirport);
-    if (!cleanupResult.success) {
-      return cleanupResult;
+    if (airportState.pendingOwnershipChange != null) {
+      return {
+        success: false,
+        code: 'AIRPORT_OWNERSHIP_CHANGE_PENDING',
+        message: 'Airport ownership change is already pending.'
+      };
     }
 
+    const sellerRoutesUsingAirport = this.getOwnedRoutesContainingAirport(seller.id, airportDefinition.id);
+
+    if (sellerRoutesUsingAirport.length === 0) {
+      buyer.capital = buyerCapital - askingPrice;
+      const sellerCapital = Number.isFinite(seller.capital) ? seller.capital : 0;
+      seller.capital = sellerCapital + askingPrice;
+      airportState.ownerPlayerId = buyer.id;
+      airportState.saleListing = null;
+
+      this.broadcastState();
+
+      return {
+        success: true,
+        code: 'OK',
+        buyerPlayerId: buyer.id,
+        sellerPlayerId: seller.id,
+        airportId: airportDefinition.id,
+        pricePaid: askingPrice,
+        buyerRemainingCapital: buyer.capital,
+        sellerUpdatedCapital: seller.capital
+      };
+    }
+
+    const previousBuyerCapital = buyer.capital;
+    const previousSaleListing = airportState.saleListing;
+    const previousPendingState = airportState.pendingOwnershipChange;
+
     buyer.capital = buyerCapital - askingPrice;
-    const sellerCapital = Number.isFinite(seller.capital) ? seller.capital : 0;
-    seller.capital = sellerCapital + askingPrice;
-    airportState.ownerPlayerId = buyer.id;
+
+    airportState.pendingOwnershipChange = {
+      type: 'player-transfer',
+      sellerPlayerId: seller.id,
+      buyerPlayerId: buyer.id,
+      lockedAmount: askingPrice
+    };
+
     airportState.saleListing = null;
+
+    const shutdownResult = this.initiateAirportRouteShutdowns(seller.id, airportDefinition.id);
+    if (!shutdownResult.success) {
+      buyer.capital = previousBuyerCapital;
+      airportState.saleListing = previousSaleListing;
+      airportState.pendingOwnershipChange = previousPendingState;
+      return shutdownResult;
+    }
 
     this.broadcastState();
 
     return {
       success: true,
-      code: 'OK',
+      code: 'AIRPORT_TRANSFER_PENDING',
       buyerPlayerId: buyer.id,
       sellerPlayerId: seller.id,
       airportId: airportDefinition.id,
       pricePaid: askingPrice,
       buyerRemainingCapital: buyer.capital,
-      sellerUpdatedCapital: seller.capital
+      affectedRouteIds: shutdownResult.affectedRouteIds
     };
   }
 
@@ -1444,29 +1562,319 @@ class Game {
       };
     }
 
+    if (airportState.pendingOwnershipChange != null) {
+      return {
+        success: false,
+        code: 'AIRPORT_OWNERSHIP_CHANGE_PENDING',
+        message: 'Airport ownership change is already pending.'
+      };
+    }
+
+    if (airportState.saleListing != null) {
+      return {
+        success: false,
+        code: 'AIRPORT_ALREADY_LISTED',
+        message: 'Airport is currently listed for sale. Cancel the listing first.'
+      };
+    }
+
     const basePrice = Number.isFinite(airportDefinition.basePrice) ? airportDefinition.basePrice : 0;
     const refundAmount = calculateAirportSellToGamePrice(basePrice);
     const currentCapital = Number.isFinite(player.capital) ? player.capital : 0;
 
     const playerRoutesUsingAirport = this.getOwnedRoutesContainingAirport(player.id, airportDefinition.id);
-    const cleanupResult = this.removeRoutesWithAircraftCleanup(playerRoutesUsingAirport);
-    if (!cleanupResult.success) {
-      return cleanupResult;
+
+    if (playerRoutesUsingAirport.length === 0) {
+      player.capital = currentCapital + refundAmount;
+      airportState.ownerPlayerId = null;
+      airportState.saleListing = null;
+
+      this.broadcastState();
+
+      return {
+        success: true,
+        code: 'OK',
+        playerId: player.id,
+        airportId: airportDefinition.id,
+        refundAmount,
+        updatedCapital: player.capital
+      };
     }
 
-    player.capital = currentCapital + refundAmount;
-    airportState.ownerPlayerId = null;
-    airportState.saleListing = null;
+    const previousPendingState = airportState.pendingOwnershipChange;
+
+    airportState.pendingOwnershipChange = {
+      type: 'sell-to-game',
+      sellerPlayerId: player.id,
+      buyerPlayerId: null,
+      lockedAmount: refundAmount
+    };
+
+    const shutdownResult = this.initiateAirportRouteShutdowns(player.id, airportDefinition.id);
+    if (!shutdownResult.success) {
+      airportState.pendingOwnershipChange = previousPendingState;
+      return shutdownResult;
+    }
 
     this.broadcastState();
 
     return {
       success: true,
-      code: 'OK',
+      code: 'AIRPORT_SALE_PENDING',
       playerId: player.id,
       airportId: airportDefinition.id,
       refundAmount,
-      updatedCapital: player.capital
+      affectedRouteIds: shutdownResult.affectedRouteIds
+    };
+  }
+
+  completePendingAirportSellToGame(airportId) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const airports = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const normalizedAirportId = String(airportId || '').trim();
+
+    const airportState = airports.find((candidate) => candidate.airportId === normalizedAirportId);
+    if (!airportState) {
+      return {
+        success: false,
+        code: 'AIRPORT_NOT_FOUND',
+        message: 'Airport was not found.'
+      };
+    }
+
+    const pendingChange = airportState.pendingOwnershipChange;
+    if (!pendingChange || typeof pendingChange !== 'object') {
+      return {
+        success: false,
+        code: 'NO_PENDING_OWNERSHIP_CHANGE',
+        message: 'Airport has no pending ownership change.'
+      };
+    }
+
+    if (pendingChange.type !== 'sell-to-game') {
+      return {
+        success: false,
+        code: 'WRONG_TRANSACTION_TYPE',
+        message: 'Pending ownership change is not a sell-to-game transaction.'
+      };
+    }
+
+    const sellerPlayerId = pendingChange.sellerPlayerId;
+    const lockedAmount = pendingChange.lockedAmount;
+
+    if (!sellerPlayerId || typeof sellerPlayerId !== 'string') {
+      return {
+        success: false,
+        code: 'INVALID_SELLER_ID',
+        message: 'Pending transaction has invalid seller ID.'
+      };
+    }
+
+    if (!Number.isFinite(lockedAmount) || lockedAmount < 0) {
+      return {
+        success: false,
+        code: 'INVALID_LOCKED_AMOUNT',
+        message: 'Pending transaction has invalid locked amount.'
+      };
+    }
+
+    if (pendingChange.buyerPlayerId != null) {
+      return {
+        success: false,
+        code: 'INVALID_BUYER_ID',
+        message: 'Sell-to-game transaction should not have a buyer ID.'
+      };
+    }
+
+    const seller = players.find((candidate) => candidate.id === sellerPlayerId);
+    if (!seller) {
+      return {
+        success: false,
+        code: 'SELLER_NOT_FOUND',
+        message: 'Seller player was not found in authoritative game state.'
+      };
+    }
+
+    if (airportState.ownerPlayerId !== sellerPlayerId) {
+      return {
+        success: false,
+        code: 'SELLER_NO_LONGER_OWNER',
+        message: 'Seller no longer owns this airport.'
+      };
+    }
+
+    const affectedRoutes = routes.filter((route) => {
+      if (!route) {
+        return false;
+      }
+
+      if (String(route.ownerPlayerId || '') !== sellerPlayerId) {
+        return false;
+      }
+
+      return (
+        String(route.originAirportId || '') === normalizedAirportId ||
+        String(route.destinationAirportId || '') === normalizedAirportId
+      );
+    });
+
+    if (affectedRoutes.length > 0) {
+      return {
+        success: true,
+        complete: false,
+        changed: false
+      };
+    }
+
+    const sellerCapital = Number.isFinite(seller.capital) ? seller.capital : 0;
+    seller.capital = sellerCapital + lockedAmount;
+    airportState.ownerPlayerId = null;
+    airportState.saleListing = null;
+    airportState.pendingOwnershipChange = null;
+
+    return {
+      success: true,
+      complete: true,
+      changed: true
+    };
+  }
+
+  completePendingAirportPlayerTransfer(airportId) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const airports = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const normalizedAirportId = String(airportId || '').trim();
+
+    const airportState = airports.find((candidate) => candidate.airportId === normalizedAirportId);
+    if (!airportState) {
+      return {
+        success: false,
+        code: 'AIRPORT_NOT_FOUND',
+        message: 'Airport was not found.'
+      };
+    }
+
+    const pendingChange = airportState.pendingOwnershipChange;
+    if (!pendingChange || typeof pendingChange !== 'object') {
+      return {
+        success: false,
+        code: 'NO_PENDING_OWNERSHIP_CHANGE',
+        message: 'Airport has no pending ownership change.'
+      };
+    }
+
+    if (pendingChange.type !== 'player-transfer') {
+      return {
+        success: false,
+        code: 'WRONG_TRANSACTION_TYPE',
+        message: 'Pending ownership change is not a player-transfer transaction.'
+      };
+    }
+
+    const sellerPlayerId = pendingChange.sellerPlayerId;
+    const buyerPlayerId = pendingChange.buyerPlayerId;
+    const lockedAmount = pendingChange.lockedAmount;
+
+    if (!sellerPlayerId || typeof sellerPlayerId !== 'string') {
+      return {
+        success: false,
+        code: 'INVALID_SELLER_ID',
+        message: 'Pending transaction has invalid seller ID.'
+      };
+    }
+
+    if (!buyerPlayerId || typeof buyerPlayerId !== 'string') {
+      return {
+        success: false,
+        code: 'INVALID_BUYER_ID',
+        message: 'Pending transaction has invalid buyer ID.'
+      };
+    }
+
+    if (!Number.isFinite(lockedAmount) || lockedAmount < 0) {
+      return {
+        success: false,
+        code: 'INVALID_LOCKED_AMOUNT',
+        message: 'Pending transaction has invalid locked amount.'
+      };
+    }
+
+    const seller = players.find((candidate) => candidate.id === sellerPlayerId);
+    if (!seller) {
+      return {
+        success: false,
+        code: 'SELLER_NOT_FOUND',
+        message: 'Seller player was not found in authoritative game state.'
+      };
+    }
+
+    const buyer = players.find((candidate) => candidate.id === buyerPlayerId);
+    if (!buyer) {
+      return {
+        success: false,
+        code: 'BUYER_NOT_FOUND',
+        message: 'Buyer player was not found in authoritative game state.'
+      };
+    }
+
+    if (airportState.ownerPlayerId !== sellerPlayerId) {
+      return {
+        success: false,
+        code: 'SELLER_NO_LONGER_OWNER',
+        message: 'Seller no longer owns this airport.'
+      };
+    }
+
+    if (sellerPlayerId === buyerPlayerId) {
+      return {
+        success: false,
+        code: 'SELLER_BUYER_SAME',
+        message: 'Seller and buyer cannot be the same player.'
+      };
+    }
+
+    if (airportState.saleListing != null) {
+      return {
+        success: false,
+        code: 'LISTING_STILL_EXISTS',
+        message: 'Airport listing still exists when it should have been consumed.'
+      };
+    }
+
+    const affectedRoutes = routes.filter((route) => {
+      if (!route) {
+        return false;
+      }
+
+      if (String(route.ownerPlayerId || '') !== sellerPlayerId) {
+        return false;
+      }
+
+      return (
+        String(route.originAirportId || '') === normalizedAirportId ||
+        String(route.destinationAirportId || '') === normalizedAirportId
+      );
+    });
+
+    if (affectedRoutes.length > 0) {
+      return {
+        success: true,
+        complete: false,
+        changed: false
+      };
+    }
+
+    const sellerCapital = Number.isFinite(seller.capital) ? seller.capital : 0;
+    seller.capital = sellerCapital + lockedAmount;
+    airportState.ownerPlayerId = buyerPlayerId;
+    airportState.saleListing = null;
+    airportState.pendingOwnershipChange = null;
+
+    return {
+      success: true,
+      complete: true,
+      changed: true
     };
   }
 
@@ -1542,7 +1950,9 @@ class Game {
       distanceKm: calculateRouteDistanceKm(originAirportDefinition, destinationAirportDefinition),
       assignedAircraftInstanceIds: [],
       reconfiguringModelCatalogIds: [],
-      reconfigurationReferenceAircraftInstanceIds: {}
+      reconfigurationReferenceAircraftInstanceIds: {},
+      pendingRemoval: false,
+      modelEditLockedUntilRealMs: {}
     };
 
     this.authoritativeState.routes = routes;
@@ -1589,20 +1999,46 @@ class Game {
       };
     }
 
-    const cleanupResult = this.removeRoutesWithAircraftCleanup([route]);
-    if (!cleanupResult.success) {
-      return cleanupResult;
+    if (route.pendingRemoval === true) {
+      return {
+        success: false,
+        code: 'ROUTE_REMOVAL_ALREADY_PENDING',
+        message: 'Route removal is already pending.'
+      };
     }
 
-    const unassignedAircraftInstanceIds = cleanupResult.routeIdToAssignedAircraftIds.get(route.routeId) || [];
+    const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
+      ? route.assignedAircraftInstanceIds
+      : [];
+
+    if (assignedAircraftInstanceIds.length === 0) {
+      const cleanupResult = this.removeRoutesWithAircraftCleanup([route]);
+      if (!cleanupResult.success) {
+        return cleanupResult;
+      }
+
+      const unassignedAircraftInstanceIds = cleanupResult.routeIdToAssignedAircraftIds.get(route.routeId) || [];
+      this.broadcastState();
+
+      return {
+        success: true,
+        code: 'OK',
+        routeId: route.routeId,
+        ownerPlayerId: route.ownerPlayerId,
+        unassignedAircraftInstanceIds
+      };
+    }
+
+    route.pendingRemoval = true;
+    route.reconfiguringModelCatalogIds = [];
+    route.reconfigurationReferenceAircraftInstanceIds = {};
     this.broadcastState();
 
     return {
       success: true,
-      code: 'OK',
+      code: 'ROUTE_REMOVAL_PENDING',
       routeId: route.routeId,
-      ownerPlayerId: route.ownerPlayerId,
-      unassignedAircraftInstanceIds
+      ownerPlayerId: route.ownerPlayerId
     };
   }
 
@@ -1986,6 +2422,188 @@ class Game {
     return { success: true, changed: true, quantitySold: pendingSaleAircraft.length, totalRefund };
   }
 
+  completePendingRouteRemoval(routeId) {
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft) ? this.authoritativeState.ownedAircraft : [];
+    const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const normalizedRouteId = String(routeId || '').trim();
+
+    const route = routes.find((candidate) => candidate && candidate.routeId === normalizedRouteId);
+    if (!route) {
+      return {
+        success: false,
+        code: 'ROUTE_NOT_FOUND',
+        message: 'Route was not found.'
+      };
+    }
+
+    if (route.pendingRemoval !== true) {
+      return {
+        success: false,
+        code: 'ROUTE_NOT_PENDING_REMOVAL',
+        message: 'Route is not pending removal.'
+      };
+    }
+
+    const routeOriginAirportId = String(route.originAirportId || '').trim();
+
+    const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
+      ? route.assignedAircraftInstanceIds
+      : [];
+
+    if (assignedAircraftInstanceIds.length === 0) {
+      return {
+        success: true,
+        complete: true,
+        changed: false
+      };
+    }
+
+    const attachedAircraft = assignedAircraftInstanceIds
+      .map((instanceId) => {
+        const aircraft = ownedAircraft.find((candidate) => {
+          return candidate && String(candidate.aircraftInstanceId || '').trim() === String(instanceId || '').trim();
+        });
+        return aircraft;
+      })
+      .filter((aircraft) => aircraft != null);
+
+    for (const aircraft of attachedAircraft) {
+      const flight = flights.find((candidate) => {
+        return candidate && String(candidate.aircraftInstanceId || '').trim() === String(aircraft.aircraftInstanceId || '').trim();
+      });
+
+      if (!flight) {
+        return {
+          success: true,
+          complete: false,
+          changed: false
+        };
+      }
+
+      if (String(flight.routeId || '').trim() !== normalizedRouteId) {
+        return {
+          success: true,
+          complete: false,
+          changed: false
+        };
+      }
+
+      const currentStatus = String(flight.status || '').trim();
+      const currentDirection = String(flight.direction || '').trim();
+      const currentOriginAirportId = String(flight.originAirportId || '').trim();
+
+      if (currentStatus !== 'ready' || currentDirection !== 'outbound' || currentOriginAirportId !== routeOriginAirportId) {
+        return {
+          success: true,
+          complete: false,
+          changed: false
+        };
+      }
+    }
+
+    const pendingSaleAircraft = [];
+    const pendingUnassignAircraft = [];
+    const ordinaryAircraft = [];
+
+    for (const aircraft of attachedAircraft) {
+      const pendingAction = String(aircraft.pendingRouteExitAction || '').trim();
+      if (pendingAction === 'sell') {
+        pendingSaleAircraft.push(aircraft);
+      } else if (pendingAction === 'unassign') {
+        pendingUnassignAircraft.push(aircraft);
+      } else {
+        ordinaryAircraft.push(aircraft);
+      }
+    }
+
+    for (const aircraft of pendingSaleAircraft) {
+      const pendingSaleRefund = Number(aircraft.pendingSaleRefund);
+      if (!Number.isFinite(pendingSaleRefund) || pendingSaleRefund < 0) {
+        return {
+          success: false,
+          code: 'INVALID_PENDING_REFUND',
+          message: 'Pending-sale aircraft has an invalid refund amount.'
+        };
+      }
+
+      const player = players.find((candidate) => candidate && candidate.id === aircraft.ownerPlayerId);
+      if (!player) {
+        return {
+          success: false,
+          code: 'OWNER_NOT_FOUND',
+          message: 'Pending-sale aircraft owner was not found.'
+        };
+      }
+    }
+
+    for (const aircraft of pendingSaleAircraft) {
+      const detachResult = this.detachAircraftFromAssignment(aircraft.aircraftInstanceId);
+      if (!detachResult.success) {
+        return {
+          success: false,
+          code: 'DETACH_FAILED',
+          message: 'Failed to detach pending-sale aircraft.'
+        };
+      }
+
+      const pendingSaleRefund = Number(aircraft.pendingSaleRefund);
+      const player = players.find((candidate) => candidate && candidate.id === aircraft.ownerPlayerId);
+      if (player) {
+        const currentCapital = Number.isFinite(player.capital) ? player.capital : 0;
+        player.capital = currentCapital + pendingSaleRefund;
+      }
+    }
+
+    const pendingSaleAircraftInstanceIds = new Set(
+      pendingSaleAircraft.map((aircraft) => String(aircraft.aircraftInstanceId || '').trim())
+    );
+
+    this.authoritativeState.ownedAircraft = this.authoritativeState.ownedAircraft.filter((aircraft) => {
+      const aircraftInstanceId = String(aircraft?.aircraftInstanceId || '').trim();
+      return !pendingSaleAircraftInstanceIds.has(aircraftInstanceId);
+    });
+
+    for (const aircraft of pendingUnassignAircraft) {
+      const detachResult = this.detachAircraftFromAssignment(aircraft.aircraftInstanceId);
+      if (!detachResult.success) {
+        return {
+          success: false,
+          code: 'DETACH_FAILED',
+          message: 'Failed to detach pending-unassign aircraft.'
+        };
+      }
+
+      aircraft.pendingRouteExitAction = null;
+    }
+
+    for (const aircraft of ordinaryAircraft) {
+      const detachResult = this.detachAircraftFromAssignment(aircraft.aircraftInstanceId);
+      if (!detachResult.success) {
+        return {
+          success: false,
+          code: 'DETACH_FAILED',
+          message: 'Failed to detach ordinary aircraft.'
+        };
+      }
+    }
+
+    this.authoritativeState.flights = this.authoritativeState.flights.filter((flight) => {
+      return String(flight.routeId || '').trim() !== normalizedRouteId;
+    });
+
+    this.authoritativeState.routes = this.authoritativeState.routes.filter((candidate) => {
+      return !(candidate && candidate.routeId === normalizedRouteId);
+    });
+
+    return {
+      success: true,
+      complete: true,
+      changed: true
+    };
+  }
+
   rebuildModelDepartureSchedule(routeId, aircraftCatalogId, rebuildStartSimulationMs) {
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
     const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft) ? this.authoritativeState.ownedAircraft : [];
@@ -2297,6 +2915,15 @@ class Game {
       };
     }
 
+    const lockedUntil = Number(route.modelEditLockedUntilRealMs?.[aircraft.aircraftCatalogId]);
+    if (Number.isFinite(lockedUntil) && Date.now() < lockedUntil) {
+      return {
+        success: false,
+        code: 'MODEL_EDIT_LOCKED',
+        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.'
+      };
+    }
+
     this.beginModelReconfiguration(route.routeId, aircraft.aircraftCatalogId);
 
     route.assignedAircraftInstanceIds = assignedAircraftInstanceIds;
@@ -2390,6 +3017,15 @@ class Game {
         success: false,
         code: 'ASSIGNMENT_NOT_FOUND',
         message: 'Aircraft assignment was not found on the route.'
+      };
+    }
+
+    const lockedUntil = Number(route.modelEditLockedUntilRealMs?.[aircraft.aircraftCatalogId]);
+    if (Number.isFinite(lockedUntil) && Date.now() < lockedUntil) {
+      return {
+        success: false,
+        code: 'MODEL_EDIT_LOCKED',
+        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.'
       };
     }
 
@@ -2559,8 +3195,22 @@ class Game {
     let anyRebuildChanged = false;
 
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
-    for (const route of routes) {
+    const routeSnapshot = routes.slice();
+
+    for (const route of routeSnapshot) {
       if (!route) {
+        continue;
+      }
+
+      if (route.pendingRemoval === true) {
+        const removalResult = this.completePendingRouteRemoval(route.routeId);
+        if (!removalResult.success) {
+          console.error(
+            `Route removal completion failed for route ${route.routeId}: ${removalResult.code} - ${removalResult.message}`
+          );
+        } else if (removalResult.changed) {
+          anyRebuildChanged = true;
+        }
         continue;
       }
 
@@ -2612,11 +3262,49 @@ class Game {
 
           if (rebuildResult.success && rebuildResult.changed) {
             anyRebuildChanged = true;
+            if (!route.modelEditLockedUntilRealMs) {
+              route.modelEditLockedUntilRealMs = {};
+            }
+            route.modelEditLockedUntilRealMs[aircraftCatalogId] = Date.now() + 1500;
           } else if (!rebuildResult.success) {
             console.error(
               `Reconfiguration schedule rebuild failed for route ${route.routeId}, model ${aircraftCatalogId}: ${rebuildResult.code} - ${rebuildResult.message}`
             );
           }
+        }
+      }
+    }
+
+    const airports = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
+    const airportSnapshot = airports.slice();
+
+    for (const airportState of airportSnapshot) {
+      if (!airportState) {
+        continue;
+      }
+
+      const pendingChange = airportState.pendingOwnershipChange;
+      if (!pendingChange || typeof pendingChange !== 'object') {
+        continue;
+      }
+
+      if (pendingChange.type === 'sell-to-game') {
+        const completionResult = this.completePendingAirportSellToGame(airportState.airportId);
+        if (!completionResult.success) {
+          console.error(
+            `Airport sell-to-game completion failed for airport ${airportState.airportId}: ${completionResult.code} - ${completionResult.message}`
+          );
+        } else if (completionResult.changed) {
+          anyRebuildChanged = true;
+        }
+      } else if (pendingChange.type === 'player-transfer') {
+        const completionResult = this.completePendingAirportPlayerTransfer(airportState.airportId);
+        if (!completionResult.success) {
+          console.error(
+            `Airport player-transfer completion failed for airport ${airportState.airportId}: ${completionResult.code} - ${completionResult.message}`
+          );
+        } else if (completionResult.changed) {
+          anyRebuildChanged = true;
         }
       }
     }
@@ -2655,7 +3343,8 @@ class Game {
         saleListing:
           airportState.saleListing && typeof airportState.saleListing === 'object'
             ? { ...airportState.saleListing }
-            : null
+            : null,
+        isOwnershipChangePending: airportState.pendingOwnershipChange != null
       });
 
       return publicAirports;
@@ -2691,12 +3380,16 @@ class Game {
 
     return ownedAircraft.map((aircraft) => {
       const { pendingRouteExitAction, pendingSaleRefund, ...publicAircraft } = aircraft;
-      return publicAircraft;
+      return {
+        ...publicAircraft,
+        isPendingUnassign: Boolean(pendingRouteExitAction === 'unassign')
+      };
     });
   }
 
   createPublicRouteSnapshot() {
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const nowRealMs = Date.now();
 
     return routes.map((route) => {
       const { reconfiguringModelCatalogIds, reconfigurationReferenceAircraftInstanceIds, ...publicRoute } = route;
@@ -2704,12 +3397,27 @@ class Game {
         ? route.assignedAircraftInstanceIds.slice()
         : [];
       const isReconfiguring = Array.isArray(reconfiguringModelCatalogIds) && reconfiguringModelCatalogIds.length > 0;
+      const pendingRemoval = Boolean(route.pendingRemoval === true);
+      const rawModelEditLockedUntilRealMs = route.modelEditLockedUntilRealMs;
+      const modelEditLockedUntilRealMs = {};
+      const rawLockedEntries = rawModelEditLockedUntilRealMs && typeof rawModelEditLockedUntilRealMs === 'object'
+        ? Object.entries(rawModelEditLockedUntilRealMs)
+        : [];
+
+      for (const [catalogId, expiryRawValue] of rawLockedEntries) {
+        const expiryMs = Number(expiryRawValue);
+        if (Number.isFinite(expiryMs) && nowRealMs < expiryMs) {
+          modelEditLockedUntilRealMs[catalogId] = expiryMs;
+        }
+      }
 
       return {
         ...publicRoute,
         assignedAircraftInstanceIds,
         activeFlightsCount: assignedAircraftInstanceIds.length,
-        isReconfiguring
+        isReconfiguring,
+        pendingRemoval,
+        modelEditLockedUntilRealMs
       };
     });
   }
