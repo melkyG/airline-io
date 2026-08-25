@@ -1346,19 +1346,6 @@ const shopAircraftMaxLabelEl = document.createElement('button');
 shopAircraftMaxLabelEl.type = 'button';
 shopAircraftMaxLabelEl.className = 'aircraft-quantity-max-label aircraft-trade-footnote-label';
 shopAircraftMaxLabelEl.textContent = 'Max 0';
-shopAircraftMaxLabelEl.addEventListener('click', () => {
-  if (isAircraftPurchasePending) {
-    return;
-  }
-
-  const normalizedMax = Number.isInteger(aircraftMaxPurchasable) && aircraftMaxPurchasable > 0
-    ? aircraftMaxPurchasable
-    : 1;
-  aircraftPurchaseQuantity = normalizeAircraftPurchaseQuantity(normalizedMax);
-  isAircraftPurchaseQuantityEditing = false;
-  aircraftPurchaseQuantityRawInput = '';
-  refreshShopAircraftInteractionPanel(gameState.getState());
-});
 
 function handleAircraftQuantityInputChanged() {
   isAircraftPurchaseQuantityEditing = true;
@@ -1420,12 +1407,28 @@ shopAircraftBuyButtonEl.addEventListener('click', () => {
   }
 
   isAircraftPurchasePending = true;
-  setAircraftSelectionMessage('Submitting purchase request...', 'info');
   refreshShopAircraftInteractionPanel(gameState.getState());
   socket.emit('aircraft:purchase:request', {
     aircraftCatalogId: selectedAircraft.aircraftCatalogId,
     quantity: normalizedQuantity
   });
+});
+
+bindQuantityInputShortcuts({
+  inputEl: shopAircraftQuantityInputEl,
+  maxButtonEl: shopAircraftMaxLabelEl,
+  actionButtonEl: shopAircraftBuyButtonEl,
+  getMaxValue: () => Number.isInteger(aircraftMaxPurchasable) && aircraftMaxPurchasable > 0 ? aircraftMaxPurchasable : 0,
+  isMaxAllowed: () => Number.isInteger(aircraftMaxPurchasable) && aircraftMaxPurchasable >= 1 && !isAircraftPurchasePending && !isAircraftQuotePending,
+  onMaxClick: (maxValue) => {
+    if (isAircraftPurchasePending) {
+      return;
+    }
+    aircraftPurchaseQuantity = normalizeAircraftPurchaseQuantity(maxValue);
+    isAircraftPurchaseQuantityEditing = false;
+    aircraftPurchaseQuantityRawInput = '';
+    refreshShopAircraftInteractionPanel(gameState.getState());
+  }
 });
 
 shopAircraftBuyQuantityColumnEl.appendChild(shopAircraftQuantityInputEl);
@@ -1517,18 +1520,21 @@ const shopAircraftOwnedLabelEl = document.createElement('button');
 shopAircraftOwnedLabelEl.type = 'button';
 shopAircraftOwnedLabelEl.className = 'aircraft-quantity-max-label aircraft-trade-footnote-label';
 shopAircraftOwnedLabelEl.textContent = 'Owned 0';
-shopAircraftOwnedLabelEl.addEventListener('click', () => {
-  if (isAircraftSellPending) {
-    return;
-  }
 
-  const normalizedOwnedMax = Number.isInteger(aircraftMaxSellable) && aircraftMaxSellable > 0
-    ? aircraftMaxSellable
-    : 0;
-  aircraftSellQuantity = normalizeAircraftSellQuantity(normalizedOwnedMax, aircraftMaxSellable);
-  isAircraftSellQuantityEditing = false;
-  aircraftSellQuantityRawInput = '';
-  refreshShopAircraftInteractionPanel(gameState.getState());
+bindQuantityInputShortcuts({
+  inputEl: shopAircraftSellQuantityInputEl,
+  maxButtonEl: shopAircraftOwnedLabelEl,
+  actionButtonEl: shopAircraftSellButtonEl,
+  getMaxValue: () => Number.isInteger(aircraftMaxSellable) && aircraftMaxSellable > 0 ? aircraftMaxSellable : 0,
+  onMaxClick: (maxValue) => {
+    if (isAircraftSellPending) {
+      return;
+    }
+    aircraftSellQuantity = normalizeAircraftSellQuantity(maxValue, aircraftMaxSellable);
+    isAircraftSellQuantityEditing = false;
+    aircraftSellQuantityRawInput = '';
+    refreshShopAircraftInteractionPanel(gameState.getState());
+  }
 });
 
 shopAircraftSellQuantityColumnEl.appendChild(shopAircraftSellQuantityInputEl);
@@ -2605,16 +2611,25 @@ function emitRouteRemoveRequest(routeId) {
   socket.emit('route:remove:request', { routeId });
 }
 
-function emitRouteAircraftAssignRequest(routeId, aircraftInstanceId) {
+function emitRouteAircraftAssignRequest(routeId, aircraftInstanceId, editOperationId) {
   socket.emit('route:aircraft:assign:request', {
     routeId,
-    aircraftInstanceId
+    aircraftInstanceId,
+    ...(editOperationId ? { editOperationId } : {})
   });
 }
 
-function emitRouteAircraftUnassignRequest(aircraftInstanceId) {
+function emitRouteAircraftAssignBulkRequest(routeId, aircraftInstanceIds) {
+  socket.emit('route:aircraft:assign:bulk:request', {
+    routeId,
+    aircraftInstanceIds
+  });
+}
+
+function emitRouteAircraftUnassignRequest(aircraftInstanceId, editOperationId) {
   socket.emit('route:aircraft:unassign:request', {
-    aircraftInstanceId
+    aircraftInstanceId,
+    ...(editOperationId ? { editOperationId } : {})
   });
 }
 
@@ -2940,6 +2955,10 @@ function openRouteContextForAirport(airportId) {
 
   const authoritativeAirport = getAuthoritativeAirportById(state, normalizedAirportId);
   if (!authoritativeAirport || !isAirportOwnedByLocalPlayer(state, authoritativeAirport)) {
+    return;
+  }
+
+  if (authoritativeAirport.isOwnershipChangePending === true) {
     return;
   }
 
@@ -3283,6 +3302,34 @@ function getRouteAircraftRowLookupByMode(mode) {
   return mode === 'unassign' ? routeAssignedAircraftRowByCatalogId : routeAvailableAircraftRowByCatalogId;
 }
 
+function bindQuantityInputShortcuts({ inputEl, maxButtonEl, actionButtonEl, getMaxValue, onMaxClick, isMaxAllowed }) {
+  maxButtonEl.addEventListener('click', () => {
+    const maxValue = getMaxValue();
+    if (!Number.isFinite(maxValue) || maxValue < 1) {
+      return;
+    }
+    const isAllowed = typeof isMaxAllowed === 'function'
+      ? isMaxAllowed()
+      : (actionButtonEl && !actionButtonEl.disabled);
+    if (!isAllowed) {
+      return;
+    }
+    onMaxClick(maxValue);
+    inputEl.value = String(maxValue);
+    inputEl.focus();
+  });
+
+  inputEl.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') {
+      return;
+    }
+    event.preventDefault();
+    if (actionButtonEl && !actionButtonEl.disabled) {
+      actionButtonEl.click();
+    }
+  });
+}
+
 function createRouteAircraftGroupRow(mode, catalogId) {
   const groupCardEl = document.createElement('div');
   groupCardEl.className = 'routes-aircraft-group-card';
@@ -3357,21 +3404,28 @@ function createRouteAircraftGroupRow(mode, catalogId) {
     refreshRoutesModal(gameState.getState());
   });
 
-  quantityMaxButtonEl.addEventListener('click', () => {
-    const catalogIdFromRow = String(groupCardEl.dataset.catalogId || '').trim();
-    const groupLookup = getRouteAircraftGroupLookupByMode(mode);
-    const currentGroup = groupLookup.get(catalogIdFromRow);
-    const maxQuantity = currentGroup && Array.isArray(currentGroup.aircraftInstanceIds)
-      ? currentGroup.aircraftInstanceIds.length
-      : 0;
-
-    commitRouteAircraftQuantityInput({
-      mode,
-      catalogId: catalogIdFromRow,
-      maxQuantity,
-      rawInputValue: maxQuantity
-    });
-    refreshRoutesModal(gameState.getState());
+  bindQuantityInputShortcuts({
+    inputEl: quantityInputEl,
+    maxButtonEl: quantityMaxButtonEl,
+    actionButtonEl,
+    getMaxValue: () => {
+      const catalogIdFromRow = String(groupCardEl.dataset.catalogId || '').trim();
+      const groupLookup = getRouteAircraftGroupLookupByMode(mode);
+      const currentGroup = groupLookup.get(catalogIdFromRow);
+      return currentGroup && Array.isArray(currentGroup.aircraftInstanceIds)
+        ? currentGroup.aircraftInstanceIds.length
+        : 0;
+    },
+    onMaxClick: (maxValue) => {
+      const catalogIdFromRow = String(groupCardEl.dataset.catalogId || '').trim();
+      commitRouteAircraftQuantityInput({
+        mode,
+        catalogId: catalogIdFromRow,
+        maxQuantity: maxValue,
+        rawInputValue: maxValue
+      });
+      refreshRoutesModal(gameState.getState());
+    }
   });
 
   actionButtonEl.addEventListener('click', () => {
@@ -3525,9 +3579,7 @@ function syncRouteAircraftGroupRows({
     const lockedUntil = Number(modelEditLockedUntilRealMs?.[catalogId]);
     const isModelEditLocked = Number.isFinite(lockedUntil) && Date.now() < lockedUntil;
 
-    row.actionButtonEl.textContent = mode === 'assign'
-      ? (isPendingForGroup ? 'Assigning...' : 'Assign')
-      : (isPendingForGroup ? 'Unassigning...' : 'Unassign');
+    row.actionButtonEl.textContent = mode === 'assign' ? 'Assign' : 'Unassign';
     row.actionButtonEl.disabled =
       !isInActiveGame ||
       hasPendingAircraftMutation ||
@@ -3589,16 +3641,18 @@ function dispatchNextRouteAircraftBulkOperationRequest() {
     return;
   }
 
+  const editOperationId = routeAircraftBulkOperation.editOperationId;
+
   if (routeAircraftBulkOperation.mode === 'unassign') {
     pendingRouteAircraftAssignAircraftInstanceId = null;
     pendingRouteAircraftUnassignAircraftInstanceId = nextAircraftInstanceId;
-    emitRouteAircraftUnassignRequest(nextAircraftInstanceId);
+    emitRouteAircraftUnassignRequest(nextAircraftInstanceId, editOperationId);
     return;
   }
 
   pendingRouteAircraftUnassignAircraftInstanceId = null;
   pendingRouteAircraftAssignAircraftInstanceId = nextAircraftInstanceId;
-  emitRouteAircraftAssignRequest(routeAircraftBulkOperation.routeId, nextAircraftInstanceId);
+  emitRouteAircraftAssignRequest(routeAircraftBulkOperation.routeId, nextAircraftInstanceId, editOperationId);
 }
 
 function startRouteAircraftBulkOperation({ mode, routeId, aircraftInstanceIds }) {
@@ -3620,6 +3674,7 @@ function startRouteAircraftBulkOperation({ mode, routeId, aircraftInstanceIds })
   routeAircraftBulkOperation = {
     mode: normalizedMode,
     routeId: normalizedRouteId,
+    editOperationId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     totalCount: queueAircraftInstanceIds.length,
     completedCount: 0,
     remainingAircraftInstanceIds: queueAircraftInstanceIds.slice()
@@ -3627,6 +3682,15 @@ function startRouteAircraftBulkOperation({ mode, routeId, aircraftInstanceIds })
 
   routeAircraftManagementFeedbackKind = 'error';
   routeAircraftManagementErrorMessage = '';
+
+  if (normalizedMode === 'assign') {
+    pendingRouteAircraftUnassignAircraftInstanceId = null;
+    pendingRouteAircraftAssignAircraftInstanceId = queueAircraftInstanceIds[0] || '__BULK__';
+    emitRouteAircraftAssignBulkRequest(normalizedRouteId, queueAircraftInstanceIds);
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
   dispatchNextRouteAircraftBulkOperationRequest();
   refreshRoutesModal(gameState.getState());
 }
@@ -3827,21 +3891,19 @@ function renderAirportInteractionActions(state, airport, actionsEl) {
       createAirportActionButton('Sell', () => emitAirportSellToGameRequest(airportId), { variant: 'sell' })
     );
 
-    if (!hasListing) {
-      actionsEl.appendChild(
-        createRoutesShortcutIconButton({
-          ariaLabel: 'Open Routes',
-          isDisabled: !isInActiveGame,
-          onClick: () => {
-            if (!isInActiveGame) {
-              return;
-            }
-
-            openRouteContextForAirport(airportId);
+    actionsEl.appendChild(
+      createRoutesShortcutIconButton({
+        ariaLabel: 'Open Routes',
+        isDisabled: !isInActiveGame || isOwnershipChangePending,
+        onClick: () => {
+          if (!isInActiveGame || isOwnershipChangePending) {
+            return;
           }
-        })
-      );
-    }
+
+          openRouteContextForAirport(airportId);
+        }
+      })
+    );
 
     return;
   }
@@ -4028,7 +4090,7 @@ function refreshShopAircraftInteractionPanel(state) {
   shopAircraftMaxLabelEl.disabled = isAircraftPurchasePending || aircraftMaxPurchasable < 1;
 
   shopAircraftBuyButtonEl.disabled = isBuyDisabled;
-  shopAircraftBuyButtonEl.textContent = isAircraftPurchasePending ? 'Buying...' : 'Buy';
+  shopAircraftBuyButtonEl.textContent = 'Buy';
 
   const normalizedSellQuantity = normalizeAircraftSellQuantity(aircraftSellQuantity, aircraftMaxSellable);
   const isSellInputFocused = document.activeElement === shopAircraftSellQuantityInputEl;
@@ -4047,7 +4109,7 @@ function refreshShopAircraftInteractionPanel(state) {
   shopAircraftSellQuantityInputEl.disabled = isAircraftSellPending;
   shopAircraftSellButtonEl.disabled =
     isAircraftSellPending || isAircraftSellQuotePending || !canSellQuantity;
-  shopAircraftSellButtonEl.textContent = isAircraftSellPending ? 'Selling...' : 'Sell';
+  shopAircraftSellButtonEl.textContent = 'Sell';
   shopAircraftOwnedLabelEl.textContent = `Owned ${INTEGER_FORMATTER.format(aircraftOwnedQuantity)}`;
   shopAircraftOwnedLabelEl.disabled =
     isAircraftSellPending || aircraftMaxSellable < 1;
@@ -5286,6 +5348,27 @@ socket.on('route:aircraft:assign:result', (result = {}) => {
     refreshRoutesModal(gameState.getState());
     return;
   }
+
+  if (!result.success) {
+    routeAircraftManagementFeedbackKind = 'error';
+    routeAircraftManagementErrorMessage = getRouteAircraftManagementResultMessage(result, 'Unable to assign aircraft.');
+    refreshRoutesModal(gameState.getState());
+    return;
+  }
+
+  routeAircraftManagementFeedbackKind = 'success';
+  routeAircraftManagementErrorMessage = '';
+  refreshRoutesModal(gameState.getState());
+});
+
+socket.on('route:aircraft:assign:bulk:result', (result = {}) => {
+  if (pendingRouteAircraftAssignAircraftInstanceId == null) {
+    return;
+  }
+
+  pendingRouteAircraftAssignAircraftInstanceId = null;
+  pendingRouteAircraftUnassignAircraftInstanceId = null;
+  routeAircraftBulkOperation = null;
 
   if (!result.success) {
     routeAircraftManagementFeedbackKind = 'error';

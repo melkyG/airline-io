@@ -256,7 +256,16 @@ class GameManager {
       return null;
     }
 
-    return PLAYER_COLOR_CATALOG.find((colorDefinition) => !lobby.colorAssignments.has(colorDefinition.colorId)) || null;
+    const availableColorDefinitions = PLAYER_COLOR_CATALOG.filter(
+      (colorDefinition) => !lobby.colorAssignments.has(colorDefinition.colorId)
+    );
+
+    if (availableColorDefinitions.length === 0) {
+      return null;
+    }
+
+    const randomIndex = Math.floor(Math.random() * availableColorDefinitions.length);
+    return availableColorDefinitions[randomIndex];
   }
 
   getAvailableColorIdsForLobby(lobby) {
@@ -1589,7 +1598,7 @@ class GameManager {
     return this.handleRouteRemoveRequest(socketId, routeId);
   }
 
-  handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId) {
+  handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId, editOperationId) {
     const player = this.players.get(socketId);
     if (!player || !player.gameId) {
       return {
@@ -1617,13 +1626,16 @@ class GameManager {
       };
     }
 
-    return game.assignAircraftToRoute(player.id, routeId, aircraftInstanceId);
+    return game.assignAircraftToRoute(player.id, routeId, aircraftInstanceId, editOperationId);
   }
 
   handleRouteAircraftAssignSocketRequest(socketId, payload) {
     const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
     const routeId = requestPayload ? requestPayload.routeId : undefined;
     const aircraftInstanceId = requestPayload ? requestPayload.aircraftInstanceId : undefined;
+    const editOperationId = requestPayload && typeof requestPayload.editOperationId === 'string'
+      ? requestPayload.editOperationId
+      : undefined;
 
     if (typeof routeId !== 'string' || routeId.trim().length === 0) {
       return {
@@ -1641,10 +1653,10 @@ class GameManager {
       };
     }
 
-    return this.handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId);
+    return this.handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId, editOperationId);
   }
 
-  handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId) {
+  handleRouteAircraftAssignBulkRequest(socketId, routeId, aircraftInstanceIds) {
     const player = this.players.get(socketId);
     if (!player || !player.gameId) {
       return {
@@ -1672,12 +1684,70 @@ class GameManager {
       };
     }
 
-    return game.unassignAircraftFromRoute(player.id, aircraftInstanceId);
+    return game.assignAircraftToRouteBulk(player.id, routeId, aircraftInstanceIds);
+  }
+
+  handleRouteAircraftAssignBulkSocketRequest(socketId, payload) {
+    const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
+    const routeId = requestPayload ? requestPayload.routeId : undefined;
+    const rawAircraftInstanceIds = requestPayload ? requestPayload.aircraftInstanceIds : undefined;
+
+    if (typeof routeId !== 'string' || routeId.trim().length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a valid routeId.'
+      };
+    }
+
+    if (!Array.isArray(rawAircraftInstanceIds) || rawAircraftInstanceIds.length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_REQUEST',
+        message: 'Request must include a non-empty aircraftInstanceIds array.'
+      };
+    }
+
+    return this.handleRouteAircraftAssignBulkRequest(socketId, routeId, rawAircraftInstanceIds);
+  }
+
+  handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId, editOperationId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    if (!gameId || gameId !== player.gameId) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    const game = this.games.get(gameId);
+    if (!game || !game.players.has(player.id)) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player is not in an active game.'
+      };
+    }
+
+    return game.unassignAircraftFromRoute(player.id, aircraftInstanceId, editOperationId);
   }
 
   handleRouteAircraftUnassignSocketRequest(socketId, payload) {
     const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
     const aircraftInstanceId = requestPayload ? requestPayload.aircraftInstanceId : undefined;
+    const editOperationId = requestPayload && typeof requestPayload.editOperationId === 'string'
+      ? requestPayload.editOperationId
+      : undefined;
 
     if (typeof aircraftInstanceId !== 'string' || aircraftInstanceId.trim().length === 0) {
       return {
@@ -1687,7 +1757,7 @@ class GameManager {
       };
     }
 
-    return this.handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId);
+    return this.handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId, editOperationId);
   }
 
   handleAircraftPurchaseRequest(socketId, aircraftCatalogId, quantity = 1) {

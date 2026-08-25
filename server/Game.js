@@ -2012,20 +2012,17 @@ class Game {
       : [];
 
     if (assignedAircraftInstanceIds.length === 0) {
-      const cleanupResult = this.removeRoutesWithAircraftCleanup([route]);
-      if (!cleanupResult.success) {
-        return cleanupResult;
-      }
-
-      const unassignedAircraftInstanceIds = cleanupResult.routeIdToAssignedAircraftIds.get(route.routeId) || [];
+      route.pendingRemoval = true;
+      route.reconfiguringModelCatalogIds = [];
+      route.reconfigurationReferenceAircraftInstanceIds = {};
+      route.pendingRemovalNotBeforeRealMs = Date.now() + 500;
       this.broadcastState();
 
       return {
         success: true,
-        code: 'OK',
+        code: 'ROUTE_REMOVAL_PENDING',
         routeId: route.routeId,
-        ownerPlayerId: route.ownerPlayerId,
-        unassignedAircraftInstanceIds
+        ownerPlayerId: route.ownerPlayerId
       };
     }
 
@@ -2453,10 +2450,26 @@ class Game {
       : [];
 
     if (assignedAircraftInstanceIds.length === 0) {
+      const notBeforeRealMs =
+        Number(route.pendingRemovalNotBeforeRealMs);
+
+      if (Date.now() < notBeforeRealMs) {
+        return {
+          success: true,
+          complete: false,
+          changed: false
+        };
+      }
+
+      const cleanupResult = this.removeRoutesWithAircraftCleanup([route]);
+      if (!cleanupResult.success) {
+        return cleanupResult;
+      }
+
       return {
         success: true,
         complete: true,
-        changed: false
+        changed: true
       };
     }
 
@@ -2788,7 +2801,7 @@ class Game {
     return { success: true, changed: true };
   }
 
-  assignAircraftToRoute(playerId, routeId, aircraftInstanceId) {
+  assignAircraftToRoute(playerId, routeId, aircraftInstanceId, editOperationId = undefined) {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
     const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
@@ -2946,7 +2959,230 @@ class Game {
     };
   }
 
-  unassignAircraftFromRoute(playerId, aircraftInstanceId) {
+  assignAircraftToRouteBulk(playerId, routeId, aircraftInstanceIds) {
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const normalizedRouteId = String(routeId || '').trim();
+
+    const player = players.find((candidate) => candidate.id === playerId);
+    if (!player) {
+      return {
+        success: false,
+        code: 'PLAYER_NOT_FOUND',
+        message: 'Player was not found in authoritative game state.'
+      };
+    }
+
+    const route = routes.find((candidate) => candidate && candidate.routeId === normalizedRouteId);
+    if (!route) {
+      return {
+        success: false,
+        code: 'ROUTE_NOT_FOUND',
+        message: 'Route was not found.'
+      };
+    }
+
+    if (String(route.ownerPlayerId) !== String(player.id)) {
+      return {
+        success: false,
+        code: 'NOT_ROUTE_OWNER',
+        message: 'Player does not own this route.'
+      };
+    }
+
+    if (route.pendingRemoval === true) {
+      return {
+        success: false,
+        code: 'ROUTE_REMOVAL_PENDING',
+        message: 'Route is pending removal and cannot be edited.'
+      };
+    }
+
+    if (!Array.isArray(aircraftInstanceIds) || aircraftInstanceIds.length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_AIRCRAFT_IDS',
+        message: 'Aircraft instance IDs must be a non-empty array.'
+      };
+    }
+
+    const normalizedAircraftInstanceIds = aircraftInstanceIds
+      .map((aircraftInstanceId) => String(aircraftInstanceId || '').trim())
+      .filter((aircraftInstanceId) => aircraftInstanceId.length > 0);
+
+    if (normalizedAircraftInstanceIds.length === 0) {
+      return {
+        success: false,
+        code: 'INVALID_AIRCRAFT_IDS',
+        message: 'Aircraft instance IDs must be a non-empty array.'
+      };
+    }
+
+    if (normalizedAircraftInstanceIds.length !== new Set(normalizedAircraftInstanceIds).size) {
+      return {
+        success: false,
+        code: 'DUPLICATE_AIRCRAFT_IDS',
+        message: 'Aircraft instance IDs must be unique.'
+      };
+    }
+
+    const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
+    const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
+      ? route.assignedAircraftInstanceIds
+      : [];
+
+    const validAircraft = [];
+    const seenCatalogIds = new Set();
+
+    for (const normalizedAircraftInstanceId of normalizedAircraftInstanceIds) {
+      const aircraft = ownedAircraft.find(
+        (candidate) => candidate && candidate.aircraftInstanceId === normalizedAircraftInstanceId
+      );
+      if (!aircraft) {
+        return {
+          success: false,
+          code: 'AIRCRAFT_NOT_FOUND',
+          message: 'Aircraft instance was not found.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (String(aircraft.ownerPlayerId) !== String(player.id)) {
+        return {
+          success: false,
+          code: 'NOT_AIRCRAFT_OWNER',
+          message: 'Player does not own this aircraft.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (aircraft.status !== OWNED_AIRCRAFT_STATUS.AVAILABLE) {
+        return {
+          success: false,
+          code: 'AIRCRAFT_NOT_AVAILABLE',
+          message: 'Aircraft is not available for assignment.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (aircraft.assignedRouteId !== null) {
+        return {
+          success: false,
+          code: 'AIRCRAFT_ALREADY_ASSIGNED',
+          message: 'Aircraft is already assigned to a route.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      const aircraftDefinition = AIRCRAFT_CATALOG_BY_ID[String(aircraft.aircraftCatalogId || '')];
+      const aircraftRangeKm = aircraftDefinition ? aircraftDefinition.rangeKm : null;
+      const aircraftCruiseSpeedKmH = aircraftDefinition ? aircraftDefinition.cruiseSpeedKmH : null;
+      const routeDistanceKm = Number(route.distanceKm);
+      if (
+        !aircraftDefinition ||
+        !Number.isFinite(aircraftRangeKm) ||
+        !Number.isFinite(routeDistanceKm) ||
+        aircraftRangeKm < routeDistanceKm
+      ) {
+        return {
+          success: false,
+          code: 'AIRCRAFT_RANGE_INSUFFICIENT',
+          message: 'Aircraft range is insufficient for this route.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (!Number.isFinite(aircraftCruiseSpeedKmH) || aircraftCruiseSpeedKmH <= 0) {
+        return {
+          success: false,
+          code: 'AIRCRAFT_SPEED_INVALID',
+          message: 'Aircraft cruise speed is invalid for flight timing calculations.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      if (assignedAircraftInstanceIds.includes(aircraft.aircraftInstanceId)) {
+        return {
+          success: false,
+          code: 'AIRCRAFT_ALREADY_ASSIGNED',
+          message: 'Aircraft is already assigned to this route.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      const existingFlightsForAircraft = flights.filter((flight) => {
+        if (!flight) {
+          return false;
+        }
+
+        return String(flight.aircraftInstanceId || '').trim() === normalizedAircraftInstanceId;
+      });
+
+      if (existingFlightsForAircraft.length > 0) {
+        return {
+          success: false,
+          code: existingFlightsForAircraft.length > 1 ? 'FLIGHT_DUPLICATE' : 'FLIGHT_ALREADY_EXISTS',
+          message:
+            existingFlightsForAircraft.length > 1
+              ? 'More than one flight exists for this aircraft instance.'
+              : 'Aircraft already has a flight record.',
+          aircraftInstanceId: normalizedAircraftInstanceId
+        };
+      }
+
+      validAircraft.push(aircraft);
+      seenCatalogIds.add(String(aircraft.aircraftCatalogId || '').trim());
+    }
+
+    if (seenCatalogIds.size !== 1) {
+      return {
+        success: false,
+        code: 'MIXED_AIRCRAFT_MODEL',
+        message: 'All requested aircraft must belong to the same model.'
+      };
+    }
+
+    const aircraftCatalogId = Array.from(seenCatalogIds)[0];
+
+    const lockedUntil = Number(route.modelEditLockedUntilRealMs?.[aircraftCatalogId]);
+    if (Number.isFinite(lockedUntil) && Date.now() < lockedUntil) {
+      return {
+        success: false,
+        code: 'MODEL_EDIT_LOCKED',
+        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.'
+      };
+    }
+
+    const beginResult = this.beginModelReconfiguration(route.routeId, aircraftCatalogId);
+    if (!beginResult.success) {
+      return beginResult;
+    }
+
+    route.assignedAircraftInstanceIds = assignedAircraftInstanceIds;
+
+    for (const aircraft of validAircraft) {
+      route.assignedAircraftInstanceIds.push(aircraft.aircraftInstanceId);
+      aircraft.status = OWNED_AIRCRAFT_STATUS.ASSIGNED;
+      aircraft.assignedRouteId = route.routeId;
+      flights.push(this.createReadyFlightRecord(route, aircraft));
+    }
+    this.authoritativeState.flights = flights;
+
+    this.broadcastState();
+
+    return {
+      success: true,
+      code: 'OK',
+      assignedCount: validAircraft.length,
+      routeId: route.routeId,
+      assignedAircraftInstanceIds: route.assignedAircraftInstanceIds.slice()
+    };
+  }
+
+  unassignAircraftFromRoute(playerId, aircraftInstanceId, editOperationId = undefined) {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
     const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
@@ -3265,7 +3501,7 @@ class Game {
             if (!route.modelEditLockedUntilRealMs) {
               route.modelEditLockedUntilRealMs = {};
             }
-            route.modelEditLockedUntilRealMs[aircraftCatalogId] = Date.now() + 1500;
+            route.modelEditLockedUntilRealMs[aircraftCatalogId] = Date.now() + 500;
           } else if (!rebuildResult.success) {
             console.error(
               `Reconfiguration schedule rebuild failed for route ${route.routeId}, model ${aircraftCatalogId}: ${rebuildResult.code} - ${rebuildResult.message}`
