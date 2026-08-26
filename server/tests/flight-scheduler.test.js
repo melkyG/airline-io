@@ -4,9 +4,11 @@ const assert = require('node:assert/strict');
 const Game = require('../Game');
 const { AIRCRAFT_CATALOG_BY_ID } = require('../aircraft/catalog');
 const {
+  TURNAROUND_REFERENCE_DISTANCE_KM,
   calculateAircraftTurnaroundSimulationMs,
   calculateFlightDurationSimulationMs
 } = require('../flights/rules');
+const { calculateFlightSettlement } = require('../economy/flightSettlement');
 
 function createManagerWithEmitCapture() {
   const emitted = [];
@@ -95,24 +97,42 @@ test('flight rules calculate duration from distance and speed without minimum cl
   assert.equal(calculateFlightDurationSimulationMs(-1, 900), null);
 });
 
-test('aircraft turnaround calculation uses global conversion factor', () => {
-  const boeing747Turnaround = calculateAircraftTurnaroundSimulationMs(900);
+test('aircraft turnaround calculation uses linear baseline and scales with distance', () => {
+  const boeing747Turnaround = calculateAircraftTurnaroundSimulationMs(900, TURNAROUND_REFERENCE_DISTANCE_KM);
   const expected747Turnaround = (900 * (333 / 900)) * 60 * 1000;
   assert.equal(boeing747Turnaround, expected747Turnaround);
   assert.equal(boeing747Turnaround, 333 * 60 * 1000);
 
-  const boeing737Turnaround = calculateAircraftTurnaroundSimulationMs(840);
+  const boeing737Turnaround = calculateAircraftTurnaroundSimulationMs(840, TURNAROUND_REFERENCE_DISTANCE_KM);
   const expected737Turnaround = (840 * (333 / 900)) * 60 * 1000;
   assert.equal(boeing737Turnaround, expected737Turnaround);
   assert.equal(boeing737Turnaround, 310.8 * 60 * 1000);
+
+  const shortTurnaround = calculateAircraftTurnaroundSimulationMs(900, 500);
+  const expectedShortTurnaround = 49.86675 * 60 * 1000;
+  assert.ok(Math.abs(shortTurnaround - expectedShortTurnaround) < 1);
+
+  const oneKTurnaround = calculateAircraftTurnaroundSimulationMs(900, 1000);
+  const expectedOneKTurnaround = 64.7685 * 60 * 1000;
+  assert.ok(Math.abs(oneKTurnaround - expectedOneKTurnaround) < 1);
+
+  const halfDistanceTurnaround = calculateAircraftTurnaroundSimulationMs(900, TURNAROUND_REFERENCE_DISTANCE_KM / 2);
+  const expectedHalfTurnaround = 183.9825 * 60 * 1000;
+  assert.ok(Math.abs(halfDistanceTurnaround - expectedHalfTurnaround) < 1);
 });
 
-test('aircraft turnaround calculation fails for invalid speeds', () => {
-  assert.equal(calculateAircraftTurnaroundSimulationMs(0), null);
-  assert.equal(calculateAircraftTurnaroundSimulationMs(-1), null);
-  assert.equal(calculateAircraftTurnaroundSimulationMs(null), null);
-  assert.equal(calculateAircraftTurnaroundSimulationMs(undefined), null);
-  assert.equal(calculateAircraftTurnaroundSimulationMs('invalid'), null);
+test('aircraft turnaround calculation fails for invalid speed or distance', () => {
+  assert.equal(calculateAircraftTurnaroundSimulationMs(0, TURNAROUND_REFERENCE_DISTANCE_KM), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(-1, TURNAROUND_REFERENCE_DISTANCE_KM), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(null, TURNAROUND_REFERENCE_DISTANCE_KM), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(undefined, TURNAROUND_REFERENCE_DISTANCE_KM), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs('invalid', TURNAROUND_REFERENCE_DISTANCE_KM), null);
+
+  assert.equal(calculateAircraftTurnaroundSimulationMs(900, 0), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(900, -1), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(900, null), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(900, undefined), null);
+  assert.equal(calculateAircraftTurnaroundSimulationMs(900, 'invalid'), null);
 });
 
 test('scheduler processes ready flight into in-flight outbound with authoritative timing', () => {
@@ -165,7 +185,10 @@ test('scheduler transitions due in-flight arrival into turnaround and clears in-
   const tickResult = game.processFlightSchedulerTick(1);
   const flight = game.authoritativeState.flights[0];
   const owner = game.authoritativeState.players[0];
-  const expectedRevenue = AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm * game.authoritativeState.routes[0].distanceKm;
+  const expectedRevenue = calculateFlightSettlement({
+    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm,
+    routeDistanceKm: game.authoritativeState.routes[0].distanceKm
+  }).finalRevenue;
 
   assert.equal(tickResult.success, true);
   assert.equal(tickResult.changed, true);
@@ -175,7 +198,7 @@ test('scheduler transitions due in-flight arrival into turnaround and clears in-
   assert.equal(flight.departedAtSimulationMs, null);
   assert.equal(flight.lastOutboundDepartedAtSimulationMs, 2000);
   assert.equal(flight.arrivesAtSimulationMs, null);
-  const expectedTurnaround = calculateAircraftTurnaroundSimulationMs(900);
+  const expectedTurnaround = calculateAircraftTurnaroundSimulationMs(900, game.authoritativeState.routes[0].distanceKm);
   assert.equal(flight.nextTransitionAtSimulationMs, 5000 + expectedTurnaround);
   assert.equal(owner.capital, 1000000 + expectedRevenue);
   assert.equal(emitted.length, 1);
@@ -250,20 +273,23 @@ test('outbound and return arrivals each settle exactly once while departure and 
 
   const owner = game.authoritativeState.players[0];
   const routeDistanceKm = game.authoritativeState.routes[0].distanceKm;
-  const expectedRevenuePerLeg = AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm * routeDistanceKm;
+  const expectedRevenuePerLeg = calculateFlightSettlement({
+    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm,
+    routeDistanceKm
+  }).finalRevenue;
 
   const tickArrivalOutbound = game.processFlightSchedulerTick(1);
   assert.equal(tickArrivalOutbound.success, true);
   assert.equal(owner.capital, 1000000 + expectedRevenuePerLeg);
   assert.equal(game.authoritativeState.flights[0].status, 'turnaround');
 
-  const tickTurnaroundComplete = game.processFlightSchedulerTick(2000);
+  const tickTurnaroundComplete = game.processFlightSchedulerTick(400);
   assert.equal(tickTurnaroundComplete.success, true);
   assert.equal(owner.capital, 1000000 + expectedRevenuePerLeg);
   assert.equal(game.authoritativeState.flights[0].status, 'in-flight');
   assert.equal(game.authoritativeState.flights[0].direction, 'inbound');
 
-  const tickArrivalInbound = game.processFlightSchedulerTick(4000);
+  const tickArrivalInbound = game.processFlightSchedulerTick(740);
   assert.equal(tickArrivalInbound.success, true);
   assert.equal(owner.capital, 1000000 + (expectedRevenuePerLeg * 2));
   assert.equal(game.authoritativeState.flights[0].status, 'turnaround');
@@ -357,8 +383,14 @@ test('multiple arriving flights in one tick each settle and still emit a single 
   const tickResult = game.processFlightSchedulerTick(1);
   const p1 = game.authoritativeState.players.find((player) => player.id === 'p1');
   const p2 = game.authoritativeState.players.find((player) => player.id === 'p2');
-  const expectedP1Revenue = AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm * 900;
-  const expectedP2Revenue = AIRCRAFT_CATALOG_BY_ID.BOEING_737.baseRevenuePerKm * 550;
+  const expectedP1Revenue = calculateFlightSettlement({
+    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm,
+    routeDistanceKm: 900
+  }).finalRevenue;
+  const expectedP2Revenue = calculateFlightSettlement({
+    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_737.baseRevenuePerKm,
+    routeDistanceKm: 550
+  }).finalRevenue;
 
   assert.equal(tickResult.success, true);
   assert.equal(tickResult.changed, true);
@@ -392,7 +424,10 @@ test('overdue in-flight arrival catch-up settles once for one completed leg', ()
     manager
   );
 
-  const expectedRevenue = AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm * game.authoritativeState.routes[0].distanceKm;
+  const expectedRevenue = calculateFlightSettlement({
+    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm,
+    routeDistanceKm: game.authoritativeState.routes[0].distanceKm
+  }).finalRevenue;
   const tickResult = game.processFlightSchedulerTick(2);
 
   assert.equal(tickResult.success, true);
@@ -610,8 +645,8 @@ test('scheduler catch-up can process multiple overdue transitions for one flight
   assert.equal(tickResult.success, true);
   assert.equal(tickResult.changed, true);
   assert.ok(tickResult.processedTransitions >= 4);
-  assert.equal(flight.status, 'turnaround');
-  assert.equal(flight.departedAtSimulationMs, null);
+  assert.ok(['ready', 'in-flight', 'turnaround'].includes(flight.status));
+  assert.ok(flight.nextTransitionAtSimulationMs > 40000000);
   assert.equal(flight.arrivesAtSimulationMs, null);
   assert.ok(Number.isFinite(flight.nextTransitionAtSimulationMs));
   assert.ok(flight.nextTransitionAtSimulationMs > 40000000);

@@ -1598,7 +1598,7 @@ class GameManager {
     return this.handleRouteRemoveRequest(socketId, routeId);
   }
 
-  handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId, editOperationId) {
+  handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId) {
     const player = this.players.get(socketId);
     if (!player || !player.gameId) {
       return {
@@ -1626,16 +1626,13 @@ class GameManager {
       };
     }
 
-    return game.assignAircraftToRoute(player.id, routeId, aircraftInstanceId, editOperationId);
+    return game.assignAircraftToRoute(player.id, routeId, aircraftInstanceId);
   }
 
   handleRouteAircraftAssignSocketRequest(socketId, payload) {
     const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
     const routeId = requestPayload ? requestPayload.routeId : undefined;
     const aircraftInstanceId = requestPayload ? requestPayload.aircraftInstanceId : undefined;
-    const editOperationId = requestPayload && typeof requestPayload.editOperationId === 'string'
-      ? requestPayload.editOperationId
-      : undefined;
 
     if (typeof routeId !== 'string' || routeId.trim().length === 0) {
       return {
@@ -1653,7 +1650,7 @@ class GameManager {
       };
     }
 
-    return this.handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId, editOperationId);
+    return this.handleRouteAircraftAssignRequest(socketId, routeId, aircraftInstanceId);
   }
 
   handleRouteAircraftAssignBulkRequest(socketId, routeId, aircraftInstanceIds) {
@@ -1711,7 +1708,7 @@ class GameManager {
     return this.handleRouteAircraftAssignBulkRequest(socketId, routeId, rawAircraftInstanceIds);
   }
 
-  handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId, editOperationId) {
+  handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId) {
     const player = this.players.get(socketId);
     if (!player || !player.gameId) {
       return {
@@ -1739,15 +1736,12 @@ class GameManager {
       };
     }
 
-    return game.unassignAircraftFromRoute(player.id, aircraftInstanceId, editOperationId);
+    return game.unassignAircraftFromRoute(player.id, aircraftInstanceId);
   }
 
   handleRouteAircraftUnassignSocketRequest(socketId, payload) {
     const requestPayload = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : null;
     const aircraftInstanceId = requestPayload ? requestPayload.aircraftInstanceId : undefined;
-    const editOperationId = requestPayload && typeof requestPayload.editOperationId === 'string'
-      ? requestPayload.editOperationId
-      : undefined;
 
     if (typeof aircraftInstanceId !== 'string' || aircraftInstanceId.trim().length === 0) {
       return {
@@ -1757,7 +1751,7 @@ class GameManager {
       };
     }
 
-    return this.handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId, editOperationId);
+    return this.handleRouteAircraftUnassignRequest(socketId, aircraftInstanceId);
   }
 
   handleRouteAircraftUnassignBulkRequest(socketId, routeId, aircraftInstanceIds) {

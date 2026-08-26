@@ -339,12 +339,12 @@ class FlightEngine {
         ? flight.arrivesAtSimulationMs
         : Math.min(normalizedDueAtSimulationMs, simulationNowMs);
 
-      const turnaroundDurationSimulationMs = calculateAircraftTurnaroundSimulationMs(cruiseSpeedKmH);
+      const turnaroundDurationSimulationMs = calculateAircraftTurnaroundSimulationMs(cruiseSpeedKmH, route.distanceKm);
       if (!Number.isFinite(turnaroundDurationSimulationMs) || turnaroundDurationSimulationMs <= 0) {
         return {
           success: false,
           code: 'TURNAROUND_DURATION_INVALID',
-          message: 'Turnaround duration could not be calculated from aircraft speed.',
+          message: 'Turnaround duration could not be calculated from aircraft speed and route distance.',
           flightId: transition.flightId
         };
       }
@@ -372,7 +372,7 @@ class FlightEngine {
 
         const lastOutboundDepartedAtSimulationMs = Number(flight.lastOutboundDepartedAtSimulationMs);
         if (Number.isFinite(lastOutboundDepartedAtSimulationMs)) {
-          const turnaroundDurationSimulationMs = calculateAircraftTurnaroundSimulationMs(cruiseSpeedKmH);
+          const turnaroundDurationSimulationMs = calculateAircraftTurnaroundSimulationMs(cruiseSpeedKmH, route.distanceKm);
           if (Number.isFinite(turnaroundDurationSimulationMs) && turnaroundDurationSimulationMs > 0) {
             const fullRoundTripDurationSimulationMs = (2 * flightDurationSimulationMs) + (2 * turnaroundDurationSimulationMs);
             if (Number.isFinite(fullRoundTripDurationSimulationMs) && fullRoundTripDurationSimulationMs > 0) {

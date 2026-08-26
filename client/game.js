@@ -285,6 +285,17 @@ function openRoutesModal({ openedFrom = ROUTES_MODAL_OPENED_FROM.HUD, entryAirpo
   refreshRoutesModal(gameState.getState());
 }
 
+function closeRouteAirportDropdowns() {
+  if (!isRouteOriginDropdownOpen && !isRouteDestinationDropdownOpen) {
+    return false;
+  }
+
+  isRouteOriginDropdownOpen = false;
+  isRouteDestinationDropdownOpen = false;
+  refreshRoutesModal(gameState.getState());
+  return true;
+}
+
 function openCreateRouteModal() {
   if (!RoutesModalState.isOpen) {
     return;
@@ -428,7 +439,7 @@ function closeCreateRouteModal() {
     closeRoutesModal();
     return;
   }
-
+  
   refreshRoutesModal(gameState.getState());
 }
 
@@ -2611,13 +2622,6 @@ function emitRouteRemoveRequest(routeId) {
   socket.emit('route:remove:request', { routeId });
 }
 
-function emitRouteAircraftAssignRequest(routeId, aircraftInstanceId, editOperationId) {
-  socket.emit('route:aircraft:assign:request', {
-    routeId,
-    aircraftInstanceId,
-    ...(editOperationId ? { editOperationId } : {})
-  });
-}
 
 function emitRouteAircraftAssignBulkRequest(routeId, aircraftInstanceIds) {
   socket.emit('route:aircraft:assign:bulk:request', {
@@ -2633,12 +2637,6 @@ function emitRouteAircraftUnassignBulkRequest(routeId, aircraftInstanceIds) {
   });
 }
 
-function emitRouteAircraftUnassignRequest(aircraftInstanceId, editOperationId) {
-  socket.emit('route:aircraft:unassign:request', {
-    aircraftInstanceId,
-    ...(editOperationId ? { editOperationId } : {})
-  });
-}
 
 function emitAirportListRequestWithPrompt(airportId) {
   const rawInput = window.prompt('Enter asking price', '');
@@ -2783,6 +2781,14 @@ function compareAirportsAlphabetically(leftAirport, rightAirport) {
   return leftCode.localeCompare(rightCode);
 }
 
+function normalizeAirportSearchText(value) {
+  return String(value || '')
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function getAirportSearchDocument(airport) {
   return [
     airport && airport.name,
@@ -2815,12 +2821,17 @@ function getOwnedAirportsForLocalPlayer(state) {
 }
 
 function getFilteredOwnedAirportsForRouteSelector(ownedAirports, rawSearchValue) {
-  const normalizedSearch = String(rawSearchValue || '').trim().toLocaleLowerCase();
-  if (!normalizedSearch) {
+  const searchTokens = normalizeAirportSearchText(rawSearchValue)
+    .split(/\s+/)
+    .filter(Boolean);
+  if (searchTokens.length === 0) {
     return ownedAirports;
   }
 
-  return ownedAirports.filter((airport) => getAirportSearchDocument(airport).includes(normalizedSearch));
+  return ownedAirports.filter((airport) => {
+    const searchDocument = normalizeAirportSearchText(getAirportSearchDocument(airport));
+    return searchTokens.every((token) => searchDocument.includes(token));
+  });
 }
 
 function getCanonicalRouteKeyForSelector(leftAirportId, rightAirportId) {
@@ -3628,41 +3639,6 @@ function syncRouteAircraftGroupRows({
   }
 }
 
-function dispatchNextRouteAircraftBulkOperationRequest() {
-  if (!routeAircraftBulkOperation || !Array.isArray(routeAircraftBulkOperation.remainingAircraftInstanceIds)) {
-    return;
-  }
-
-  if (routeAircraftBulkOperation.remainingAircraftInstanceIds.length === 0) {
-    routeAircraftManagementFeedbackKind = 'error';
-    routeAircraftManagementErrorMessage = '';
-    pendingRouteAircraftAssignAircraftInstanceId = null;
-    pendingRouteAircraftUnassignAircraftInstanceId = null;
-    routeAircraftBulkOperation = null;
-    refreshRoutesModal(gameState.getState());
-    return;
-  }
-
-  const nextAircraftInstanceId = routeAircraftBulkOperation.remainingAircraftInstanceIds[0];
-  if (!nextAircraftInstanceId) {
-    routeAircraftBulkOperation.remainingAircraftInstanceIds.shift();
-    dispatchNextRouteAircraftBulkOperationRequest();
-    return;
-  }
-
-  const editOperationId = routeAircraftBulkOperation.editOperationId;
-
-  if (routeAircraftBulkOperation.mode === 'unassign') {
-    pendingRouteAircraftAssignAircraftInstanceId = null;
-    pendingRouteAircraftUnassignAircraftInstanceId = nextAircraftInstanceId;
-    emitRouteAircraftUnassignRequest(nextAircraftInstanceId, editOperationId);
-    return;
-  }
-
-  pendingRouteAircraftUnassignAircraftInstanceId = null;
-  pendingRouteAircraftAssignAircraftInstanceId = nextAircraftInstanceId;
-  emitRouteAircraftAssignRequest(routeAircraftBulkOperation.routeId, nextAircraftInstanceId, editOperationId);
-}
 
 function startRouteAircraftBulkOperation({ mode, routeId, aircraftInstanceIds }) {
   const normalizedMode = mode === 'unassign' ? 'unassign' : 'assign';
@@ -3681,12 +3657,7 @@ function startRouteAircraftBulkOperation({ mode, routeId, aircraftInstanceIds })
   }
 
   routeAircraftBulkOperation = {
-    mode: normalizedMode,
-    routeId: normalizedRouteId,
-    editOperationId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
-    totalCount: queueAircraftInstanceIds.length,
-    completedCount: 0,
-    remainingAircraftInstanceIds: queueAircraftInstanceIds.slice()
+    mode: normalizedMode
   };
 
   routeAircraftManagementFeedbackKind = 'error';
@@ -3694,14 +3665,14 @@ function startRouteAircraftBulkOperation({ mode, routeId, aircraftInstanceIds })
 
   if (normalizedMode === 'assign') {
     pendingRouteAircraftUnassignAircraftInstanceId = null;
-    pendingRouteAircraftAssignAircraftInstanceId = queueAircraftInstanceIds[0] || '__BULK__';
+    pendingRouteAircraftAssignAircraftInstanceId = '__BULK__';
     emitRouteAircraftAssignBulkRequest(normalizedRouteId, queueAircraftInstanceIds);
     refreshRoutesModal(gameState.getState());
     return;
   }
 
   pendingRouteAircraftAssignAircraftInstanceId = null;
-  pendingRouteAircraftUnassignAircraftInstanceId = queueAircraftInstanceIds[0] || '__BULK__';
+  pendingRouteAircraftUnassignAircraftInstanceId = '__BULK__';
   emitRouteAircraftUnassignBulkRequest(normalizedRouteId, queueAircraftInstanceIds);
   refreshRoutesModal(gameState.getState());
 }
@@ -3768,13 +3739,18 @@ function getSelectedAircraftCatalogEntry(state) {
 }
 
 function getFilteredSortedAirports(state, rawSearchValue) {
-  const normalizedSearch = String(rawSearchValue || '').trim().toLocaleLowerCase();
+  const searchTokens = normalizeAirportSearchText(rawSearchValue)
+    .split(/\s+/)
+    .filter(Boolean);
   const airports = getAuthoritativeAirports(state).slice().sort(compareAirportsAlphabetically);
-  if (!normalizedSearch) {
+  if (searchTokens.length === 0) {
     return airports;
   }
 
-  return airports.filter((airport) => getAirportSearchDocument(airport).includes(normalizedSearch));
+  return airports.filter((airport) => {
+    const searchDocument = normalizeAirportSearchText(getAirportSearchDocument(airport));
+    return searchTokens.every((token) => searchDocument.includes(token));
+  });
 }
 
 function createShopAirportOptionButton(airport) {
@@ -4296,11 +4272,28 @@ createRouteModalOverlayEl.addEventListener('click', (event) => {
     return;
   }
 
+  const didClose = closeRouteAirportDropdowns();
+  if (didClose) {
+    event.stopPropagation();
+    return;
+  }
+
   event.stopPropagation();
   closeCreateRouteModal();
 });
 
 createRouteModalDialogEl.addEventListener('click', (event) => {
+  const isInsideOriginSelector = routesOriginSelectorFieldEl.contains(event.target);
+  const isInsideDestinationSelector = routesDestinationSelectorFieldEl.contains(event.target);
+
+  if (!isInsideOriginSelector && !isInsideDestinationSelector) {
+    const didClose = closeRouteAirportDropdowns();
+    if (didClose) {
+      event.stopPropagation();
+      return;
+    }
+  }
+
   event.stopPropagation();
 });
 
@@ -4406,14 +4399,8 @@ document.addEventListener('click', (event) => {
     const isInsideDestinationSelector = routesDestinationSelectorFieldEl.contains(event.target);
 
     if (!isInsideOriginSelector && !isInsideDestinationSelector) {
-      if (isRouteOriginDropdownOpen) {
-        isRouteOriginDropdownOpen = false;
-        shouldRefreshRoutes = true;
-      }
-
-      if (isRouteDestinationDropdownOpen) {
-        isRouteDestinationDropdownOpen = false;
-        shouldRefreshRoutes = true;
+      if (closeRouteAirportDropdowns()) {
+        event.stopPropagation();
       }
     }
   }
@@ -5311,66 +5298,6 @@ socket.on('route:remove:result', (result = {}) => {
   refreshRoutesModal(gameState.getState());
 });
 
-socket.on('route:aircraft:assign:result', (result = {}) => {
-  if (pendingRouteAircraftAssignAircraftInstanceId == null) {
-    return;
-  }
-
-  const expectedAircraftInstanceId = String(pendingRouteAircraftAssignAircraftInstanceId || '').trim();
-  const resultAircraftInstanceId = String(result && result.aircraftInstanceId ? result.aircraftInstanceId : '').trim();
-  if (resultAircraftInstanceId && expectedAircraftInstanceId && resultAircraftInstanceId !== expectedAircraftInstanceId) {
-    return;
-  }
-
-  pendingRouteAircraftAssignAircraftInstanceId = null;
-  pendingRouteAircraftUnassignAircraftInstanceId = null;
-
-  if (
-    routeAircraftBulkOperation &&
-    routeAircraftBulkOperation.mode === 'assign' &&
-    Array.isArray(routeAircraftBulkOperation.remainingAircraftInstanceIds)
-  ) {
-    const queueAircraftInstanceId = String(routeAircraftBulkOperation.remainingAircraftInstanceIds[0] || '').trim();
-    if (!queueAircraftInstanceId || queueAircraftInstanceId !== expectedAircraftInstanceId) {
-      routeAircraftBulkOperation = null;
-      routeAircraftManagementFeedbackKind = 'error';
-      routeAircraftManagementErrorMessage = 'Aircraft assignment queue was interrupted. Please try again.';
-      refreshRoutesModal(gameState.getState());
-      return;
-    }
-
-    if (!result.success) {
-      const completedCount = Number.isInteger(routeAircraftBulkOperation.completedCount)
-        ? routeAircraftBulkOperation.completedCount
-        : 0;
-      const totalCount = Number.isInteger(routeAircraftBulkOperation.totalCount)
-        ? routeAircraftBulkOperation.totalCount
-        : completedCount;
-      routeAircraftBulkOperation = null;
-      routeAircraftManagementFeedbackKind = 'error';
-      routeAircraftManagementErrorMessage = `${getRouteAircraftManagementResultMessage(result, 'Unable to assign aircraft.')} Assigned ${INTEGER_FORMATTER.format(completedCount)} of ${INTEGER_FORMATTER.format(totalCount)} before stopping.`;
-      refreshRoutesModal(gameState.getState());
-      return;
-    }
-
-    routeAircraftBulkOperation.remainingAircraftInstanceIds.shift();
-    routeAircraftBulkOperation.completedCount += 1;
-    dispatchNextRouteAircraftBulkOperationRequest();
-    refreshRoutesModal(gameState.getState());
-    return;
-  }
-
-  if (!result.success) {
-    routeAircraftManagementFeedbackKind = 'error';
-    routeAircraftManagementErrorMessage = getRouteAircraftManagementResultMessage(result, 'Unable to assign aircraft.');
-    refreshRoutesModal(gameState.getState());
-    return;
-  }
-
-  routeAircraftManagementFeedbackKind = 'success';
-  routeAircraftManagementErrorMessage = '';
-  refreshRoutesModal(gameState.getState());
-});
 
 socket.on('route:aircraft:assign:bulk:result', (result = {}) => {
   if (pendingRouteAircraftAssignAircraftInstanceId == null) {
@@ -5393,66 +5320,6 @@ socket.on('route:aircraft:assign:bulk:result', (result = {}) => {
   refreshRoutesModal(gameState.getState());
 });
 
-socket.on('route:aircraft:unassign:result', (result = {}) => {
-  if (pendingRouteAircraftUnassignAircraftInstanceId == null) {
-    return;
-  }
-
-  const expectedAircraftInstanceId = String(pendingRouteAircraftUnassignAircraftInstanceId || '').trim();
-  const resultAircraftInstanceId = String(result && result.aircraftInstanceId ? result.aircraftInstanceId : '').trim();
-  if (resultAircraftInstanceId && expectedAircraftInstanceId && resultAircraftInstanceId !== expectedAircraftInstanceId) {
-    return;
-  }
-
-  pendingRouteAircraftUnassignAircraftInstanceId = null;
-  pendingRouteAircraftAssignAircraftInstanceId = null;
-
-  if (
-    routeAircraftBulkOperation &&
-    routeAircraftBulkOperation.mode === 'unassign' &&
-    Array.isArray(routeAircraftBulkOperation.remainingAircraftInstanceIds)
-  ) {
-    const queueAircraftInstanceId = String(routeAircraftBulkOperation.remainingAircraftInstanceIds[0] || '').trim();
-    if (!queueAircraftInstanceId || queueAircraftInstanceId !== expectedAircraftInstanceId) {
-      routeAircraftBulkOperation = null;
-      routeAircraftManagementFeedbackKind = 'error';
-      routeAircraftManagementErrorMessage = 'Aircraft unassignment queue was interrupted. Please try again.';
-      refreshRoutesModal(gameState.getState());
-      return;
-    }
-
-    if (!result.success) {
-      const completedCount = Number.isInteger(routeAircraftBulkOperation.completedCount)
-        ? routeAircraftBulkOperation.completedCount
-        : 0;
-      const totalCount = Number.isInteger(routeAircraftBulkOperation.totalCount)
-        ? routeAircraftBulkOperation.totalCount
-        : completedCount;
-      routeAircraftBulkOperation = null;
-      routeAircraftManagementFeedbackKind = 'error';
-      routeAircraftManagementErrorMessage = `${getRouteAircraftManagementResultMessage(result, 'Unable to unassign aircraft.')} Unassigned ${INTEGER_FORMATTER.format(completedCount)} of ${INTEGER_FORMATTER.format(totalCount)} before stopping.`;
-      refreshRoutesModal(gameState.getState());
-      return;
-    }
-
-    routeAircraftBulkOperation.remainingAircraftInstanceIds.shift();
-    routeAircraftBulkOperation.completedCount += 1;
-    dispatchNextRouteAircraftBulkOperationRequest();
-    refreshRoutesModal(gameState.getState());
-    return;
-  }
-
-  if (!result.success) {
-    routeAircraftManagementFeedbackKind = 'error';
-    routeAircraftManagementErrorMessage = getRouteAircraftManagementResultMessage(result, 'Unable to unassign aircraft.');
-    refreshRoutesModal(gameState.getState());
-    return;
-  }
-
-  routeAircraftManagementFeedbackKind = 'success';
-  routeAircraftManagementErrorMessage = '';
-  refreshRoutesModal(gameState.getState());
-});
 
 socket.on('route:aircraft:unassign:bulk:result', (result = {}) => {
   if (pendingRouteAircraftUnassignAircraftInstanceId == null) {

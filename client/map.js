@@ -752,6 +752,332 @@
     };
   }
 
+  function resolveAircraftCruiseSpeedKmH(game, aircraftInstanceId) {
+    const ownedAircraft = game && Array.isArray(game.ownedAircraft) ? game.ownedAircraft : [];
+    const aircraft = ownedAircraft.find((candidate) => {
+      return candidate && String(candidate.aircraftInstanceId || '').trim() === String(aircraftInstanceId || '').trim();
+    });
+    const catalogId = aircraft && aircraft.aircraftCatalogId ? String(aircraft.aircraftCatalogId).trim() : '';
+    const catalog = game && Array.isArray(game.aircraftCatalog) ? game.aircraftCatalog : [];
+    const catalogEntry = catalog.find((candidate) => {
+      return candidate && String(candidate.aircraftCatalogId || '').trim() === catalogId;
+    });
+    return Number(catalogEntry && catalogEntry.cruiseSpeedKmH);
+  }
+
+  function resolveRouteDistanceKm(game, routeId) {
+    const routes = game && Array.isArray(game.routes) ? game.routes : [];
+    const route = routes.find((candidate) => {
+      return candidate && String(candidate.routeId || '').trim() === String(routeId || '').trim();
+    });
+    return Number(route && route.distanceKm);
+  }
+
+  function calculateClientFlightDurationSimulationMs(routeDistanceKm, cruiseSpeedKmH) {
+    const normalizedDistance = Number(routeDistanceKm);
+    const normalizedSpeed = Number(cruiseSpeedKmH);
+    if (
+      !Number.isFinite(normalizedDistance) ||
+      normalizedDistance < 0 ||
+      !Number.isFinite(normalizedSpeed) ||
+      normalizedSpeed <= 0
+    ) {
+      return null;
+    }
+    return (normalizedDistance / normalizedSpeed) * 60 * 60 * 1000;
+  }
+
+  function calculateClientTurnaroundSimulationMs(cruiseSpeedKmH, routeDistanceKm) {
+    const TURNAROUND_MINUTES_PER_KMH = 333 / 900;
+    const TURNAROUND_REFERENCE_DISTANCE_KM = 10000;
+    const TURNAROUND_DISTANCE_BASE_FACTOR = 0.105;
+    const normalizedSpeed = Number(cruiseSpeedKmH);
+    const normalizedDistance = Number(routeDistanceKm);
+    if (
+      !Number.isFinite(normalizedSpeed) ||
+      normalizedSpeed <= 0 ||
+      !Number.isFinite(normalizedDistance) ||
+      normalizedDistance <= 0
+    ) {
+      return null;
+    }
+    const baseTurnaroundMinutes = normalizedSpeed * TURNAROUND_MINUTES_PER_KMH;
+    const distanceRatio = normalizedDistance / TURNAROUND_REFERENCE_DISTANCE_KM;
+    const distanceFactor =
+      TURNAROUND_DISTANCE_BASE_FACTOR +
+      ((1 - TURNAROUND_DISTANCE_BASE_FACTOR) * distanceRatio);
+    const turnaroundMinutes = baseTurnaroundMinutes * distanceFactor;
+    return turnaroundMinutes * 60 * 1000;
+  }
+
+  function getProjectedInFlightLeg(flight, game, simNow) {
+    const flightId = String(flight && flight.flightId || '').trim();
+    const routeId = String(flight && flight.routeId || '').trim();
+    const aircraftInstanceId = String(flight && flight.aircraftInstanceId || '').trim();
+    const status = String(flight && flight.status || '').trim();
+    const direction = String(flight && flight.direction || '').trim();
+
+    if (!flightId || !routeId || !aircraftInstanceId) {
+      return null;
+    }
+
+    const routes = game && Array.isArray(game.routes) ? game.routes : [];
+    const route = routes.find((candidate) => {
+      return candidate && String(candidate.routeId || '').trim() === routeId;
+    });
+    const ownedAircraft = game && Array.isArray(game.ownedAircraft) ? game.ownedAircraft : [];
+    const aircraft = ownedAircraft.find((candidate) => {
+      return candidate && String(candidate.aircraftInstanceId || '').trim() === aircraftInstanceId;
+    });
+    if (!route || !aircraft) {
+      return null;
+    }
+
+    const distanceKm = resolveRouteDistanceKm(game, routeId);
+    const cruiseSpeedKmH = resolveAircraftCruiseSpeedKmH(game, aircraftInstanceId);
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0 || !Number.isFinite(cruiseSpeedKmH) || cruiseSpeedKmH <= 0) {
+      return null;
+    }
+
+    const flightDuration = calculateClientFlightDurationSimulationMs(distanceKm, cruiseSpeedKmH);
+    const turnaround = calculateClientTurnaroundSimulationMs(cruiseSpeedKmH, distanceKm);
+    if (!Number.isFinite(flightDuration) || flightDuration <= 0 || !Number.isFinite(turnaround) || turnaround <= 0) {
+      return null;
+    }
+
+    const fullRoundTrip = (2 * flightDuration) + (2 * turnaround);
+    if (fullRoundTrip <= 0) {
+      return null;
+    }
+
+    const aircraftCatalogId = String(aircraft.aircraftCatalogId || '').trim();
+    const reconfiguringModelCatalogIds = Array.isArray(route.reconfiguringModelCatalogIds)
+      ? route.reconfiguringModelCatalogIds
+      : [];
+    const isReconfiguring = reconfiguringModelCatalogIds.some((candidateId) => {
+      return String(candidateId || '').trim() === aircraftCatalogId;
+    });
+
+    const lastOutbound = Number(flight && flight.lastOutboundDepartedAtSimulationMs);
+    const nextTransition = Number(flight && flight.nextTransitionAtSimulationMs);
+    let outboundAnchor = null;
+
+    if (status === 'ready') {
+      if (isReconfiguring) {
+        return null;
+      }
+      if (Number.isFinite(nextTransition)) {
+        if (simNow < nextTransition) {
+          return null;
+        }
+        outboundAnchor = nextTransition;
+      } else {
+        outboundAnchor = Number.isFinite(lastOutbound) ? lastOutbound : null;
+      }
+    } else if (status === 'turnaround') {
+      if (Number.isFinite(nextTransition)) {
+        if (simNow < nextTransition) {
+          return null;
+        }
+        if (direction === 'outbound') {
+          outboundAnchor = nextTransition - flightDuration - turnaround;
+        } else if (direction === 'inbound') {
+          if (isReconfiguring) {
+            return null;
+          }
+          outboundAnchor = nextTransition;
+        } else {
+          outboundAnchor = Number.isFinite(lastOutbound) ? lastOutbound : null;
+        }
+      } else {
+        if (direction === 'inbound' && isReconfiguring) {
+          return null;
+        }
+        outboundAnchor = Number.isFinite(lastOutbound) ? lastOutbound : null;
+      }
+    } else {
+      outboundAnchor = Number.isFinite(lastOutbound) ? lastOutbound : null;
+    }
+
+    if (!Number.isFinite(outboundAnchor) || simNow < outboundAnchor) {
+      return null;
+    }
+
+    const elapsed = simNow - outboundAnchor;
+    const phase = elapsed % fullRoundTrip;
+    const cycleOffset = Math.floor(elapsed / fullRoundTrip) * fullRoundTrip;
+
+    let legDirection = null;
+    let legDeparture = null;
+    let legArrival = null;
+
+    if (phase < flightDuration) {
+      legDirection = 'outbound';
+      legDeparture = outboundAnchor + cycleOffset;
+      legArrival = legDeparture + flightDuration;
+    } else if (phase < flightDuration + turnaround) {
+      return null;
+    } else if (phase < (2 * flightDuration) + turnaround) {
+      legDirection = 'inbound';
+      legDeparture = outboundAnchor + cycleOffset + flightDuration + turnaround;
+      legArrival = legDeparture + flightDuration;
+    } else {
+      return null;
+    }
+
+    const originAirportId = legDirection === 'outbound'
+      ? route.originAirportId
+      : route.destinationAirportId;
+    const destinationAirportId = legDirection === 'outbound'
+      ? route.destinationAirportId
+      : route.originAirportId;
+
+    if (!originAirportId || !destinationAirportId) {
+      return null;
+    }
+
+    return {
+      flightId,
+      ownerPlayerId: flight.ownerPlayerId,
+      routeId,
+      aircraftInstanceId,
+      originAirportId,
+      destinationAirportId,
+      direction: legDirection,
+      departedAtSimulationMs: legDeparture,
+      arrivesAtSimulationMs: legArrival
+    };
+  }
+
+  function calculateFlightDotPosition(flight, simNow, airportLookupById, routeGeometryLookup) {
+    const originAirportId = String(flight && flight.originAirportId || '').trim();
+    const destinationAirportId = String(flight && flight.destinationAirportId || '').trim();
+    const departedAtSimulationMs = Number(flight && flight.departedAtSimulationMs);
+    const arrivesAtSimulationMs = Number(flight && flight.arrivesAtSimulationMs);
+
+    if (
+      !originAirportId ||
+      !destinationAirportId ||
+      !Number.isFinite(departedAtSimulationMs) ||
+      !Number.isFinite(arrivesAtSimulationMs) ||
+      arrivesAtSimulationMs <= departedAtSimulationMs
+    ) {
+      return null;
+    }
+
+    const originAirport = airportLookupById.get(originAirportId);
+    const destinationAirport = airportLookupById.get(destinationAirportId);
+    if (!originAirport || !destinationAirport) {
+      return null;
+    }
+
+    const originLat = Number(originAirport.lat);
+    const originLng = Number(originAirport.lng);
+    const destinationLat = Number(destinationAirport.lat);
+    const destinationLng = Number(destinationAirport.lng);
+    if (
+      !Number.isFinite(originLat) ||
+      !Number.isFinite(originLng) ||
+      !Number.isFinite(destinationLat) ||
+      !Number.isFinite(destinationLng)
+    ) {
+      return null;
+    }
+
+    const rawProgress = clamp01(
+      (simNow - departedAtSimulationMs) / (arrivesAtSimulationMs - departedAtSimulationMs)
+    );
+    const easedProgress = easeFlightProgress(rawProgress);
+    let lng = originLng + ((destinationLng - originLng) * easedProgress);
+    let lat = originLat + ((destinationLat - originLat) * easedProgress);
+
+    if (easedProgress > 0 && easedProgress < 1) {
+      let fallbackUsed = false;
+
+      try {
+        const lookupResult = resolveFlightRouteGeometrySegments(flight, routeGeometryLookup);
+        const routeGeometrySegments =
+          lookupResult && Array.isArray(lookupResult.segments) && lookupResult.segments.length > 0
+            ? lookupResult.segments
+            : (typeof buildGreatCircleRouteSegments === 'function'
+              ? buildGreatCircleRouteSegments(
+                  { lat: originLat, lng: originLng },
+                  { lat: destinationLat, lng: destinationLng }
+                )
+              : []);
+        const routePosition = getFlightPositionAlongRouteGeometry(routeGeometrySegments, easedProgress);
+
+        if (routePosition && Number.isFinite(routePosition.lng) && Number.isFinite(routePosition.lat)) {
+          lng = routePosition.lng;
+          lat = routePosition.lat;
+        } else {
+          fallbackUsed = true;
+        }
+      } catch (error) {
+        fallbackUsed = true;
+        if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+          const flightId = String(flight && flight.flightId || '').trim();
+          const routeId = String(flight && flight.routeId || '').trim();
+          const errorMessage = error && typeof error === 'object' && 'message' in error
+            ? String(error.message)
+            : String(error);
+
+          console.warn('[flight-route-geometry:fallback]', {
+            flightId,
+            routeId,
+            originAirportId,
+            destinationAirportId,
+            reason: errorMessage
+          });
+        }
+      }
+
+      if (fallbackUsed) {
+        lng = originLng + ((destinationLng - originLng) * easedProgress);
+        lat = originLat + ((destinationLat - originLat) * easedProgress);
+      }
+    }
+
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
+      lng = originLng + ((destinationLng - originLng) * easedProgress);
+      lat = originLat + ((destinationLat - originLat) * easedProgress);
+    }
+
+    return {
+      lng,
+      lat
+    };
+  }
+
+  function getFlightDot(flight, game, simNow, playersById, airportLookupById, routeGeometryLookup) {
+    if (!flight || !flight.flightId) {
+      return null;
+    }
+
+    const flightId = String(flight.flightId || '').trim();
+    const status = String(flight.status || '').trim();
+    let dotFlight = flight;
+
+    if (status !== 'in-flight') {
+      dotFlight = getProjectedInFlightLeg(flight, game, simNow);
+      if (!dotFlight) {
+        return null;
+      }
+    }
+
+    const dotPosition = calculateFlightDotPosition(dotFlight, simNow, airportLookupById, routeGeometryLookup);
+    if (!dotPosition) {
+      return null;
+    }
+
+    return {
+      flightId,
+      colorHex: resolvePlayerColorHexById(flight.ownerPlayerId, playersById, FLIGHT_DOT_COLOR),
+      lng: dotPosition.lng,
+      lat: dotPosition.lat
+    };
+  }
+
   function getDrawableFlights(gameSnapshot, renderableRoutes = [], realNowMs = Date.now()) {
     const game = gameSnapshot && typeof gameSnapshot === 'object' ? gameSnapshot : null;
     if (!game) {
@@ -772,119 +1098,10 @@
     }
 
     return flights.reduce((drawableFlights, flight) => {
-      if (!flight || String(flight.status || '') !== 'in-flight') {
-        return drawableFlights;
+      const dot = getFlightDot(flight, game, simulationNowGameMs, playersById, airportLookupById, routeGeometryLookup);
+      if (dot) {
+        drawableFlights.push(dot);
       }
-
-      const flightId = String(flight.flightId || '').trim();
-      const originAirportId = String(flight.originAirportId || '').trim();
-      const destinationAirportId = String(flight.destinationAirportId || '').trim();
-      const departedAtSimulationMs = Number(flight.departedAtSimulationMs);
-      const arrivesAtSimulationMs = Number(flight.arrivesAtSimulationMs);
-
-      if (
-        !flightId ||
-        !originAirportId ||
-        !destinationAirportId ||
-        !Number.isFinite(departedAtSimulationMs) ||
-        !Number.isFinite(arrivesAtSimulationMs) ||
-        arrivesAtSimulationMs <= departedAtSimulationMs
-      ) {
-        return drawableFlights;
-      }
-
-      const originAirport = airportLookupById.get(originAirportId);
-      const destinationAirport = airportLookupById.get(destinationAirportId);
-      if (!originAirport || !destinationAirport) {
-        return drawableFlights;
-      }
-
-      const originLat = Number(originAirport.lat);
-      const originLng = Number(originAirport.lng);
-      const destinationLat = Number(destinationAirport.lat);
-      const destinationLng = Number(destinationAirport.lng);
-      if (
-        !Number.isFinite(originLat) ||
-        !Number.isFinite(originLng) ||
-        !Number.isFinite(destinationLat) ||
-        !Number.isFinite(destinationLng)
-      ) {
-        return drawableFlights;
-      }
-
-      const rawProgress = clamp01(
-        (simulationNowGameMs - departedAtSimulationMs) / (arrivesAtSimulationMs - departedAtSimulationMs)
-      );
-      const easedProgress = easeFlightProgress(rawProgress);
-      const colorHex = resolvePlayerColorHexById(flight.ownerPlayerId, playersById, FLIGHT_DOT_COLOR);
-
-      let lng = originLng + ((destinationLng - originLng) * easedProgress);
-      let lat = originLat + ((destinationLat - originLat) * easedProgress);
-
-      if (easedProgress <= 0) {
-        lng = originLng;
-        lat = originLat;
-      } else if (easedProgress >= 1) {
-        lng = destinationLng;
-        lat = destinationLat;
-      } else {
-        let fallbackUsed = false;
-
-        try {
-          const lookupResult = resolveFlightRouteGeometrySegments(flight, routeGeometryLookup);
-          const routeGeometrySegments =
-            lookupResult && Array.isArray(lookupResult.segments) && lookupResult.segments.length > 0
-              ? lookupResult.segments
-              : (typeof buildGreatCircleRouteSegments === 'function'
-                ? buildGreatCircleRouteSegments(
-                    { lat: originLat, lng: originLng },
-                    { lat: destinationLat, lng: destinationLng }
-                  )
-                : []);
-          const routePosition = getFlightPositionAlongRouteGeometry(routeGeometrySegments, easedProgress);
-
-          if (routePosition && Number.isFinite(routePosition.lng) && Number.isFinite(routePosition.lat)) {
-            lng = routePosition.lng;
-            lat = routePosition.lat;
-          } else {
-            fallbackUsed = true;
-          }
-        } catch (error) {
-          fallbackUsed = true;
-          if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-            const routeId = String(flight.routeId || '').trim();
-            const errorMessage = error && typeof error === 'object' && 'message' in error
-              ? String(error.message)
-              : String(error);
-
-            console.warn('[flight-route-geometry:fallback]', {
-              flightId,
-              routeId,
-              originAirportId,
-              destinationAirportId,
-              reason: errorMessage
-            });
-          }
-        }
-
-        if (fallbackUsed) {
-          lng = originLng + ((destinationLng - originLng) * easedProgress);
-          lat = originLat + ((destinationLat - originLat) * easedProgress);
-        }
-      }
-
-      if (!Number.isFinite(lng) || !Number.isFinite(lat)) {
-        lng = originLng + ((destinationLng - originLng) * easedProgress);
-        lat = originLat + ((destinationLat - originLat) * easedProgress);
-      }
-
-      drawableFlights.push({
-        flightId,
-        colorHex,
-        lng,
-        lat
-      });
-
       return drawableFlights;
     }, []);
   }

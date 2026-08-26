@@ -2725,7 +2725,11 @@ class Game {
       delete reconfigurationReferenceAircraftInstanceIds[normalizedAircraftCatalogId];
       route.reconfigurationReferenceAircraftInstanceIds = reconfigurationReferenceAircraftInstanceIds;
 
-      return { success: true, changed: true };
+      if (route.modelEditLockedUntilRealMs) {
+        delete route.modelEditLockedUntilRealMs[normalizedAircraftCatalogId];
+      }
+
+      return { success: true, changed: true, rosterCount: 0 };
     }
 
     const routeOriginAirportId = String(route.originAirportId || '').trim();
@@ -2798,10 +2802,10 @@ class Game {
     delete reconfigurationReferenceAircraftInstanceIds[normalizedAircraftCatalogId];
     route.reconfigurationReferenceAircraftInstanceIds = reconfigurationReferenceAircraftInstanceIds;
 
-    return { success: true, changed: true };
+    return { success: true, changed: true, rosterCount: effectiveRosterAircraft.length };
   }
 
-  assignAircraftToRoute(playerId, routeId, aircraftInstanceId, editOperationId = undefined) {
+  assignAircraftToRoute(playerId, routeId, aircraftInstanceId) {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
     const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
@@ -3182,7 +3186,7 @@ class Game {
     };
   }
 
-  unassignAircraftFromRoute(playerId, aircraftInstanceId, editOperationId = undefined) {
+  unassignAircraftFromRoute(playerId, aircraftInstanceId) {
     const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
     const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
@@ -3721,14 +3725,12 @@ class Game {
 
           if (rebuildResult.success && rebuildResult.changed) {
             anyRebuildChanged = true;
-            if (!route.modelEditLockedUntilRealMs) {
-              route.modelEditLockedUntilRealMs = {};
+            if (Number(rebuildResult.rosterCount) > 0) {
+              if (!route.modelEditLockedUntilRealMs) {
+                route.modelEditLockedUntilRealMs = {};
+              }
+              route.modelEditLockedUntilRealMs[aircraftCatalogId] = Date.now() + 500;
             }
-            route.modelEditLockedUntilRealMs[aircraftCatalogId] = Date.now() + 500;
-          } else if (!rebuildResult.success) {
-            console.error(
-              `Reconfiguration schedule rebuild failed for route ${route.routeId}, model ${aircraftCatalogId}: ${rebuildResult.code} - ${rebuildResult.message}`
-            );
           }
         }
       }
@@ -3876,7 +3878,10 @@ class Game {
         activeFlightsCount: assignedAircraftInstanceIds.length,
         isReconfiguring,
         pendingRemoval,
-        modelEditLockedUntilRealMs
+        modelEditLockedUntilRealMs,
+        reconfiguringModelCatalogIds: Array.isArray(reconfiguringModelCatalogIds)
+          ? reconfiguringModelCatalogIds.slice()
+          : []
       };
     });
   }
@@ -3885,8 +3890,7 @@ class Game {
     const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
 
     return flights.map((flight) => {
-      const { lastOutboundDepartedAtSimulationMs, ...publicFlight } = flight;
-      return publicFlight;
+      return { ...flight };
     });
   }
 

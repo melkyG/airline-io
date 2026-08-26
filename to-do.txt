@@ -1,9 +1,9 @@
 
 - client reconnect (8 sec limit) 
-- unasiggning big bulk then exiting modal interferes with processing of bulk. after modal is closed not all aircraft from the bulk got unassigned
 - make route length affect turnaround time
 - fix airport distribution (not all expensive ones)
 - crop map
+-
 
 So from the user’s perspective, bulk unassign already behaves correctly, and we don’t gain much by adding a separate atomic bulk-unassign endpoint right now.
 

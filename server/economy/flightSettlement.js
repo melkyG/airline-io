@@ -1,3 +1,6 @@
+const REVENUE_DISTANCE_REFERENCE_KM = 10000;
+const REVENUE_DISTANCE_EXPONENT = 1.015;
+
 function calculateFlightSettlement({
   baseRevenuePerKm,
   routeDistanceKm
@@ -20,12 +23,15 @@ function calculateFlightSettlement({
     };
   }
 
-  const baseRevenue = normalizedBaseRevenuePerKm * normalizedRouteDistanceKm;
+  const distanceRatio = normalizedRouteDistanceKm / REVENUE_DISTANCE_REFERENCE_KM;
+  const scaledDistanceKm =
+    REVENUE_DISTANCE_REFERENCE_KM * Math.pow(distanceRatio, REVENUE_DISTANCE_EXPONENT);
+  const finalRevenue = normalizedBaseRevenuePerKm * scaledDistanceKm;
 
   return {
     success: true,
-    baseRevenue,
-    finalRevenue: baseRevenue
+    baseRevenue: finalRevenue,
+    finalRevenue
   };
 }
 
