@@ -6,6 +6,7 @@ const { createGame } = require('./gameFactory');
 const { AIRCRAFT_CATALOG_BY_ID } = require('./aircraft/catalog');
 const { FULL_AIRPORT_CATALOG } = require('./airports/catalog');
 const { PLAYER_COLOR_CATALOG, PLAYER_COLOR_BY_ID } = require('./colors/palette');
+const PerfDiagnostics = require('./diagnostics/perfDiagnostics');
 
 const AIRPORT_CATALOG_BY_ID = Object.freeze(
   FULL_AIRPORT_CATALOG.reduce((lookup, airport) => {
@@ -208,6 +209,8 @@ class GameManager {
       setTimeout,
       clearTimeout
     };
+    this.perfDiagnostics = new PerfDiagnostics(this);
+    this.perfDiagnostics.start();
   }
 
   registerConnection(socket) {
@@ -936,6 +939,10 @@ class GameManager {
       }
 
       this.games.delete(gameId);
+      if (this.perfDiagnostics) {
+        this.perfDiagnostics.logGameDestroy(game, reason);
+        this.perfDiagnostics.removeGame(gameId);
+      }
       this.broadcastLobbyPreviews();
       return true;
     } finally {
@@ -945,6 +952,13 @@ class GameManager {
 
   handleGameParticipantExit(socketId, { isDisconnect = false } = {}) {
     const player = this.players.get(socketId);
+    if (this.perfDiagnostics && player && player.socket) {
+      this.perfDiagnostics.logSocketEvent(
+        player.socket,
+        isDisconnect ? 'player-disconnect' : 'player-leave',
+        { reason: isDisconnect ? 'disconnect' : 'leave' }
+      );
+    }
     if (!player || !player.gameId) {
       return { success: false, code: 'PLAYER_NOT_IN_GAME', message: 'Player is not in an active game.' };
     }
@@ -1933,6 +1947,64 @@ class GameManager {
     return game.sellAircraftToGame(player.id, aircraftCatalogId, quantity);
   }
 
+  handleFinanceHistoryRequest(socketId) {
+    const player = this.players.get(socketId);
+    if (!player || !player.gameId) {
+      return {
+        ok: false,
+        error: 'Player is not in an active game.'
+      };
+    }
+
+    const gameId = this.playerGameIds.get(socketId) || player.gameId;
+    const game = gameId ? this.games.get(gameId) : null;
+    if (!game) {
+      return {
+        ok: false,
+        error: 'Game is not available.'
+      };
+    }
+
+    const historyByPlayerId = game.financeHistoryByPlayerId && typeof game.financeHistoryByPlayerId === 'object'
+      ? game.financeHistoryByPlayerId
+      : {};
+    const playerHistory = Array.isArray(historyByPlayerId[String(player.id)])
+      ? historyByPlayerId[String(player.id)]
+      : [];
+
+    const samples = playerHistory.map((sample) => ({
+      worldElapsedSimulationMs: Number.isFinite(sample && sample.worldElapsedSimulationMs)
+        ? sample.worldElapsedSimulationMs
+        : null,
+      cash: Number.isFinite(sample && sample.cash) ? sample.cash : 0,
+      netWorth: Number.isFinite(sample && sample.netWorth) ? sample.netWorth : 0
+    }));
+
+    return { ok: true, samples };
+  }
+
+  emitFinanceSampleToPlayer(playerId, sample) {
+    if (typeof playerId !== 'string' || playerId.trim().length === 0) {
+      return false;
+    }
+
+    const player = this.players.get(playerId);
+    if (!player || player.isBot || !player.connected) {
+      return false;
+    }
+
+    const payload = {
+      worldElapsedSimulationMs: Number.isFinite(sample && sample.worldElapsedSimulationMs)
+        ? sample.worldElapsedSimulationMs
+        : null,
+      cash: Number.isFinite(sample && sample.cash) ? sample.cash : 0,
+      netWorth: Number.isFinite(sample && sample.netWorth) ? sample.netWorth : 0
+    };
+
+    this.io.to(playerId).emit('finance:history:sample', payload);
+    return true;
+  }
+
   emitGameEventToPlayer(socketId, eventType, data, options = {}) {
     if (typeof socketId !== 'string' || socketId.trim().length === 0) {
       return false;
@@ -1942,9 +2014,23 @@ class GameManager {
       return false;
     }
 
+    const player = this.players.get(socketId);
+    const resolvedGameId =
+      options.gameId ||
+      (player && player.gameId) ||
+      this.playerGameIds.get(socketId) ||
+      null;
+    const game = resolvedGameId ? this.games.get(resolvedGameId) : null;
+    const simulationNowMs = game ? game.getSimulationTimeMs() : null;
+    const worldElapsedSimulationMs =
+      game && Number.isFinite(simulationNowMs)
+        ? game.getWorldElapsedSimulationMs(simulationNowMs)
+        : null;
+
     const payload = {
       type: eventType,
       occurredAt: Number.isFinite(options.occurredAt) ? options.occurredAt : Date.now(),
+      worldElapsedSimulationMs,
       gameId: options.gameId || null,
       actorPlayerId: options.actorPlayerId || null,
       data: data && typeof data === 'object' ? { ...data } : data
@@ -2041,6 +2127,9 @@ class GameManager {
   }
 
   shutdown() {
+    if (this.perfDiagnostics) {
+      this.perfDiagnostics.stop();
+    }
     this.lobbies.forEach((lobby) => {
       if (lobby.countdownInterval) {
         clearInterval(lobby.countdownInterval);

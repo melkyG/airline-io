@@ -5,21 +5,36 @@ const Game = require('../Game');
 const { AIRCRAFT_CATALOG_BY_ID } = require('../aircraft/catalog');
 const {
   TURNAROUND_REFERENCE_DISTANCE_KM,
+  MAX_FLIGHT_TRANSITIONS_PER_TICK,
   calculateAircraftTurnaroundSimulationMs,
   calculateFlightDurationSimulationMs
 } = require('../flights/rules');
 const { calculateFlightSettlement } = require('../economy/flightSettlement');
+
+function expectedSettledRevenue(game, route, baseRevenuePerKm, simulationNowMs = 0) {
+  const baseRevenue = calculateFlightSettlement({
+    baseRevenuePerKm,
+    routeDistanceKm: route.distanceKm
+  }).finalRevenue;
+  return (
+    baseRevenue *
+    game.resolveRouteCountryProfitFactor(route, simulationNowMs) *
+    game.resolveRouteAirportValueFactor(route)
+  );
+}
 
 function createManagerWithEmitCapture() {
   const emitted = [];
   const manager = {
     io: {
       to(roomName) {
-        return {
+        const room = {
           emit(eventName, payload) {
             emitted.push({ roomName, eventName, payload });
           }
         };
+        room.volatile = room;
+        return room;
       }
     }
   };
@@ -185,10 +200,11 @@ test('scheduler transitions due in-flight arrival into turnaround and clears in-
   const tickResult = game.processFlightSchedulerTick(1);
   const flight = game.authoritativeState.flights[0];
   const owner = game.authoritativeState.players[0];
-  const expectedRevenue = calculateFlightSettlement({
-    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm,
-    routeDistanceKm: game.authoritativeState.routes[0].distanceKm
-  }).finalRevenue;
+  const expectedRevenue = expectedSettledRevenue(
+    game,
+    game.authoritativeState.routes[0],
+    AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm
+  );
 
   assert.equal(tickResult.success, true);
   assert.equal(tickResult.changed, true);
@@ -272,28 +288,37 @@ test('outbound and return arrivals each settle exactly once while departure and 
   );
 
   const owner = game.authoritativeState.players[0];
-  const routeDistanceKm = game.authoritativeState.routes[0].distanceKm;
-  const expectedRevenuePerLeg = calculateFlightSettlement({
-    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm,
-    routeDistanceKm
-  }).finalRevenue;
+  const expectedRevenuePerLeg = expectedSettledRevenue(
+    game,
+    game.authoritativeState.routes[0],
+    AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm
+  );
 
   const tickArrivalOutbound = game.processFlightSchedulerTick(1);
   assert.equal(tickArrivalOutbound.success, true);
-  assert.equal(owner.capital, 1000000 + expectedRevenuePerLeg);
+  assert.ok(Math.abs(owner.capital - (1000000 + expectedRevenuePerLeg)) < 1e-6);
   assert.equal(game.authoritativeState.flights[0].status, 'turnaround');
 
   const tickTurnaroundComplete = game.processFlightSchedulerTick(400);
   assert.equal(tickTurnaroundComplete.success, true);
-  assert.equal(owner.capital, 1000000 + expectedRevenuePerLeg);
+  assert.ok(Math.abs(owner.capital - (1000000 + expectedRevenuePerLeg)) < 1e-6);
   assert.equal(game.authoritativeState.flights[0].status, 'in-flight');
   assert.equal(game.authoritativeState.flights[0].direction, 'inbound');
 
   const tickArrivalInbound = game.processFlightSchedulerTick(740);
   assert.equal(tickArrivalInbound.success, true);
-  assert.equal(owner.capital, 1000000 + (expectedRevenuePerLeg * 2));
+  assert.ok(Math.abs(owner.capital - (1000000 + expectedRevenuePerLeg * 2)) < 1e-6);
   assert.equal(game.authoritativeState.flights[0].status, 'turnaround');
-  assert.equal(emitted.length, 3);
+
+  // Broadcasts are throttled/coalesced: mutating ticks set a pending flag and the
+  // state emits at most once per broadcast interval, so require >=1 game:state.
+  assert.ok(emitted.length >= 1, `expected at least one emission, got ${emitted.length}`);
+  assert.ok(emitted.every((entry) => entry.eventName === 'game:state'));
+  const latest = emitted[emitted.length - 1].payload;
+  assert.ok(latest && typeof latest === 'object');
+  assert.ok(latest.game && typeof latest.game === 'object');
+  assert.ok(Array.isArray(latest.game.players));
+  assert.ok(Array.isArray(latest.game.flights));
 });
 
 test('multiple arriving flights in one tick each settle and still emit a single game:state broadcast', () => {
@@ -383,14 +408,18 @@ test('multiple arriving flights in one tick each settle and still emit a single 
   const tickResult = game.processFlightSchedulerTick(1);
   const p1 = game.authoritativeState.players.find((player) => player.id === 'p1');
   const p2 = game.authoritativeState.players.find((player) => player.id === 'p2');
-  const expectedP1Revenue = calculateFlightSettlement({
-    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm,
-    routeDistanceKm: 900
-  }).finalRevenue;
-  const expectedP2Revenue = calculateFlightSettlement({
-    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_737.baseRevenuePerKm,
-    routeDistanceKm: 550
-  }).finalRevenue;
+  const route1 = game.authoritativeState.routes.find((r) => r.routeId === 'route-1');
+  const route2 = game.authoritativeState.routes.find((r) => r.routeId === 'route-2');
+  const expectedP1Revenue = expectedSettledRevenue(
+    game,
+    route1,
+    AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm
+  );
+  const expectedP2Revenue = expectedSettledRevenue(
+    game,
+    route2,
+    AIRCRAFT_CATALOG_BY_ID.BOEING_737.baseRevenuePerKm
+  );
 
   assert.equal(tickResult.success, true);
   assert.equal(tickResult.changed, true);
@@ -424,10 +453,11 @@ test('overdue in-flight arrival catch-up settles once for one completed leg', ()
     manager
   );
 
-  const expectedRevenue = calculateFlightSettlement({
-    baseRevenuePerKm: AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm,
-    routeDistanceKm: game.authoritativeState.routes[0].distanceKm
-  }).finalRevenue;
+  const expectedRevenue = expectedSettledRevenue(
+    game,
+    game.authoritativeState.routes[0],
+    AIRCRAFT_CATALOG_BY_ID.BOEING_747.baseRevenuePerKm
+  );
   const tickResult = game.processFlightSchedulerTick(2);
 
   assert.equal(tickResult.success, true);
@@ -842,4 +872,648 @@ test('lastOutboundDepartedAtSimulationMs is set on outbound departure and preser
   assert.equal(flight.status, 'in-flight');
   assert.equal(flight.direction, 'outbound');
   assert.equal(flight.lastOutboundDepartedAtSimulationMs, 10000);
+});
+
+/* Local due queue focused tests */
+
+test('local due queue processes transitions in dueAtSimulationMs order across multiple flights', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 900,
+          assignedAircraftInstanceIds: ['acft-1', 'acft-2']
+        }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        },
+        {
+          aircraftInstanceId: 'acft-2',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-late',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-2',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: 2000
+        },
+        {
+          flightId: 'flight-early',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: 1000
+        }
+      ]
+    }),
+    manager
+  );
+
+  const order = [];
+  const originalApply = game.flightEngine.applyFlightTransition.bind(game.flightEngine);
+  game.flightEngine.applyFlightTransition = function (transition, simulationNowMs) {
+    order.push(transition.flightId);
+    return originalApply(transition, simulationNowMs);
+  };
+
+  const result = game.processFlightSchedulerTick(1);
+  game.flightEngine.applyFlightTransition = originalApply;
+
+  assert.equal(result.success, true);
+  assert.equal(result.processedTransitions, 2);
+  assert.deepStrictEqual(order, ['flight-early', 'flight-late']);
+  const allInFlight = game.authoritativeState.flights.every((f) => f.status === 'in-flight');
+  assert.equal(allInFlight, true);
+});
+
+test('local due queue preserves flightId tie-break for equal due timestamps', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 900,
+          assignedAircraftInstanceIds: ['acft-1', 'acft-2']
+        }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        },
+        {
+          aircraftInstanceId: 'acft-2',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-b',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        },
+        {
+          flightId: 'flight-a',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-2',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ]
+    }),
+    manager
+  );
+
+  const order = [];
+  const originalApply = game.flightEngine.applyFlightTransition.bind(game.flightEngine);
+  game.flightEngine.applyFlightTransition = function (transition, simulationNowMs) {
+    order.push(transition.flightId);
+    return originalApply(transition, simulationNowMs);
+  };
+
+  game.processFlightSchedulerTick(1);
+  game.flightEngine.applyFlightTransition = originalApply;
+
+  assert.deepStrictEqual(order, ['flight-a', 'flight-b']);
+});
+
+test('reconfiguration-blocked ready flight remains ready with local due queue', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 900,
+          assignedAircraftInstanceIds: ['acft-1'],
+          reconfiguringModelCatalogIds: ['BOEING_747']
+        }
+      ]
+    }),
+    manager
+  );
+
+  const result = game.processFlightSchedulerTick(1);
+  const flight = game.authoritativeState.flights[0];
+
+  assert.equal(result.success, true);
+  assert.equal(result.changed, false);
+  assert.equal(result.processedTransitions, 0);
+  assert.equal(flight.status, 'ready');
+});
+
+test('transition cap is enforced with local due queue', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const flightCount = MAX_FLIGHT_TRANSITIONS_PER_TICK + 10;
+
+  const assignedAircraftInstanceIds = [];
+  const ownedAircraft = [];
+  const flights = [];
+  for (let i = 0; i < flightCount; i += 1) {
+    const aircraftInstanceId = `acft-${i}`;
+    assignedAircraftInstanceIds.push(aircraftInstanceId);
+    ownedAircraft.push({
+      aircraftInstanceId,
+      ownerPlayerId: 'p1',
+      aircraftCatalogId: 'BOEING_747',
+      acquisitionPrice: 300000,
+      status: 'assigned',
+      assignedRouteId: 'route-1'
+    });
+    flights.push({
+      flightId: `flight-${i}`,
+      ownerPlayerId: 'p1',
+      routeId: 'route-1',
+      aircraftInstanceId,
+      originAirportId: 'YYZ',
+      destinationAirportId: 'JFK',
+      direction: 'outbound',
+      status: 'ready',
+      departedAtSimulationMs: null,
+      arrivesAtSimulationMs: null,
+      nextTransitionAtSimulationMs: null
+    });
+  }
+
+  const game = new Game(
+    createBaseState({
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 900,
+          assignedAircraftInstanceIds
+        }
+      ],
+      ownedAircraft,
+      flights
+    }),
+    manager
+  );
+
+  const result = game.processFlightSchedulerTick(1);
+
+  assert.equal(result.success, true);
+  assert.equal(result.transitionCapHit, true);
+  assert.equal(result.processedTransitions, MAX_FLIGHT_TRANSITIONS_PER_TICK);
+});
+
+test('revenue settlement remains unchanged with local due queue', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'in-flight',
+          departedAtSimulationMs: 0,
+          arrivesAtSimulationMs: 0,
+          lastOutboundDepartedAtSimulationMs: 0,
+          nextTransitionAtSimulationMs: 0
+        }
+      ]
+    }),
+    manager
+  );
+
+  const player = game.authoritativeState.players[0];
+  const beforeCapital = player.capital;
+  const aircraftDefinition = AIRCRAFT_CATALOG_BY_ID.BOEING_747;
+  const route = game.authoritativeState.routes[0];
+  const expectedRevenue = expectedSettledRevenue(game, route, aircraftDefinition.baseRevenuePerKm);
+
+  const result = game.processFlightSchedulerTick(1);
+  const flight = game.authoritativeState.flights[0];
+
+  assert.equal(result.success, true);
+  assert.equal(result.processedTransitions, 1);
+  assert.equal(flight.status, 'turnaround');
+  assert.ok(Math.abs(player.capital - (beforeCapital + expectedRevenue)) < 1e-9);
+});
+
+test('Airbus A320 scheduling uses its 830 km/h catalog speed', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      ownedAircraft: [{
+        aircraftInstanceId: 'acft-1',
+        ownerPlayerId: 'p1',
+        aircraftCatalogId: 'AIRBUS_A320',
+        acquisitionPrice: 280000,
+        status: 'assigned',
+        assignedRouteId: 'route-1'
+      }],
+      flights: [{
+        flightId: 'flight-1',
+        ownerPlayerId: 'p1',
+        routeId: 'route-1',
+        aircraftInstanceId: 'acft-1',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        direction: 'outbound',
+        status: 'ready',
+        departedAtSimulationMs: null,
+        arrivesAtSimulationMs: null,
+        nextTransitionAtSimulationMs: 0
+      }]
+    }),
+    manager
+  );
+
+  const result = game.processFlightSchedulerTick(1);
+
+  assert.equal(result.success, true);
+  assert.equal(game.authoritativeState.flights[0].status, 'in-flight');
+  assert.equal(
+    game.authoritativeState.flights[0].arrivesAtSimulationMs,
+    calculateFlightDurationSimulationMs(900, 830)
+  );
+});
+
+test('Airbus A320 flight settlement uses its $32 per km base revenue', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      ownedAircraft: [{
+        aircraftInstanceId: 'acft-1',
+        ownerPlayerId: 'p1',
+        aircraftCatalogId: 'AIRBUS_A320',
+        acquisitionPrice: 280000,
+        status: 'assigned',
+        assignedRouteId: 'route-1'
+      }],
+      flights: [{
+        flightId: 'flight-1',
+        ownerPlayerId: 'p1',
+        routeId: 'route-1',
+        aircraftInstanceId: 'acft-1',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        direction: 'outbound',
+        status: 'in-flight',
+        departedAtSimulationMs: 0,
+        arrivesAtSimulationMs: 0,
+        lastOutboundDepartedAtSimulationMs: 0,
+        nextTransitionAtSimulationMs: 0
+      }]
+    }),
+    manager
+  );
+  const player = game.authoritativeState.players[0];
+  const beforeCapital = player.capital;
+  const route = game.authoritativeState.routes[0];
+  const expectedRevenue = expectedSettledRevenue(
+    game,
+    route,
+    AIRCRAFT_CATALOG_BY_ID.AIRBUS_A320.baseRevenuePerKm
+  );
+
+  const result = game.processFlightSchedulerTick(1);
+
+  assert.equal(result.success, true);
+  assert.equal(game.authoritativeState.flights[0].status, 'turnaround');
+  assert.ok(Math.abs(player.capital - (beforeCapital + expectedRevenue)) < 1e-9);
+});
+
+test('no due flight is skipped by the local due queue', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 900,
+          assignedAircraftInstanceIds: ['acft-1', 'acft-2']
+        }
+      ],
+      ownedAircraft: [
+        {
+          aircraftInstanceId: 'acft-1',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        },
+        {
+          aircraftInstanceId: 'acft-2',
+          ownerPlayerId: 'p1',
+          aircraftCatalogId: 'BOEING_747',
+          acquisitionPrice: 300000,
+          status: 'assigned',
+          assignedRouteId: 'route-1'
+        }
+      ],
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        },
+        {
+          flightId: 'flight-2',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'acft-2',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ]
+    }),
+    manager
+  );
+
+  const result = game.processFlightSchedulerTick(1);
+
+  assert.equal(result.processedTransitions, 2);
+  const allInFlight = game.authoritativeState.flights.every((f) => f.status === 'in-flight');
+  assert.equal(allInFlight, true);
+});
+
+test('missing route is detected before transition with local lookup Maps', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'missing-route',
+          aircraftInstanceId: 'acft-1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ]
+    }),
+    manager
+  );
+
+  const result = game.processFlightSchedulerTick(1);
+  const flight = game.authoritativeState.flights[0];
+
+  assert.equal(result.success, false);
+  assert.equal(result.processedTransitions, 0);
+  assert.equal(flight.status, 'ready');
+});
+
+test('missing aircraft assignment is detected before transition with local lookup Maps', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      flights: [
+        {
+          flightId: 'flight-1',
+          ownerPlayerId: 'p1',
+          routeId: 'route-1',
+          aircraftInstanceId: 'missing-acft',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          direction: 'outbound',
+          status: 'ready',
+          departedAtSimulationMs: null,
+          arrivesAtSimulationMs: null,
+          nextTransitionAtSimulationMs: null
+        }
+      ]
+    }),
+    manager
+  );
+
+  const result = game.processFlightSchedulerTick(1);
+  const flight = game.authoritativeState.flights[0];
+
+  assert.equal(result.success, false);
+  assert.equal(result.processedTransitions, 0);
+  assert.equal(flight.status, 'ready');
+});
+
+test('more than 200 transitions can be processed in one tick within the time budget', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const flightCount = 250;
+
+  const assignedAircraftInstanceIds = [];
+  const ownedAircraft = [];
+  const flights = [];
+  for (let i = 0; i < flightCount; i += 1) {
+    const aircraftInstanceId = `acft-${i}`;
+    assignedAircraftInstanceIds.push(aircraftInstanceId);
+    ownedAircraft.push({
+      aircraftInstanceId,
+      ownerPlayerId: 'p1',
+      aircraftCatalogId: 'BOEING_747',
+      acquisitionPrice: 300000,
+      status: 'assigned',
+      assignedRouteId: 'route-1'
+    });
+    flights.push({
+      flightId: `flight-${i}`,
+      ownerPlayerId: 'p1',
+      routeId: 'route-1',
+      aircraftInstanceId,
+      originAirportId: 'YYZ',
+      destinationAirportId: 'JFK',
+      direction: 'outbound',
+      status: 'ready',
+      departedAtSimulationMs: null,
+      arrivesAtSimulationMs: null,
+      nextTransitionAtSimulationMs: null
+    });
+  }
+
+  const game = new Game(
+    createBaseState({
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 900,
+          assignedAircraftInstanceIds
+        }
+      ],
+      ownedAircraft,
+      flights
+    }),
+    manager
+  );
+
+  const result = game.processFlightSchedulerTick(1);
+
+  assert.equal(result.success, true);
+  assert.equal(result.transitionCapHit, false);
+  assert.equal(result.timeCapHit, false);
+  assert.ok(result.processedTransitions > 200);
+  assert.equal(result.processedTransitions, flightCount);
+});
+
+test('processing time guard can stop before the 1000 transition cap', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const flightCount = 1200;
+
+  const assignedAircraftInstanceIds = [];
+  const ownedAircraft = [];
+  const flights = [];
+  for (let i = 0; i < flightCount; i += 1) {
+    const aircraftInstanceId = `acft-${i}`;
+    assignedAircraftInstanceIds.push(aircraftInstanceId);
+    ownedAircraft.push({
+      aircraftInstanceId,
+      ownerPlayerId: 'p1',
+      aircraftCatalogId: 'BOEING_747',
+      acquisitionPrice: 300000,
+      status: 'assigned',
+      assignedRouteId: 'route-1'
+    });
+    flights.push({
+      flightId: `flight-${i}`,
+      ownerPlayerId: 'p1',
+      routeId: 'route-1',
+      aircraftInstanceId,
+      originAirportId: 'YYZ',
+      destinationAirportId: 'JFK',
+      direction: 'outbound',
+      status: 'ready',
+      departedAtSimulationMs: null,
+      arrivesAtSimulationMs: null,
+      nextTransitionAtSimulationMs: null
+    });
+  }
+
+  const game = new Game(
+    createBaseState({
+      routes: [
+        {
+          routeId: 'route-1',
+          ownerPlayerId: 'p1',
+          originAirportId: 'YYZ',
+          destinationAirportId: 'JFK',
+          routeKey: 'JFK::YYZ',
+          distanceKm: 900,
+          assignedAircraftInstanceIds
+        }
+      ],
+      ownedAircraft,
+      flights
+    }),
+    manager
+  );
+
+  const originalDateNow = Date.now;
+  let callCount = 0;
+  const start = 1_000_000;
+  Date.now = () => {
+    callCount += 1;
+    if (callCount > 5) {
+      return start + 100;
+    }
+    return start;
+  };
+
+  try {
+    const result = game.flightEngine.processFlightSchedulerTick(0);
+
+    assert.equal(result.success, true);
+    assert.equal(result.transitionCapHit, false);
+    assert.equal(result.timeCapHit, true);
+    assert.ok(result.processedTransitions > 0);
+    assert.ok(result.processedTransitions < 1000);
+  } finally {
+    Date.now = originalDateNow;
+  }
 });

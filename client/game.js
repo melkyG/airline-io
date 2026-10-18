@@ -30,7 +30,8 @@ let simulationClockSnapshot = {
   simulationStartedAtGameMs: null,
   simulationSpeedMultiplier: null,
   simulationEndedAtGameMs: null,
-  simulationNowGameMs: null
+  simulationNowGameMs: null,
+  worldCalendarStartYear: null
 };
 let lastRenderedSimulationDateText = '';
 let lastRenderedSimulationTimeText = '';
@@ -75,6 +76,7 @@ let routeAircraftManagementErrorMessage = '';
 let routeAircraftManagementFeedbackKind = 'error';
 let routeAircraftModelEditLockRefreshTimeoutId = null;
 let lastScheduledModelEditLockRefreshExpiry = null;
+let routeAircraftLearnedModelEditLocks = new Map();
 let routeAircraftAssignQuantityByCatalogId = new Map();
 let routeAircraftUnassignQuantityByCatalogId = new Map();
 let routeAircraftAssignQuantityInputByCatalogId = new Map();
@@ -117,6 +119,34 @@ const ShopModalState = {
   activeTab: SHOP_MODAL_TAB.AIRPORTS,
   lastActiveTab: SHOP_MODAL_TAB.AIRPORTS,
   hasOpenedFromHud: false
+};
+
+const FinancesModalState = {
+  isOpen: false,
+  showCash: true,
+  showNetWorth: false,
+  selectedTimeframe: 'All'
+};
+
+const FINANCE_TIMEFRAMES = [
+  'All',
+  '3Y',
+  '1Y',
+  '6M',
+  '3M',
+  '1M',
+  '2W',
+  '1W'
+];
+
+const FINANCE_TIMEFRAME_WINDOWS_MS = {
+  '1W': 7 * SIMULATION_HOURS_PER_DAY * SIMULATION_HOUR_MS,
+  '2W': 14 * SIMULATION_HOURS_PER_DAY * SIMULATION_HOUR_MS,
+  '1M': SIMULATION_DAYS_PER_MONTH * SIMULATION_HOURS_PER_DAY * SIMULATION_HOUR_MS,
+  '3M': 3 * SIMULATION_DAYS_PER_MONTH * SIMULATION_HOURS_PER_DAY * SIMULATION_HOUR_MS,
+  '6M': 6 * SIMULATION_DAYS_PER_MONTH * SIMULATION_HOURS_PER_DAY * SIMULATION_HOUR_MS,
+  '1Y': SIMULATION_DAYS_PER_YEAR * SIMULATION_HOURS_PER_DAY * SIMULATION_HOUR_MS,
+  '3Y': 3 * SIMULATION_DAYS_PER_YEAR * SIMULATION_HOURS_PER_DAY * SIMULATION_HOUR_MS
 };
 
 const RoutesModalState = {
@@ -191,6 +221,7 @@ function endPointerInteraction(pointerId) {
       pendingAuthoritativeState = null;
       refreshShopModal(stateToRefresh);
       refreshRoutesModal(stateToRefresh);
+      refreshFinancesModal(stateToRefresh);
     }
   }, 0);
 }
@@ -218,6 +249,7 @@ function flushPendingAuthoritativeRefresh() {
     pendingAuthoritativeState = null;
     refreshShopModal(stateToRefresh);
     refreshRoutesModal(stateToRefresh);
+    refreshFinancesModal(stateToRefresh);
   }
 }
 
@@ -240,6 +272,7 @@ function forceFlushPendingAuthoritativeRefresh() {
     pendingAuthoritativeState = null;
     refreshShopModal(stateToRefresh);
     refreshRoutesModal(stateToRefresh);
+    refreshFinancesModal(stateToRefresh);
   }
 }
 
@@ -401,6 +434,29 @@ function openRouteAircraftManagementModalForRoute(routeId, { openedFrom = ROUTES
   refreshRoutesModal(gameState.getState());
 }
 
+function openFinancesModal() {
+  FinancesModalState.isOpen = true;
+  if (financesModalSessionPosition) {
+    applyFinancesModalPosition(financesModalSessionPosition.left, financesModalSessionPosition.top);
+  }
+  requestFinanceHistory();
+  refreshFinancesModal(gameState.getState());
+}
+
+function closeFinancesModal() {
+  FinancesModalState.isOpen = false;
+  refreshFinancesModal(gameState.getState());
+}
+
+function toggleFinancesModal() {
+  if (FinancesModalState.isOpen) {
+    closeFinancesModal();
+    return;
+  }
+
+  openFinancesModal();
+}
+
 function closeShopModal() {
   ShopModalState.isOpen = false;
   isAirportSearchResultsOpen = false;
@@ -474,12 +530,60 @@ function resetRouteAircraftManagementRowCaches() {
   lastRenderedRouteAircraftManagementRouteId = null;
 }
 
-function scheduleRouteAircraftModelEditLockRefresh(modelEditLockedUntilRealMs) {
-  if (routeAircraftModelEditLockRefreshTimeoutId !== null) {
-    clearTimeout(routeAircraftModelEditLockRefreshTimeoutId);
-    routeAircraftModelEditLockRefreshTimeoutId = null;
+function rememberRouteAircraftModelEditLock(result) {
+  if (!result || result.code !== 'MODEL_EDIT_LOCKED') {
+    return;
   }
 
+  const routeId = String(result.routeId || '').trim();
+  const catalogId = String(result.aircraftCatalogId || '').trim();
+  const lockedUntilRealMs = Number(result.lockedUntilRealMs);
+  if (!routeId || !catalogId || !Number.isFinite(lockedUntilRealMs) || lockedUntilRealMs <= Date.now()) {
+    return;
+  }
+
+  const locksByCatalogId = routeAircraftLearnedModelEditLocks.get(routeId) || new Map();
+  const existingLockUntil = Number(locksByCatalogId.get(catalogId));
+  locksByCatalogId.set(
+    catalogId,
+    Number.isFinite(existingLockUntil) ? Math.max(existingLockUntil, lockedUntilRealMs) : lockedUntilRealMs
+  );
+  routeAircraftLearnedModelEditLocks.set(routeId, locksByCatalogId);
+}
+
+function getRouteAircraftModelEditLocks(route) {
+  const modelEditLockedUntilRealMs = {
+    ...(route && route.modelEditLockedUntilRealMs && typeof route.modelEditLockedUntilRealMs === 'object'
+      ? route.modelEditLockedUntilRealMs
+      : {})
+  };
+  const routeId = String(route && route.routeId || '').trim();
+  const locksByCatalogId = routeAircraftLearnedModelEditLocks.get(routeId);
+  if (!routeId || !locksByCatalogId) {
+    return modelEditLockedUntilRealMs;
+  }
+
+  const now = Date.now();
+  for (const [catalogId, lockedUntilRealMs] of locksByCatalogId) {
+    if (!Number.isFinite(lockedUntilRealMs) || lockedUntilRealMs <= now) {
+      locksByCatalogId.delete(catalogId);
+      continue;
+    }
+
+    const snapshotLockUntil = Number(modelEditLockedUntilRealMs[catalogId]);
+    modelEditLockedUntilRealMs[catalogId] = Number.isFinite(snapshotLockUntil)
+      ? Math.max(snapshotLockUntil, lockedUntilRealMs)
+      : lockedUntilRealMs;
+  }
+
+  if (locksByCatalogId.size === 0) {
+    routeAircraftLearnedModelEditLocks.delete(routeId);
+  }
+
+  return modelEditLockedUntilRealMs;
+}
+
+function scheduleRouteAircraftModelEditLockRefresh(modelEditLockedUntilRealMs) {
   const lockEntries = modelEditLockedUntilRealMs && typeof modelEditLockedUntilRealMs === 'object'
     ? Object.entries(modelEditLockedUntilRealMs)
     : [];
@@ -496,12 +600,24 @@ function scheduleRouteAircraftModelEditLockRefresh(modelEditLockedUntilRealMs) {
   }
 
   if (earliestExpiry === null) {
+    if (routeAircraftModelEditLockRefreshTimeoutId !== null) {
+      clearTimeout(routeAircraftModelEditLockRefreshTimeoutId);
+      routeAircraftModelEditLockRefreshTimeoutId = null;
+    }
     lastScheduledModelEditLockRefreshExpiry = null;
     return;
   }
 
-  if (lastScheduledModelEditLockRefreshExpiry === earliestExpiry) {
+  if (
+    lastScheduledModelEditLockRefreshExpiry === earliestExpiry &&
+    routeAircraftModelEditLockRefreshTimeoutId !== null
+  ) {
     return;
+  }
+
+  if (routeAircraftModelEditLockRefreshTimeoutId !== null) {
+    clearTimeout(routeAircraftModelEditLockRefreshTimeoutId);
+    routeAircraftModelEditLockRefreshTimeoutId = null;
   }
 
   lastScheduledModelEditLockRefreshExpiry = earliestExpiry;
@@ -562,7 +678,8 @@ function getEmptyGameState() {
       simulationStartedAtGameMs: null,
       simulationSpeedMultiplier: null,
       simulationEndedAtGameMs: null,
-      simulationNowGameMs: null
+      simulationNowGameMs: null,
+      worldCalendarStartYear: null
     }
   };
 }
@@ -573,7 +690,8 @@ function getEmptySimulationClockSnapshot() {
     simulationStartedAtGameMs: null,
     simulationSpeedMultiplier: null,
     simulationEndedAtGameMs: null,
-    simulationNowGameMs: null
+    simulationNowGameMs: null,
+    worldCalendarStartYear: null
   };
 }
 
@@ -597,6 +715,9 @@ function normalizeSimulationClockSnapshot(source) {
       : null,
     simulationNowGameMs: Number.isFinite(snapshotSource.simulationNowGameMs)
       ? snapshotSource.simulationNowGameMs
+      : null,
+    worldCalendarStartYear: Number.isFinite(snapshotSource.worldCalendarStartYear)
+      ? snapshotSource.worldCalendarStartYear
       : null
   };
 }
@@ -698,6 +819,9 @@ function normalizeIncomingGameEvent(eventPayload) {
   return {
     type,
     occurredAt,
+    worldElapsedSimulationMs: Number.isFinite(eventPayload.worldElapsedSimulationMs)
+      ? eventPayload.worldElapsedSimulationMs
+      : null,
     gameId: eventPayload.gameId == null ? null : String(eventPayload.gameId),
     actorPlayerId: eventPayload.actorPlayerId == null ? null : String(eventPayload.actorPlayerId),
     data: normalizedData
@@ -749,7 +873,8 @@ const gameState = window.createGameState({
     preferredLobbyColorId: null,
     currentLobbyId: null,
     currentGameId: null,
-    gameEvents: []
+    gameEvents: [],
+    financeHistorySamples: []
   },
   lobby: getEmptyLobbyState(),
   ui: {
@@ -773,6 +898,7 @@ gameState.subscribe((state) => {
   } else {
     refreshShopModal(state);
     refreshRoutesModal(state);
+    refreshFinancesModal(state);
   }
 });
 renderer.render(gameState.getState());
@@ -787,11 +913,20 @@ const simulationClockDateEl = document.createElement('p');
 simulationClockDateEl.className = 'simulation-clock-date';
 simulationClockDateEl.textContent = '--';
 
+const simulationClockCountryEl = document.createElement('span');
+simulationClockCountryEl.className = 'simulation-clock-country';
+simulationClockCountryEl.textContent = '';
+
+const simulationClockDateRowEl = document.createElement('div');
+simulationClockDateRowEl.className = 'simulation-clock-date-row';
+simulationClockDateRowEl.appendChild(simulationClockDateEl);
+simulationClockDateRowEl.appendChild(simulationClockCountryEl);
+
 const simulationClockTimeEl = document.createElement('p');
 simulationClockTimeEl.className = 'simulation-clock-time';
 simulationClockTimeEl.textContent = '--:--';
 
-simulationClockHudEl.appendChild(simulationClockDateEl);
+simulationClockHudEl.appendChild(simulationClockDateRowEl);
 simulationClockHudEl.appendChild(simulationClockTimeEl);
 
 const hudIconColumnEl = document.createElement('div');
@@ -806,6 +941,11 @@ const routesHudButtonEl = document.createElement('button');
 routesHudButtonEl.type = 'button';
 routesHudButtonEl.className = 'hud-icon-button route-hud-button';
 routesHudButtonEl.setAttribute('aria-label', 'Open routes modal');
+
+const financesHudButtonEl = document.createElement('button');
+financesHudButtonEl.type = 'button';
+financesHudButtonEl.className = 'hud-icon-button finances-hud-button';
+financesHudButtonEl.setAttribute('aria-label', 'Open finances modal');
 
 const svgNamespace = 'http://www.w3.org/2000/svg';
 const shopHudButtonIconEl = document.createElementNS(svgNamespace, 'svg');
@@ -897,10 +1037,426 @@ routesHudButtonIconEl.appendChild(topPinInnerEl);
 routesHudButtonIconEl.appendChild(bottomPinOuterEl);
 routesHudButtonIconEl.appendChild(bottomPinInnerEl);
 
+const financesHudButtonIconEl = document.createElementNS(svgNamespace, 'svg');
+financesHudButtonIconEl.classList.add('hud-icon-button-icon', 'finances-hud-button-icon');
+financesHudButtonIconEl.setAttribute('viewBox', '0 0 24 24');
+financesHudButtonIconEl.setAttribute('fill', 'none');
+financesHudButtonIconEl.setAttribute('aria-hidden', 'true');
+financesHudButtonIconEl.setAttribute('focusable', 'false');
+
+const financesAxesEl = document.createElementNS(svgNamespace, 'path');
+financesAxesEl.setAttribute('d', 'M4.5 4.5 V19.5 H19.5');
+financesAxesEl.setAttribute('stroke', 'currentColor');
+financesAxesEl.setAttribute('stroke-width', '2');
+financesAxesEl.setAttribute('stroke-linecap', 'round');
+financesAxesEl.setAttribute('stroke-linejoin', 'round');
+
+const financesLineEl = document.createElementNS(svgNamespace, 'path');
+financesLineEl.setAttribute('d', 'M6.5 15.5 L10.5 11 L13.5 12.8 L18.5 7');
+financesLineEl.setAttribute('stroke', 'currentColor');
+financesLineEl.setAttribute('stroke-width', '2');
+financesLineEl.setAttribute('stroke-linecap', 'round');
+financesLineEl.setAttribute('stroke-linejoin', 'round');
+
+const financesPointEl = document.createElementNS(svgNamespace, 'circle');
+financesPointEl.setAttribute('cx', '18.5');
+financesPointEl.setAttribute('cy', '7');
+financesPointEl.setAttribute('r', '1.6');
+financesPointEl.setAttribute('fill', 'currentColor');
+
+financesHudButtonIconEl.appendChild(financesAxesEl);
+financesHudButtonIconEl.appendChild(financesLineEl);
+financesHudButtonIconEl.appendChild(financesPointEl);
+
 shopHudButtonEl.appendChild(shopHudButtonIconEl);
 routesHudButtonEl.appendChild(routesHudButtonIconEl);
+financesHudButtonEl.appendChild(financesHudButtonIconEl);
+const AIRPORT_PRICE_FILTER_STOPS = [
+  { label: 'All', maxPrice: null },
+  { label: '2.5B', maxPrice: 2500000000 },
+  { label: '1B', maxPrice: 1000000000 },
+  { label: '750M', maxPrice: 750000000 },
+  { label: '500M', maxPrice: 500000000 },
+  { label: '250M', maxPrice: 250000000 },
+  { label: '100M', maxPrice: 100000000 },
+  { label: '75M', maxPrice: 75000000 },
+  { label: '50M', maxPrice: 50000000 },
+  { label: '25M', maxPrice: 25000000 },
+  { label: '10M', maxPrice: 10000000 },
+  { label: '7.5M', maxPrice: 7500000 },
+  { label: '5M', maxPrice: 5000000 },
+  { label: '2.5M', maxPrice: 2500000 },
+  { label: '1M', maxPrice: 1000000 },
+  { label: '750K', maxPrice: 750000 },
+  { label: '500K', maxPrice: 500000 },
+  { label: '250K', maxPrice: 250000 },
+  { label: 'Min', maxPrice: 0 }
+];
+
+const airportPriceFilterEl = document.createElement('div');
+airportPriceFilterEl.className = 'airport-price-filter';
+
+const airportPriceFilterLabelEl = document.createElement('div');
+airportPriceFilterLabelEl.className = 'airport-price-filter-label';
+airportPriceFilterLabelEl.textContent = 'Budget';
+
+const airportPriceFilterResetButtonEl = document.createElement('button');
+airportPriceFilterResetButtonEl.type = 'button';
+airportPriceFilterResetButtonEl.className = 'airport-price-filter-action-button airport-price-filter-reset';
+airportPriceFilterResetButtonEl.textContent = '↺';
+airportPriceFilterResetButtonEl.setAttribute('aria-label', 'Reset');
+airportPriceFilterResetButtonEl.title = 'Reset';
+
+const airportPriceFilterBudgetButtonEl = document.createElement('button');
+airportPriceFilterBudgetButtonEl.type = 'button';
+airportPriceFilterBudgetButtonEl.className = 'airport-price-filter-action-button airport-price-filter-budget';
+airportPriceFilterBudgetButtonEl.textContent = 'Cash';
+
+const airportPriceFilterActionsEl = document.createElement('div');
+airportPriceFilterActionsEl.className = 'airport-price-filter-actions';
+airportPriceFilterActionsEl.appendChild(airportPriceFilterResetButtonEl);
+airportPriceFilterActionsEl.appendChild(airportPriceFilterBudgetButtonEl);
+
+const airportPriceFilterTrackEl = document.createElement('div');
+airportPriceFilterTrackEl.className = 'airport-price-filter-track';
+
+const airportPriceFilterTicksEl = document.createElement('div');
+airportPriceFilterTicksEl.className = 'airport-price-filter-ticks';
+
+const airportPriceFilterTickEls = AIRPORT_PRICE_FILTER_STOPS.map((stop) => {
+  const tickEl = document.createElement('span');
+  tickEl.className = 'airport-price-filter-tick';
+  tickEl.textContent = stop.label.startsWith('$') ? stop.label.slice(1) : stop.label;
+  airportPriceFilterTicksEl.appendChild(tickEl);
+  return tickEl;
+});
+
+const airportPriceFilterSliderStackEl = document.createElement('div');
+airportPriceFilterSliderStackEl.className = 'airport-price-filter-slider-stack';
+
+const airportPriceFilterRailEl = document.createElement('div');
+airportPriceFilterRailEl.className = 'airport-price-filter-rail';
+airportPriceFilterRailEl.setAttribute('aria-hidden', 'true');
+
+const airportPriceFilterRangeEl = document.createElement('div');
+airportPriceFilterRangeEl.className = 'airport-price-filter-range';
+airportPriceFilterRangeEl.setAttribute('aria-hidden', 'true');
+
+const airportPriceFilterMinHitTargetEl = document.createElement('div');
+airportPriceFilterMinHitTargetEl.className = 'airport-price-filter-hit-target airport-price-filter-hit-target--min';
+airportPriceFilterMinHitTargetEl.setAttribute('aria-hidden', 'true');
+
+const airportPriceFilterMaxHitTargetEl = document.createElement('div');
+airportPriceFilterMaxHitTargetEl.className = 'airport-price-filter-hit-target airport-price-filter-hit-target--max';
+airportPriceFilterMaxHitTargetEl.setAttribute('aria-hidden', 'true');
+
+const airportPriceFilterMinSliderEl = document.createElement('input');
+airportPriceFilterMinSliderEl.type = 'range';
+airportPriceFilterMinSliderEl.className = 'airport-price-filter-slider airport-price-filter-slider--min';
+airportPriceFilterMinSliderEl.min = '0';
+airportPriceFilterMinSliderEl.max = String(AIRPORT_PRICE_FILTER_STOPS.length - 1);
+airportPriceFilterMinSliderEl.step = 'any';
+airportPriceFilterMinSliderEl.value = '0';
+airportPriceFilterMinSliderEl.setAttribute('orient', 'vertical');
+airportPriceFilterMinSliderEl.setAttribute('aria-label', 'Minimum airport price');
+airportPriceFilterMinSliderEl.setAttribute('aria-orientation', 'vertical');
+
+const airportPriceFilterMaxSliderEl = document.createElement('input');
+airportPriceFilterMaxSliderEl.type = 'range';
+airportPriceFilterMaxSliderEl.className = 'airport-price-filter-slider airport-price-filter-slider--max';
+airportPriceFilterMaxSliderEl.min = '0';
+airportPriceFilterMaxSliderEl.max = String(AIRPORT_PRICE_FILTER_STOPS.length - 1);
+airportPriceFilterMaxSliderEl.step = 'any';
+airportPriceFilterMaxSliderEl.value = String(AIRPORT_PRICE_FILTER_STOPS.length - 1);
+airportPriceFilterMaxSliderEl.setAttribute('orient', 'vertical');
+airportPriceFilterMaxSliderEl.setAttribute('aria-label', 'Maximum airport price');
+airportPriceFilterMaxSliderEl.setAttribute('aria-orientation', 'vertical');
+
+function getAirportPriceFilterMinimumPrice(index) {
+  return getAirportPriceFilterPriceAtStopPosition(index);
+}
+
+// The All endpoint stays unbounded; its fractional upper segment uses the highest current airport price as a finite anchor.
+function getAirportPriceFilterAllSegmentFiniteMaximumPrice() {
+  const state = gameState.getState();
+  const airports = Array.isArray(state && state.game && state.game.airports) ? state.game.airports : [];
+  return airports.reduce((maximumPrice, airport) => {
+    const basePrice = airport && Number(airport.basePrice);
+    return Number.isFinite(basePrice) && basePrice > maximumPrice ? basePrice : maximumPrice;
+  }, AIRPORT_PRICE_FILTER_STOPS[1].maxPrice);
+}
+
+function getAirportPriceFilterPriceAtStopPosition(position, isUpperBound = false) {
+  const maxStopIndex = AIRPORT_PRICE_FILTER_STOPS.length - 1;
+  const clampedPosition = Math.max(0, Math.min(maxStopIndex, Number(position) || 0));
+
+  if (clampedPosition === 0) {
+    return isUpperBound ? null : AIRPORT_PRICE_FILTER_STOPS[1].maxPrice;
+  }
+
+  if (clampedPosition < 1) {
+    if (!isUpperBound) {
+      return AIRPORT_PRICE_FILTER_STOPS[1].maxPrice;
+    }
+
+    const segmentMaximumPrice = getAirportPriceFilterAllSegmentFiniteMaximumPrice();
+    const twoPointFiveBPrice = AIRPORT_PRICE_FILTER_STOPS[1].maxPrice;
+    return segmentMaximumPrice + (twoPointFiveBPrice - segmentMaximumPrice) * clampedPosition;
+  }
+
+  const upperStopIndex = Math.floor(clampedPosition);
+  const lowerStopIndex = Math.ceil(clampedPosition);
+  const upperPrice = AIRPORT_PRICE_FILTER_STOPS[upperStopIndex].maxPrice;
+  const lowerPrice = AIRPORT_PRICE_FILTER_STOPS[lowerStopIndex].maxPrice;
+  const segmentProgress = clampedPosition - upperStopIndex;
+  const interpolatedPrice = upperPrice + (lowerPrice - upperPrice) * segmentProgress;
+  // Normalize floating-point noise so exact price boundaries remain inclusive.
+  return Number(interpolatedPrice.toPrecision(15));
+}
+
+function getAirportPriceFilterStopPositionForPrice(price) {
+  const maxStopIndex = AIRPORT_PRICE_FILTER_STOPS.length - 1;
+  if (price >= AIRPORT_PRICE_FILTER_STOPS[1].maxPrice) {
+    return price === AIRPORT_PRICE_FILTER_STOPS[1].maxPrice ? 1 : 0;
+  }
+
+  for (let index = 1; index < maxStopIndex; index += 1) {
+    const upperPrice = AIRPORT_PRICE_FILTER_STOPS[index].maxPrice;
+    const lowerPrice = AIRPORT_PRICE_FILTER_STOPS[index + 1].maxPrice;
+    if (price <= upperPrice && price >= lowerPrice) {
+      return index + (upperPrice - price) / (upperPrice - lowerPrice);
+    }
+  }
+
+  return maxStopIndex;
+}
+
+function getAirportPriceFilterLowerStopIndexBelowPrice(price) {
+  let lowerStopIndex = AIRPORT_PRICE_FILTER_STOPS.length - 1;
+  let lowerStopPrice = AIRPORT_PRICE_FILTER_STOPS[lowerStopIndex].maxPrice;
+
+  for (let index = 1; index < AIRPORT_PRICE_FILTER_STOPS.length - 1; index += 1) {
+    const stopPrice = AIRPORT_PRICE_FILTER_STOPS[index].maxPrice;
+    if (stopPrice < price && stopPrice > lowerStopPrice) {
+      lowerStopIndex = index;
+      lowerStopPrice = stopPrice;
+    }
+  }
+
+  return lowerStopIndex;
+}
+
+function getAirportPriceFilterMinimumRawValueForBudget(budget, currentMinRawValue) {
+  const maxSliderValue = AIRPORT_PRICE_FILTER_STOPS.length - 1;
+  const currentMinRaw = Number(currentMinRawValue);
+  const currentMinStopIndex = maxSliderValue - currentMinRaw;
+  if (getAirportPriceFilterMinimumPrice(currentMinStopIndex) < budget) {
+    return currentMinRaw;
+  }
+
+  return maxSliderValue - getAirportPriceFilterLowerStopIndexBelowPrice(budget);
+}
+
+let airportPriceFilterExactMaxPrice = null;
+
+function snapAirportPriceFilterPosition(position) {
+  const nearestStop = Math.round(position);
+  return Math.abs(position - nearestStop) <= 0.22 + Number.EPSILON * 4 ? nearestStop : position;
+}
+
+function applyAirportPriceFilterRange(minRawValue, maxRawValue, activeHandle = null) {
+  const maxSliderValue = AIRPORT_PRICE_FILTER_STOPS.length - 1;
+  let minRaw = Math.max(0, Math.min(maxSliderValue, Number(minRawValue) || 0));
+  let maxRaw = Math.max(0, Math.min(maxSliderValue, Number(maxRawValue) || 0));
+
+  if (activeHandle === 'min') {
+    minRaw = snapAirportPriceFilterPosition(minRaw);
+  } else if (activeHandle === 'max') {
+    maxRaw = snapAirportPriceFilterPosition(maxRaw);
+  }
+
+  if (activeHandle === 'min' && minRaw > maxRaw) {
+    minRaw = maxRaw;
+  } else if (activeHandle === 'max' && maxRaw < minRaw) {
+    maxRaw = minRaw;
+  } else if (!activeHandle && minRaw > maxRaw) {
+    maxRaw = minRaw;
+  }
+  const minStopPosition = maxSliderValue - minRaw;
+  const maxStopPosition = maxSliderValue - maxRaw;
+  const maxStopIndex = Math.ceil(maxStopPosition);
+
+  airportPriceFilterMinSliderEl.value = String(minRaw);
+  airportPriceFilterMaxSliderEl.value = String(maxRaw);
+
+  airportPriceFilterTickEls.forEach((tickEl, tickIndex) => {
+    tickEl.classList.toggle(
+      'airport-price-filter-tick--active',
+      tickIndex >= maxStopIndex && tickIndex <= minStopPosition
+    );
+  });
+
+  const sliderRange = maxSliderValue || 1;
+  airportPriceFilterSliderStackEl.style.setProperty('--airport-price-filter-min-hit-top', `${((sliderRange - minRaw) / sliderRange) * 100}%`);
+  airportPriceFilterSliderStackEl.style.setProperty('--airport-price-filter-max-hit-top', `${((sliderRange - maxRaw) / sliderRange) * 100}%`);
+  airportPriceFilterSliderStackEl.style.setProperty('--airport-price-filter-range-top', `${((sliderRange - maxRaw) / sliderRange) * 100}%`);
+  airportPriceFilterSliderStackEl.style.setProperty('--airport-price-filter-range-bottom', `${(minRaw / sliderRange) * 100}%`);
+
+  if (typeof renderer.setAirportPriceFilter === 'function') {
+    renderer.setAirportPriceFilter({
+      minPrice: getAirportPriceFilterPriceAtStopPosition(minStopPosition),
+      maxPrice: airportPriceFilterExactMaxPrice == null
+        ? getAirportPriceFilterPriceAtStopPosition(maxStopPosition, true)
+        : airportPriceFilterExactMaxPrice
+    });
+  }
+}
+
+airportPriceFilterMinSliderEl.addEventListener('input', () => {
+  airportPriceFilterExactMaxPrice = null;
+  applyAirportPriceFilterRange(
+    airportPriceFilterMinSliderEl.value,
+    airportPriceFilterMaxSliderEl.value,
+    'min'
+  );
+});
+
+airportPriceFilterMaxSliderEl.addEventListener('input', () => {
+  airportPriceFilterExactMaxPrice = null;
+  applyAirportPriceFilterRange(
+    airportPriceFilterMinSliderEl.value,
+    airportPriceFilterMaxSliderEl.value,
+    'max'
+  );
+});
+
+airportPriceFilterBudgetButtonEl.addEventListener('click', () => {
+  const state = gameState.getState();
+  const playerId = state && state.session ? state.session.playerId : null;
+  const players = Array.isArray(state && state.game && state.game.players) ? state.game.players : [];
+  const localPlayer = playerId == null
+    ? null
+    : players.find((player) => player && String(player.id) === String(playerId));
+  const budget = localPlayer && Number.isFinite(localPlayer.capital) && localPlayer.capital >= 0
+    ? localPlayer.capital
+    : null;
+
+  if (budget == null) {
+    return;
+  }
+
+  const maxSliderValue = AIRPORT_PRICE_FILTER_STOPS.length - 1;
+  const minRaw = getAirportPriceFilterMinimumRawValueForBudget(
+    budget,
+    airportPriceFilterMinSliderEl.value
+  );
+  airportPriceFilterExactMaxPrice = budget;
+  const maxStopPosition = getAirportPriceFilterStopPositionForPrice(budget);
+  const maxRaw = maxSliderValue - maxStopPosition;
+  applyAirportPriceFilterRange(minRaw, maxRaw);
+});
+
+airportPriceFilterResetButtonEl.addEventListener('click', () => {
+  airportPriceFilterExactMaxPrice = null;
+  airportPriceFilterMinSliderEl.value = '0';
+  airportPriceFilterMaxSliderEl.value = String(AIRPORT_PRICE_FILTER_STOPS.length - 1);
+  applyAirportPriceFilterRange(
+    airportPriceFilterMinSliderEl.value,
+    airportPriceFilterMaxSliderEl.value
+  );
+});
+
+let airportPriceFilterHitDragHandle = null;
+let airportPriceFilterHitDragPointerId = null;
+
+function getAirportPriceFilterRawValueFromPointer(event) {
+  const stackRect = airportPriceFilterSliderStackEl.getBoundingClientRect();
+  const sliderRange = AIRPORT_PRICE_FILTER_STOPS.length - 1;
+  if (!stackRect.height || !sliderRange) {
+    return 0;
+  }
+
+  const progress = Math.max(0, Math.min(1, (event.clientY - stackRect.top) / stackRect.height));
+  return (1 - progress) * sliderRange;
+}
+
+function beginAirportPriceFilterHitDrag(event) {
+  if (event.target !== airportPriceFilterMinHitTargetEl && event.target !== airportPriceFilterMaxHitTargetEl) {
+    return;
+  }
+
+  const stackRect = airportPriceFilterSliderStackEl.getBoundingClientRect();
+  const sliderRange = AIRPORT_PRICE_FILTER_STOPS.length - 1;
+  const getCenterY = (rawValue) => stackRect.top + ((sliderRange - Number(rawValue)) / sliderRange) * stackRect.height;
+  const pointerY = event.clientY;
+  const minCenterY = getCenterY(airportPriceFilterMinSliderEl.value);
+  const maxCenterY = getCenterY(airportPriceFilterMaxSliderEl.value);
+  const minDistance = Math.abs(pointerY - minCenterY);
+  const maxDistance = Math.abs(pointerY - maxCenterY);
+
+  airportPriceFilterHitDragHandle = minDistance < maxDistance ? 'min' : 'max';
+  airportPriceFilterHitDragPointerId = event.pointerId;
+  airportPriceFilterExactMaxPrice = null;
+  event.preventDefault();
+  if (typeof airportPriceFilterSliderStackEl.setPointerCapture === 'function') {
+    airportPriceFilterSliderStackEl.setPointerCapture(event.pointerId);
+  }
+  applyAirportPriceFilterRange(
+    airportPriceFilterHitDragHandle === 'min'
+      ? getAirportPriceFilterRawValueFromPointer(event)
+      : airportPriceFilterMinSliderEl.value,
+    airportPriceFilterHitDragHandle === 'max'
+      ? getAirportPriceFilterRawValueFromPointer(event)
+      : airportPriceFilterMaxSliderEl.value,
+    airportPriceFilterHitDragHandle
+  );
+}
+
+function updateAirportPriceFilterHitDrag(event) {
+  if (airportPriceFilterHitDragPointerId !== event.pointerId || !airportPriceFilterHitDragHandle) {
+    return;
+  }
+
+  const rawValue = getAirportPriceFilterRawValueFromPointer(event);
+  applyAirportPriceFilterRange(
+    airportPriceFilterHitDragHandle === 'min' ? rawValue : airportPriceFilterMinSliderEl.value,
+    airportPriceFilterHitDragHandle === 'max' ? rawValue : airportPriceFilterMaxSliderEl.value,
+    airportPriceFilterHitDragHandle
+  );
+}
+
+function endAirportPriceFilterHitDrag(event) {
+  if (airportPriceFilterHitDragPointerId !== event.pointerId) {
+    return;
+  }
+
+  airportPriceFilterHitDragHandle = null;
+  airportPriceFilterHitDragPointerId = null;
+}
+
+airportPriceFilterSliderStackEl.addEventListener('pointerdown', beginAirportPriceFilterHitDrag);
+window.addEventListener('pointermove', updateAirportPriceFilterHitDrag);
+window.addEventListener('pointerup', endAirportPriceFilterHitDrag);
+window.addEventListener('pointercancel', endAirportPriceFilterHitDrag);
+
+applyAirportPriceFilterRange(airportPriceFilterMinSliderEl.value, airportPriceFilterMaxSliderEl.value);
+
+airportPriceFilterTrackEl.appendChild(airportPriceFilterTicksEl);
+airportPriceFilterSliderStackEl.appendChild(airportPriceFilterRailEl);
+airportPriceFilterSliderStackEl.appendChild(airportPriceFilterRangeEl);
+airportPriceFilterSliderStackEl.appendChild(airportPriceFilterMinSliderEl);
+airportPriceFilterSliderStackEl.appendChild(airportPriceFilterMaxSliderEl);
+airportPriceFilterSliderStackEl.appendChild(airportPriceFilterMinHitTargetEl);
+airportPriceFilterSliderStackEl.appendChild(airportPriceFilterMaxHitTargetEl);
+airportPriceFilterTrackEl.appendChild(airportPriceFilterSliderStackEl);
+airportPriceFilterEl.appendChild(airportPriceFilterLabelEl);
+airportPriceFilterEl.appendChild(airportPriceFilterTrackEl);
+airportPriceFilterEl.appendChild(airportPriceFilterActionsEl);
+
 hudIconColumnEl.appendChild(shopHudButtonEl);
 hudIconColumnEl.appendChild(routesHudButtonEl);
+hudIconColumnEl.appendChild(financesHudButtonEl);
+hudBottomRightStackEl.appendChild(airportPriceFilterEl);
 hudBottomRightStackEl.appendChild(hudIconColumnEl);
 if (capitalHudEl) {
   hudBottomRightStackEl.appendChild(capitalHudEl);
@@ -1174,7 +1730,7 @@ shopModalOverlayEl.className = 'shop-modal-overlay hidden';
 shopModalOverlayEl.setAttribute('aria-hidden', 'true');
 
 const shopModalDialogEl = document.createElement('div');
-shopModalDialogEl.className = 'shop-modal';
+shopModalDialogEl.className = 'shop-modal shop-store-modal';
 shopModalDialogEl.setAttribute('role', 'dialog');
 shopModalDialogEl.setAttribute('aria-modal', 'true');
 
@@ -1258,6 +1814,21 @@ shopAirportPriceRowEl.innerHTML = '<span class="airport-interaction-label" data-
 const shopAirportPriceLabelEl = shopAirportPriceRowEl.querySelector('[data-shop-airport-price-label]');
 const shopAirportPriceValueEl = shopAirportPriceRowEl.querySelector('[data-shop-airport-price]');
 
+const shopAirportCapacityLimitsRowEl = document.createElement('p');
+shopAirportCapacityLimitsRowEl.className = 'airport-interaction-row';
+shopAirportCapacityLimitsRowEl.innerHTML = '<span class="airport-interaction-label">Max Aircraft per route:</span> <span class="airport-interaction-value" data-shop-airport-capacity-limits>-</span>';
+const shopAirportCapacityLimitsValueEl = shopAirportCapacityLimitsRowEl.querySelector('[data-shop-airport-capacity-limits]');
+
+const shopAirportRoutesRowEl = document.createElement('p');
+shopAirportRoutesRowEl.className = 'airport-interaction-row';
+shopAirportRoutesRowEl.innerHTML = '<span class="airport-interaction-label">Max Routes:</span> <span class="airport-interaction-value" data-shop-airport-routes>-</span>';
+const shopAirportRoutesValueEl = shopAirportRoutesRowEl.querySelector('[data-shop-airport-routes]');
+
+const shopAirportAssignedAircraftRowEl = document.createElement('p');
+shopAirportAssignedAircraftRowEl.className = 'airport-interaction-row';
+shopAirportAssignedAircraftRowEl.innerHTML = '<span class="airport-interaction-label">Assigned Aircraft:</span> <span class="airport-interaction-value" data-shop-airport-assigned-aircraft>-</span>';
+const shopAirportAssignedAircraftValueEl = shopAirportAssignedAircraftRowEl.querySelector('[data-shop-airport-assigned-aircraft]');
+
 const shopAirportMessageEl = document.createElement('p');
 shopAirportMessageEl.className = 'airport-interaction-row';
 shopAirportMessageEl.textContent = 'Select an airport from the list to view purchase actions.';
@@ -1273,6 +1844,9 @@ shopAirportsPanelEl.appendChild(shopAirportSearchContainerEl);
 shopAirportDetailsEl.appendChild(shopAirportTitleEl);
 shopAirportDetailsEl.appendChild(shopAirportOwnerRowEl);
 shopAirportDetailsEl.appendChild(shopAirportPriceRowEl);
+shopAirportDetailsEl.appendChild(shopAirportRoutesRowEl);
+shopAirportDetailsEl.appendChild(shopAirportCapacityLimitsRowEl);
+shopAirportDetailsEl.appendChild(shopAirportAssignedAircraftRowEl);
 shopAirportDetailsEl.appendChild(shopAirportMessageEl);
 shopAirportDetailsEl.appendChild(shopAirportActionsEl);
 shopAirportsPanelEl.appendChild(shopAirportDetailsEl);
@@ -1377,6 +1951,10 @@ function commitAircraftQuantityInputChanged() {
     aircraftPurchaseQuantity = normalizedMax >= 1 ? 1 : 0;
   } else {
     aircraftPurchaseQuantity = Math.min(normalizedQuantity, normalizedMax);
+  }
+
+  if (aircraftPurchaseQuantity === 0 && normalizedMax >= 1) {
+    aircraftPurchaseQuantity = 1;
   }
 
   isAircraftPurchaseQuantityEditing = false;
@@ -1590,6 +2168,258 @@ if (gameScreenEl) {
   });
 }
 
+const financesModalEl = document.createElement('div');
+financesModalEl.className = 'finances-modal hidden';
+financesModalEl.setAttribute('role', 'dialog');
+financesModalEl.setAttribute('aria-modal', 'false');
+financesModalEl.setAttribute('aria-label', 'Finances');
+
+const financesModalCloseButtonEl = document.createElement('button');
+financesModalCloseButtonEl.type = 'button';
+financesModalCloseButtonEl.className = 'shop-modal-close finances-modal-close';
+financesModalCloseButtonEl.setAttribute('aria-label', 'Close finances modal');
+financesModalCloseButtonEl.textContent = 'x';
+
+const financesModalTitleEl = document.createElement('h3');
+financesModalTitleEl.className = 'shop-modal-title finances-modal-title';
+financesModalTitleEl.textContent = 'Finances';
+
+const financesModalContentEl = document.createElement('div');
+financesModalContentEl.className = 'finances-modal-content';
+
+const financesSummaryEl = document.createElement('div');
+financesSummaryEl.className = 'finances-modal-summary';
+
+const financesSummaryRowEl = document.createElement('div');
+financesSummaryRowEl.className = 'finances-modal-row finances-modal-row--summary';
+
+const financesCashGroupEl = document.createElement('span');
+financesCashGroupEl.className = 'finances-modal-summary-group';
+
+const financesCashLabelEl = document.createElement('span');
+financesCashLabelEl.className = 'finances-modal-label';
+financesCashLabelEl.textContent = 'Cash:';
+
+const financesCashValueEl = document.createElement('span');
+financesCashValueEl.className = 'finances-modal-value';
+financesCashValueEl.textContent = '--';
+
+financesCashGroupEl.appendChild(financesCashLabelEl);
+financesCashGroupEl.appendChild(financesCashValueEl);
+
+const financesNetWorthGroupEl = document.createElement('span');
+financesNetWorthGroupEl.className = 'finances-modal-summary-group finances-modal-summary-group--net-worth';
+
+const financesNetWorthLabelEl = document.createElement('span');
+financesNetWorthLabelEl.className = 'finances-modal-label';
+financesNetWorthLabelEl.textContent = 'Net Worth:';
+
+const financesNetWorthValueEl = document.createElement('span');
+financesNetWorthValueEl.className = 'finances-modal-value';
+financesNetWorthValueEl.textContent = '--';
+
+financesNetWorthGroupEl.appendChild(financesNetWorthLabelEl);
+financesNetWorthGroupEl.appendChild(financesNetWorthValueEl);
+
+financesSummaryRowEl.appendChild(financesCashGroupEl);
+financesSummaryRowEl.appendChild(financesNetWorthGroupEl);
+
+financesSummaryEl.appendChild(financesSummaryRowEl);
+
+const financesChartTogglesEl = document.createElement('div');
+financesChartTogglesEl.className = 'finances-chart-toggles';
+
+const financesCashToggleEl = document.createElement('button');
+financesCashToggleEl.type = 'button';
+financesCashToggleEl.className = 'finances-chart-toggle finances-chart-toggle--cash';
+financesCashToggleEl.setAttribute('aria-pressed', 'true');
+
+const financesCashToggleSwatchEl = document.createElement('span');
+financesCashToggleSwatchEl.className = 'finances-chart-toggle-swatch finances-chart-toggle-swatch--cash';
+financesCashToggleSwatchEl.setAttribute('aria-hidden', 'true');
+
+const financesCashToggleLabelEl = document.createElement('span');
+financesCashToggleLabelEl.textContent = 'Cash';
+
+financesCashToggleEl.appendChild(financesCashToggleSwatchEl);
+financesCashToggleEl.appendChild(financesCashToggleLabelEl);
+
+const financesNetWorthToggleEl = document.createElement('button');
+financesNetWorthToggleEl.type = 'button';
+financesNetWorthToggleEl.className = 'finances-chart-toggle finances-chart-toggle--net-worth finances-chart-toggle--off';
+financesNetWorthToggleEl.setAttribute('aria-pressed', 'false');
+
+const financesNetWorthToggleSwatchEl = document.createElement('span');
+financesNetWorthToggleSwatchEl.className = 'finances-chart-toggle-swatch finances-chart-toggle-swatch--net-worth';
+financesNetWorthToggleSwatchEl.setAttribute('aria-hidden', 'true');
+
+const financesNetWorthToggleLabelEl = document.createElement('span');
+financesNetWorthToggleLabelEl.textContent = 'Net Worth';
+
+financesNetWorthToggleEl.appendChild(financesNetWorthToggleSwatchEl);
+financesNetWorthToggleEl.appendChild(financesNetWorthToggleLabelEl);
+
+financesChartTogglesEl.appendChild(financesCashToggleEl);
+financesChartTogglesEl.appendChild(financesNetWorthToggleEl);
+
+const financesChartSvgEl = document.createElementNS(svgNamespace, 'svg');
+financesChartSvgEl.classList.add('finances-chart-svg');
+financesChartSvgEl.setAttribute('viewBox', '0 0 308 140');
+financesChartSvgEl.setAttribute('width', '100%');
+financesChartSvgEl.setAttribute('aria-hidden', 'true');
+
+const financesTimeframeTogglesEl = document.createElement('div');
+financesTimeframeTogglesEl.className = 'finances-timeframe-toggles';
+
+const financesTimeframeToggleEls = [];
+for (const timeframe of FINANCE_TIMEFRAMES) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'finances-timeframe-toggle';
+  button.textContent = timeframe;
+  button.dataset.timeframe = timeframe;
+  button.setAttribute('aria-pressed', timeframe === 'All' ? 'true' : 'false');
+  if (timeframe !== 'All') {
+    button.classList.add('finances-timeframe-toggle--off');
+  }
+  button.addEventListener('click', () => {
+    FinancesModalState.selectedTimeframe = timeframe;
+    refreshFinancesModal(gameState.getState());
+  });
+  financesTimeframeTogglesEl.appendChild(button);
+  financesTimeframeToggleEls.push(button);
+}
+
+financesModalContentEl.appendChild(financesSummaryEl);
+financesModalContentEl.appendChild(financesChartTogglesEl);
+financesModalContentEl.appendChild(financesChartSvgEl);
+financesModalContentEl.appendChild(financesTimeframeTogglesEl);
+
+financesModalEl.appendChild(financesModalCloseButtonEl);
+financesModalEl.appendChild(financesModalTitleEl);
+financesModalEl.appendChild(financesModalContentEl);
+
+const FINANCES_MODAL_MIN_VISIBLE_PX = 48;
+let isFinancesModalDragging = false;
+let financesModalDragPointerId = null;
+let financesModalDragStartClientX = 0;
+let financesModalDragStartClientY = 0;
+let financesModalDragStartLeft = 0;
+let financesModalDragStartTop = 0;
+let financesModalSessionPosition = null;
+
+function applyFinancesModalPosition(leftPx, topPx) {
+  financesModalEl.style.left = `${leftPx}px`;
+  financesModalEl.style.top = `${topPx}px`;
+  financesModalEl.style.bottom = 'auto';
+  financesModalSessionPosition = { left: leftPx, top: topPx };
+}
+
+function clampFinancesModalPosition(leftPx, topPx) {
+  const parent = financesModalEl.offsetParent;
+  const parentWidth = parent && Number.isFinite(parent.clientWidth) ? parent.clientWidth : window.innerWidth;
+  const parentHeight = parent && Number.isFinite(parent.clientHeight) ? parent.clientHeight : window.innerHeight;
+  const modalWidth = Number.isFinite(financesModalEl.offsetWidth) ? financesModalEl.offsetWidth : 0;
+  const titleHeight = Number.isFinite(financesModalTitleEl.offsetHeight) && financesModalTitleEl.offsetHeight > 0
+    ? financesModalTitleEl.offsetHeight
+    : FINANCES_MODAL_MIN_VISIBLE_PX;
+
+  const minLeft = FINANCES_MODAL_MIN_VISIBLE_PX - modalWidth;
+  const maxLeft = Math.max(0, parentWidth - FINANCES_MODAL_MIN_VISIBLE_PX);
+  const clampedLeft = Math.min(Math.max(leftPx, minLeft), maxLeft);
+
+  const clampedTop = Math.min(Math.max(topPx, 0), Math.max(0, parentHeight - titleHeight));
+
+  return { left: clampedLeft, top: clampedTop };
+}
+
+function handleFinancesModalDragStart(event) {
+  if (!event || event.button !== 0) {
+    return;
+  }
+
+  if (financesModalCloseButtonEl.contains(event.target)) {
+    return;
+  }
+
+  startPointerInteraction(event.pointerId);
+  event.preventDefault();
+
+  isFinancesModalDragging = true;
+  financesModalDragPointerId = event.pointerId;
+  financesModalDragStartClientX = event.clientX;
+  financesModalDragStartClientY = event.clientY;
+
+  if (financesModalSessionPosition) {
+    financesModalDragStartLeft = financesModalSessionPosition.left;
+    financesModalDragStartTop = financesModalSessionPosition.top;
+  } else {
+    financesModalDragStartLeft = financesModalEl.offsetLeft;
+    financesModalDragStartTop = financesModalEl.offsetTop;
+  }
+
+  financesModalEl.classList.add('finances-modal--dragging');
+
+  if (typeof financesModalTitleEl.setPointerCapture === 'function') {
+    try {
+      financesModalTitleEl.setPointerCapture(event.pointerId);
+    } catch (captureError) {
+      // Pointer capture can fail for synthetic pointers; dragging still works via window listeners.
+    }
+  }
+}
+
+function handleFinancesModalDragMove(event) {
+  if (!isFinancesModalDragging || event.pointerId !== financesModalDragPointerId) {
+    return;
+  }
+
+  event.preventDefault();
+
+  const nextLeft = financesModalDragStartLeft + (event.clientX - financesModalDragStartClientX);
+  const nextTop = financesModalDragStartTop + (event.clientY - financesModalDragStartClientY);
+  const clamped = clampFinancesModalPosition(nextLeft, nextTop);
+  applyFinancesModalPosition(clamped.left, clamped.top);
+}
+
+function handleFinancesModalDragEnd(event) {
+  if (!isFinancesModalDragging || event.pointerId !== financesModalDragPointerId) {
+    return;
+  }
+
+  isFinancesModalDragging = false;
+  financesModalDragPointerId = null;
+  financesModalEl.classList.remove('finances-modal--dragging');
+
+  if (
+    typeof financesModalTitleEl.releasePointerCapture === 'function' &&
+    typeof financesModalTitleEl.hasPointerCapture === 'function' &&
+    financesModalTitleEl.hasPointerCapture(event.pointerId)
+  ) {
+    try {
+      financesModalTitleEl.releasePointerCapture(event.pointerId);
+    } catch (releaseError) {
+      // Safe to ignore: capture release is best-effort.
+    }
+  }
+}
+
+if (gameScreenEl) {
+  gameScreenEl.appendChild(financesModalEl);
+
+  financesModalEl.addEventListener('pointerdown', (e) => {
+    startPointerInteraction(e.pointerId);
+  });
+
+  financesModalTitleEl.addEventListener('pointerdown', handleFinancesModalDragStart);
+  financesModalTitleEl.addEventListener('pointermove', handleFinancesModalDragMove);
+  financesModalTitleEl.addEventListener('pointerup', handleFinancesModalDragEnd);
+  financesModalTitleEl.addEventListener('pointercancel', handleFinancesModalDragEnd);
+  window.addEventListener('pointermove', handleFinancesModalDragMove);
+  window.addEventListener('pointerup', handleFinancesModalDragEnd);
+  window.addEventListener('pointercancel', handleFinancesModalDragEnd);
+}
+
 function formatCurrencyValue(value) {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) {
@@ -1608,6 +2438,30 @@ function getAuthoritativeAirportById(state, airportId) {
 
     return String(airport.id || airport.iata) === String(airportId);
   }) || null;
+}
+
+function resolveRouteMaxAircraftCapacity(state, route) {
+  if (!route || route.originAirportId == null || route.destinationAirportId == null) {
+    return null;
+  }
+
+  const originAirport = getAuthoritativeAirportById(state, route.originAirportId);
+  const destinationAirport = getAuthoritativeAirportById(state, route.destinationAirportId);
+  const originCapacity = originAirport && originAirport.capacity;
+  const destinationCapacity = destinationAirport && destinationAirport.capacity;
+  const originMax = originCapacity && originCapacity.maxAircraftPerRoute;
+  const destinationMax = destinationCapacity && destinationCapacity.maxAircraftPerRoute;
+
+  if (
+    !Number.isFinite(originMax) ||
+    originMax < 0 ||
+    !Number.isFinite(destinationMax) ||
+    destinationMax < 0
+  ) {
+    return null;
+  }
+
+  return Math.min(originMax, destinationMax);
 }
 
 function getAuthoritativeAirports(state) {
@@ -1719,10 +2573,13 @@ function applyAuthoritativeAircraftMaxPurchasable(maxPurchasable, { initialize =
   const normalizedQuantity = normalizeAircraftPurchaseQuantity(aircraftPurchaseQuantity);
   if (normalizedQuantity == null) {
     aircraftPurchaseQuantity = normalizedMax >= 1 ? 1 : 0;
-    return;
+  } else {
+    aircraftPurchaseQuantity = normalizedQuantity > normalizedMax ? normalizedMax : normalizedQuantity;
   }
 
-  aircraftPurchaseQuantity = normalizedQuantity > normalizedMax ? normalizedMax : normalizedQuantity;
+  if (aircraftPurchaseQuantity === 0 && normalizedMax >= 1) {
+    aircraftPurchaseQuantity = 1;
+  }
 }
 
 function applyAuthoritativeAircraftSellQuote(ownedQuantity, maxSellable, unitSellPrice, { initialize = false } = {}) {
@@ -1945,6 +2802,332 @@ function refreshShopModal(state = gameState.getState()) {
   shopModalOverlayEl.setAttribute('aria-hidden', 'true');
 }
 
+function refreshFinancesModal(state = gameState.getState()) {
+  const shouldShowFinancesModal = FinancesModalState.isOpen;
+  financesModalEl.classList.toggle('hidden', !shouldShowFinancesModal);
+  financesModalEl.setAttribute('aria-hidden', shouldShowFinancesModal ? 'false' : 'true');
+
+  if (!shouldShowFinancesModal) {
+    return;
+  }
+
+  const localPlayerId = state && state.session ? state.session.playerId : null;
+  const localPlayer = getAuthoritativePlayerById(state, localPlayerId);
+
+  const cash = localPlayer && Number.isFinite(localPlayer.capital) ? localPlayer.capital : null;
+  const netWorth = localPlayer && Number.isFinite(localPlayer.netWorth) ? localPlayer.netWorth : cash;
+
+  financesCashValueEl.textContent = Number.isFinite(cash) ? formatCurrencyValue(cash) : '--';
+  financesNetWorthValueEl.textContent = Number.isFinite(netWorth) ? formatCompactNetWorth(netWorth) : '--';
+
+  financesCashToggleEl.classList.toggle('finances-chart-toggle--off', !FinancesModalState.showCash);
+  financesNetWorthToggleEl.classList.toggle('finances-chart-toggle--off', !FinancesModalState.showNetWorth);
+  financesCashToggleEl.setAttribute('aria-pressed', FinancesModalState.showCash ? 'true' : 'false');
+  financesNetWorthToggleEl.setAttribute('aria-pressed', FinancesModalState.showNetWorth ? 'true' : 'false');
+
+  for (const button of financesTimeframeToggleEls) {
+    const isSelected = button.dataset.timeframe === FinancesModalState.selectedTimeframe;
+    button.classList.toggle('finances-timeframe-toggle--off', !isSelected);
+    button.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+  }
+
+  renderFinanceChart(buildFinanceChartData(state), state);
+}
+
+function buildFinanceLiveSample(state = gameState.getState()) {
+  const localPlayerId = state && state.session ? state.session.playerId : null;
+  const localPlayer = getAuthoritativePlayerById(state, localPlayerId);
+
+  const cash = localPlayer && Number.isFinite(localPlayer.capital) ? localPlayer.capital : null;
+  const netWorth = localPlayer && Number.isFinite(localPlayer.netWorth) ? localPlayer.netWorth : cash;
+
+  const simulationNowGameMs = deriveSimulationNowGameMs(simulationClockSnapshot);
+  const simulationStartedAtGameMs =
+    simulationClockSnapshot && Number.isFinite(simulationClockSnapshot.simulationStartedAtGameMs)
+      ? simulationClockSnapshot.simulationStartedAtGameMs
+      : null;
+
+  if (!Number.isFinite(simulationNowGameMs) || !Number.isFinite(simulationStartedAtGameMs)) {
+    return null;
+  }
+
+  return {
+    worldElapsedSimulationMs: Math.max(0, simulationNowGameMs - simulationStartedAtGameMs),
+    cash: Number.isFinite(cash) ? cash : 0,
+    netWorth: Number.isFinite(netWorth) ? netWorth : 0,
+    live: true
+  };
+}
+
+function buildFinanceChartData(state = gameState.getState()) {
+  const historySamples =
+    state && state.session && Array.isArray(state.session.financeHistorySamples)
+      ? state.session.financeHistorySamples
+      : [];
+
+  const chartData = historySamples.map((sample) => ({
+    worldElapsedSimulationMs: Number.isFinite(sample && sample.worldElapsedSimulationMs)
+      ? sample.worldElapsedSimulationMs
+      : null,
+    cash: Number.isFinite(sample && sample.cash) ? sample.cash : 0,
+    netWorth: Number.isFinite(sample && sample.netWorth) ? sample.netWorth : 0
+  }));
+
+  const liveSample = buildFinanceLiveSample(state);
+  if (liveSample) {
+    chartData.push(liveSample);
+  }
+
+  if (FinancesModalState.selectedTimeframe === 'All' || chartData.length === 0) {
+    return chartData;
+  }
+
+  const latestElapsedSimulationMs = chartData[chartData.length - 1].worldElapsedSimulationMs;
+  const windowMs = FINANCE_TIMEFRAME_WINDOWS_MS[FinancesModalState.selectedTimeframe];
+  if (!Number.isFinite(windowMs) || windowMs <= 0) {
+    return chartData;
+  }
+
+  const cutoff = latestElapsedSimulationMs - windowMs;
+  return chartData.filter((point) =>
+    Number.isFinite(point.worldElapsedSimulationMs) && point.worldElapsedSimulationMs >= cutoff
+  );
+}
+
+const FINANCE_CHART_WIDTH = 308;
+const FINANCE_CHART_HEIGHT = 140;
+const FINANCE_CHART_PAD_LEFT = 44;
+const FINANCE_CHART_PAD_RIGHT = 8;
+const FINANCE_CHART_PAD_TOP = 8;
+const FINANCE_CHART_PAD_BOTTOM = 20;
+const FINANCE_CHART_MONTH_ABBREVIATIONS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+
+function formatCompactNetWorth(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return '$0.00';
+  }
+
+  const absValue = Math.abs(numericValue);
+
+  if (absValue >= 1e9) {
+    return `$${(numericValue / 1e9).toFixed(2)}B`;
+  }
+
+  if (absValue >= 1e6) {
+    return `$${(numericValue / 1e6).toFixed(2)}M`;
+  }
+
+  if (absValue >= 1e3) {
+    return `$${(numericValue / 1e3).toFixed(2)}k`;
+  }
+
+  return formatCurrencyValue(numericValue);
+}
+
+function formatCompactCurrencyValue(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return '$0';
+  }
+
+  const sign = numericValue < 0 ? '-' : '';
+  const absValue = Math.abs(numericValue);
+  const units = [
+    { threshold: 1e9, suffix: 'B' },
+    { threshold: 1e6, suffix: 'M' },
+    { threshold: 1e3, suffix: 'k' }
+  ];
+
+  for (const unit of units) {
+    if (absValue >= unit.threshold) {
+      const scaled = absValue / unit.threshold;
+      const rounded = Math.round(scaled * 10) / 10;
+      const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+      return `${sign}$${text}${unit.suffix}`;
+    }
+  }
+
+  return `${sign}$${Math.round(absValue)}`;
+}
+
+function formatFinanceAxisLabel(worldElapsedSimulationMs, spanSimulationMs) {
+  if (!Number.isFinite(worldElapsedSimulationMs)) {
+    return '--';
+  }
+
+  const elapsed = Math.max(0, worldElapsedSimulationMs);
+  const padTwo = (value) => String(value).padStart(2, '0');
+  const dayMs = SIMULATION_HOURS_PER_DAY * SIMULATION_HOUR_MS;
+
+  if (!Number.isFinite(spanSimulationMs) || spanSimulationMs < dayMs) {
+    const totalMinutes = Math.floor(elapsed / 60000);
+    const totalHours = Math.floor(elapsed / SIMULATION_HOUR_MS);
+    return `${padTwo(totalHours % SIMULATION_HOURS_PER_DAY)}:${padTwo(totalMinutes % 60)}`;
+  }
+
+  const elapsedDays = Math.floor(elapsed / dayMs);
+  const dayOffsetInYear = elapsedDays % SIMULATION_DAYS_PER_YEAR;
+  const monthIndex = Math.floor(dayOffsetInYear / SIMULATION_DAYS_PER_MONTH);
+  const dayOfMonth = (dayOffsetInYear % SIMULATION_DAYS_PER_MONTH) + 1;
+
+  return `${FINANCE_CHART_MONTH_ABBREVIATIONS[monthIndex]} ${padTwo(dayOfMonth)}`;
+}
+
+function buildFinanceChartGeometry(chartData, { showCash = true, showNetWorth = true } = {}) {
+  const plotWidth = FINANCE_CHART_WIDTH - FINANCE_CHART_PAD_LEFT - FINANCE_CHART_PAD_RIGHT;
+  const plotHeight = FINANCE_CHART_HEIGHT - FINANCE_CHART_PAD_TOP - FINANCE_CHART_PAD_BOTTOM;
+
+  const points = Array.isArray(chartData)
+    ? chartData.filter((point) => point && Number.isFinite(point.worldElapsedSimulationMs))
+    : [];
+
+  if (points.length === 0) {
+    return { points: [], xTicks: [], yTicks: [], cashPath: '', netWorthPath: '', isEmpty: true };
+  }
+
+  const elapsedValues = points.map((point) => point.worldElapsedSimulationMs);
+  let xMin = Math.min(...elapsedValues);
+  let xMax = Math.max(...elapsedValues);
+  if (xMax === xMin) {
+    xMin -= 1;
+    xMax += 1;
+  }
+  const xSpan = xMax - xMin;
+
+  const visibleValues = [];
+  for (const point of points) {
+    if (showCash && Number.isFinite(point.cash)) {
+      visibleValues.push(point.cash);
+    }
+    if (showNetWorth && Number.isFinite(point.netWorth)) {
+      visibleValues.push(point.netWorth);
+    }
+  }
+  if (visibleValues.length === 0) {
+    for (const point of points) {
+      if (Number.isFinite(point.cash)) {
+        visibleValues.push(point.cash);
+      }
+      if (Number.isFinite(point.netWorth)) {
+        visibleValues.push(point.netWorth);
+      }
+    }
+  }
+
+  let yMin = visibleValues.length > 0 ? Math.min(...visibleValues) : 0;
+  let yMax = visibleValues.length > 0 ? Math.max(...visibleValues) : 1;
+  if (yMax === yMin) {
+    const padding = Math.abs(yMax) * 0.1 || 1;
+    yMin -= padding;
+    yMax += padding;
+  }
+
+  const toX = (elapsed) => FINANCE_CHART_PAD_LEFT + ((elapsed - xMin) / xSpan) * plotWidth;
+  const toY = (value) => FINANCE_CHART_PAD_TOP + (1 - (value - yMin) / (yMax - yMin)) * plotHeight;
+
+  const xTicks = [0, 1, 2, 3].map((index) => {
+    const elapsed = xMin + (xSpan * index) / 3;
+    return {
+      elapsed,
+      x: toX(elapsed),
+      label: formatFinanceAxisLabel(elapsed, xMax - xMin)
+    };
+  });
+
+  const yTicks = [0, 1, 2, 3].map((index) => {
+    const value = yMin + ((yMax - yMin) * index) / 3;
+    return {
+      value,
+      y: toY(value),
+      label: formatCompactCurrencyValue(value)
+    };
+  });
+
+  const buildPath = (key) => points
+    .filter((point) => Number.isFinite(point[key]))
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${toX(point.worldElapsedSimulationMs).toFixed(2)} ${toY(point[key]).toFixed(2)}`)
+    .join(' ');
+
+  return {
+    points,
+    xTicks,
+    yTicks,
+    cashPath: showCash ? buildPath('cash') : '',
+    netWorthPath: showNetWorth ? buildPath('netWorth') : '',
+    isEmpty: false
+  };
+}
+
+function renderFinanceChart(chartData, state) {
+  const geometry = buildFinanceChartGeometry(chartData, {
+    showCash: FinancesModalState.showCash,
+    showNetWorth: FinancesModalState.showNetWorth
+  });
+
+  financesChartSvgEl.textContent = '';
+
+  const appendSvgChild = (tagName, attributes) => {
+    const element = document.createElementNS(svgNamespace, tagName);
+    for (const [name, value] of Object.entries(attributes)) {
+      element.setAttribute(name, value);
+    }
+    financesChartSvgEl.appendChild(element);
+    return element;
+  };
+
+  for (const tick of geometry.yTicks) {
+    appendSvgChild('line', {
+      class: 'finances-chart-grid-line',
+      x1: FINANCE_CHART_PAD_LEFT,
+      x2: FINANCE_CHART_WIDTH - FINANCE_CHART_PAD_RIGHT,
+      y1: tick.y.toFixed(2),
+      y2: tick.y.toFixed(2)
+    });
+    appendSvgChild('text', {
+      class: 'finances-chart-tick-label',
+      x: FINANCE_CHART_PAD_LEFT - 6,
+      y: (tick.y + 3).toFixed(2),
+      'text-anchor': 'end'
+    }).textContent = tick.label;
+  }
+
+  for (const tick of geometry.xTicks) {
+    appendSvgChild('text', {
+      class: 'finances-chart-tick-label',
+      x: tick.x.toFixed(2),
+      y: FINANCE_CHART_HEIGHT - 5,
+      'text-anchor': 'middle'
+    }).textContent = tick.label;
+  }
+
+  if (geometry.cashPath) {
+    appendSvgChild('path', {
+      class: 'finances-chart-line finances-chart-line--cash',
+      d: geometry.cashPath
+    });
+  }
+
+  if (geometry.netWorthPath) {
+    appendSvgChild('path', {
+      class: 'finances-chart-line finances-chart-line--net-worth',
+      d: geometry.netWorthPath
+    });
+  }
+
+  if (geometry.isEmpty) {
+    appendSvgChild('text', {
+      class: 'finances-chart-empty-label',
+      x: FINANCE_CHART_WIDTH / 2,
+      y: FINANCE_CHART_HEIGHT / 2,
+      'text-anchor': 'middle'
+    }).textContent = 'No data yet';
+  }
+}
+
 function refreshRoutesHudButton(state = gameState.getState()) {
   const isInActiveGame =
     state &&
@@ -1970,7 +3153,7 @@ function refreshRoutesHudButton(state = gameState.getState()) {
   }
 }
 
-function createRouteListRow(routeId, originCode, destinationCode, isInActiveGame, pendingRemoval) {
+function createRouteListRow(routeId, originCode, destinationCode, assignedAircraftCount, maxAircraftCapacity, isInActiveGame, pendingRemoval) {
   const routeItemEl = document.createElement('div');
   routeItemEl.className = 'routes-list-item';
   routeItemEl.dataset.routeId = routeId;
@@ -1988,11 +3171,13 @@ function createRouteListRow(routeId, originCode, destinationCode, isInActiveGame
   const routeDistanceMetaEl = document.createElement('span');
   routeDistanceMetaEl.className = 'routes-list-meta-metric';
 
-  const routeActiveFlightsMetaEl = document.createElement('span');
-  routeActiveFlightsMetaEl.className = 'routes-list-meta-metric';
+  const routeAssignedAircraftMetaEl = document.createElement('span');
+  routeAssignedAircraftMetaEl.className = 'routes-list-meta-metric';
+  routeAssignedAircraftMetaEl.textContent =
+    `Assigned Aircraft: ${INTEGER_FORMATTER.format(assignedAircraftCount)}/${maxAircraftCapacity == null ? '—' : INTEGER_FORMATTER.format(maxAircraftCapacity)}`;
 
   routeMetaEl.appendChild(routeDistanceMetaEl);
-  routeMetaEl.appendChild(routeActiveFlightsMetaEl);
+  routeMetaEl.appendChild(routeAssignedAircraftMetaEl);
 
   routeMainEl.appendChild(routeTitleEl);
   routeMainEl.appendChild(routeMetaEl);
@@ -2037,24 +3222,25 @@ function createRouteListRow(routeId, originCode, destinationCode, isInActiveGame
     routeItemEl,
     routeTitleEl,
     routeDistanceMetaEl,
-    routeActiveFlightsMetaEl,
+    routeAssignedAircraftMetaEl,
     manageAircraftButtonEl,
     removeButtonEl
   };
 }
 
-function updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, activeFlightsCount, isInActiveGame, pendingRemoval) {
+function updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, assignedAircraftCount, maxAircraftCapacity, isInActiveGame, pendingRemoval) {
   const {
     routeTitleEl,
     routeDistanceMetaEl,
-    routeActiveFlightsMetaEl,
+    routeAssignedAircraftMetaEl,
     manageAircraftButtonEl,
     removeButtonEl
   } = rowElements;
 
   routeTitleEl.textContent = `${originCode} → ${destinationCode}`;
   routeDistanceMetaEl.textContent = `Distance: ${distanceText}`;
-  routeActiveFlightsMetaEl.textContent = `Active Flights: ${INTEGER_FORMATTER.format(activeFlightsCount)}`;
+  routeAssignedAircraftMetaEl.textContent =
+    `Assigned Aircraft: ${INTEGER_FORMATTER.format(assignedAircraftCount)}/${maxAircraftCapacity == null ? '—' : INTEGER_FORMATTER.format(maxAircraftCapacity)}`;
   manageAircraftButtonEl.disabled = !isInActiveGame;
   manageAircraftButtonEl.setAttribute('aria-label', `Manage aircraft for route ${originCode} to ${destinationCode}`);
 
@@ -2157,17 +3343,36 @@ function refreshRoutesModal(state = gameState.getState()) {
       const distanceText = Number.isFinite(route.distanceKm)
         ? `${INTEGER_FORMATTER.format(route.distanceKm)} km`
         : '-';
-      const activeFlightsCount = Number.isFinite(route.activeFlightsCount)
-        ? Math.max(0, route.activeFlightsCount)
+      const assignedAircraftCount = Array.isArray(route.assignedAircraftInstanceIds)
+        ? route.assignedAircraftInstanceIds.length
         : 0;
+      const maxAircraftCapacity = resolveRouteMaxAircraftCapacity(normalizedState, route);
 
       let rowElements = routeListRowByRouteId.get(routeId);
 
       if (!rowElements) {
-        rowElements = createRouteListRow(routeId, originCode, destinationCode, isInActiveGame, route.pendingRemoval);
+        rowElements = createRouteListRow(
+          routeId,
+          originCode,
+          destinationCode,
+          assignedAircraftCount,
+          maxAircraftCapacity,
+          isInActiveGame,
+          route.pendingRemoval
+        );
         routeListRowByRouteId.set(routeId, rowElements);
       } else {
-        updateRouteListRow(rowElements, routeId, originCode, destinationCode, distanceText, activeFlightsCount, isInActiveGame, route.pendingRemoval);
+        updateRouteListRow(
+          rowElements,
+          routeId,
+          originCode,
+          destinationCode,
+          distanceText,
+          assignedAircraftCount,
+          maxAircraftCapacity,
+          isInActiveGame,
+          route.pendingRemoval
+        );
       }
 
       routesListEl.appendChild(rowElements.routeItemEl);
@@ -2224,10 +3429,15 @@ function refreshRoutesModal(state = gameState.getState()) {
       'routes-aircraft-management-feedback--success',
       routeAircraftManagementFeedbackKind === 'success'
     );
+    routeAircraftManagementFeedbackEl.classList.toggle(
+      'routes-aircraft-management-feedback--info',
+      routeAircraftManagementFeedbackKind === 'info'
+    );
   } else {
     routeAircraftManagementFeedbackEl.textContent = '';
     routeAircraftManagementFeedbackEl.classList.add('hidden');
     routeAircraftManagementFeedbackEl.classList.remove('routes-aircraft-management-feedback--success');
+    routeAircraftManagementFeedbackEl.classList.remove('routes-aircraft-management-feedback--info');
   }
 
   if (selectedRouteForAircraftModal) {
@@ -2276,14 +3486,46 @@ function refreshRoutesModal(state = gameState.getState()) {
       return aircraftRangeKm >= routeDistanceKm;
     });
 
-    const assignedAircraft = localOwnedAircraft.filter((aircraft) => {
+    const allocatedAircraftInstanceIds = new Set(
+      (Array.isArray(selectedRouteForAircraftModal.assignedAircraftInstanceIds)
+        ? selectedRouteForAircraftModal.assignedAircraftInstanceIds
+        : []
+      ).map((aircraftInstanceId) => String(aircraftInstanceId || '').trim())
+    );
+    const allocatedAssignedAircraft = localOwnedAircraft.filter((aircraft) => {
+      const aircraftInstanceId = String(aircraft.aircraftInstanceId || '').trim();
       const assignedRouteId = String(aircraft.assignedRouteId || '').trim();
-      const isPendingUnassign = Boolean(aircraft.isPendingUnassign === true);
-      return assignedRouteId.length > 0 && assignedRouteId === selectedRouteId && !isPendingUnassign;
+      return allocatedAircraftInstanceIds.has(aircraftInstanceId) && assignedRouteId === selectedRouteId;
+    });
+    const assignedAircraftCountByCatalogId = new Map();
+    allocatedAssignedAircraft.forEach((aircraft) => {
+      const catalogId = String(aircraft.aircraftCatalogId || '').trim();
+      if (!catalogId) return;
+
+      assignedAircraftCountByCatalogId.set(
+        catalogId,
+        (assignedAircraftCountByCatalogId.get(catalogId) || 0) + 1
+      );
     });
 
     const groupedAvailableAircraft = groupRouteAircraftByCatalog(availableAircraft, aircraftCatalogLookupById);
-    const groupedAssignedAircraft = groupRouteAircraftByCatalog(assignedAircraft, aircraftCatalogLookupById);
+    const groupedAllocatedAircraft = groupRouteAircraftByCatalog(allocatedAssignedAircraft, aircraftCatalogLookupById);
+    const actionableAssignedAircraft = allocatedAssignedAircraft.filter((aircraft) => aircraft.isPendingUnassign !== true);
+    const groupedAssignedAircraft = groupRouteAircraftByCatalog(actionableAssignedAircraft, aircraftCatalogLookupById);
+    const actionableAircraftIdsByCatalogId = new Map(
+      groupedAssignedAircraft.map((group) => [group.catalogId, group.aircraftInstanceIds])
+    );
+    const groupedAssignedAircraftForDisplay = groupedAllocatedAircraft.map((group) => ({
+      ...group,
+      aircraftInstanceIds: actionableAircraftIdsByCatalogId.get(group.catalogId) || []
+    }));
+    const maxAircraftCapacity = resolveRouteMaxAircraftCapacity(normalizedState, selectedRouteForAircraftModal);
+    const assignedAircraftCount = Array.isArray(selectedRouteForAircraftModal.assignedAircraftInstanceIds)
+      ? selectedRouteForAircraftModal.assignedAircraftInstanceIds.length
+      : 0;
+    const isRouteAtAircraftCapacity =
+      maxAircraftCapacity != null && maxAircraftCapacity - assignedAircraftCount <= 0;
+    const modelEditLockedUntilRealMs = getRouteAircraftModelEditLocks(selectedRouteForAircraftModal);
     if (lastRenderedRouteAircraftManagementRouteId !== selectedRouteId) {
       routeAvailableAircraftRowByCatalogId = new Map();
       routeAssignedAircraftRowByCatalogId = new Map();
@@ -2325,19 +3567,22 @@ function refreshRoutesModal(state = gameState.getState()) {
       listEl: routeAvailableAircraftListEl,
       emptyMessage: 'No range-compatible available aircraft for this route.',
       isInActiveGame,
-      modelEditLockedUntilRealMs: selectedRouteForAircraftModal.modelEditLockedUntilRealMs
+      modelEditLockedUntilRealMs,
+      isRouteAtAircraftCapacity
     });
 
     syncRouteAircraftGroupRows({
       mode: 'unassign',
-      groups: groupedAssignedAircraft,
+      groups: groupedAssignedAircraftForDisplay,
       listEl: routeAssignedAircraftListEl,
       emptyMessage: 'No aircraft currently assigned to this route.',
       isInActiveGame,
-      modelEditLockedUntilRealMs: selectedRouteForAircraftModal.modelEditLockedUntilRealMs
+      modelEditLockedUntilRealMs,
+      assignedAircraftCountByCatalogId,
+      maxAircraftCapacity
     });
 
-    scheduleRouteAircraftModelEditLockRefresh(selectedRouteForAircraftModal.modelEditLockedUntilRealMs);
+    scheduleRouteAircraftModelEditLockRefresh(modelEditLockedUntilRealMs);
 
     if (focusedRouteQuantityInputBeforeSync) {
       const focusedRouteQuantityInputAfterSync = document.activeElement;
@@ -2698,10 +3943,19 @@ function isAirportOwnedByLocalPlayer(state, airport) {
   return ownerPlayerId != null && localPlayerId != null && String(ownerPlayerId) === String(localPlayerId);
 }
 
-function setAirportInteractionFallbackContent({ titleEl, ownerValueEl, priceValueEl, actionsEl, messageEl }) {
+function setAirportInteractionFallbackContent({ titleEl, ownerValueEl, priceValueEl, capacityLimitsValueEl, routesValueEl, assignedAircraftValueEl, actionsEl, messageEl }) {
   titleEl.textContent = 'Select an airport';
   ownerValueEl.textContent = 'Unknown';
   priceValueEl.textContent = '-';
+  if (capacityLimitsValueEl) {
+    capacityLimitsValueEl.textContent = '—';
+  }
+  if (routesValueEl) {
+    routesValueEl.textContent = '—';
+  }
+  if (assignedAircraftValueEl) {
+    assignedAircraftValueEl.textContent = '—';
+  }
   actionsEl.innerHTML = '';
   if (messageEl) {
     messageEl.textContent = 'Select an airport from the list to view purchase actions.';
@@ -3079,6 +4333,23 @@ function getRouteAircraftManagementResultMessage(result, fallbackMessage) {
   }
 
   return fallbackMessage;
+}
+
+function setRouteAircraftBulkResultFeedback(result, fallbackMessage) {
+  if (!result.success && result.code === 'MODEL_EDIT_LOCKED') {
+    routeAircraftManagementFeedbackKind = 'info';
+    routeAircraftManagementErrorMessage = 'Roster updating — please try again shortly.';
+    return;
+  }
+
+  if (!result.success) {
+    routeAircraftManagementFeedbackKind = 'error';
+    routeAircraftManagementErrorMessage = getRouteAircraftManagementResultMessage(result, fallbackMessage);
+    return;
+  }
+
+  routeAircraftManagementFeedbackKind = 'success';
+  routeAircraftManagementErrorMessage = '';
 }
 
 function getAircraftCatalogLookupById(state) {
@@ -3486,7 +4757,29 @@ function createRouteAircraftGroupRow(mode, catalogId) {
       maxQuantity,
       rawInputValue
     });
-    const aircraftInstanceIdsToMutate = currentGroup.aircraftInstanceIds.slice(0, committedQuantity);
+    let aircraftInstanceIdsToMutate = currentGroup.aircraftInstanceIds.slice(0, committedQuantity);
+    if (mode === 'assign') {
+      const latestRoutes = Array.isArray(state && state.game && state.game.routes)
+        ? state.game.routes
+        : [];
+      const latestRoute = latestRoutes.find((route) => {
+        return route && String(route.routeId || '') === selectedRouteId;
+      }) || null;
+      const maxAircraftCapacity = resolveRouteMaxAircraftCapacity(state, latestRoute);
+
+      if (maxAircraftCapacity != null && latestRoute) {
+        const assignedAircraftCount = Array.isArray(latestRoute.assignedAircraftInstanceIds)
+          ? latestRoute.assignedAircraftInstanceIds.length
+          : 0;
+        const remainingCapacity = Math.max(0, maxAircraftCapacity - assignedAircraftCount);
+        if (remainingCapacity === 0) {
+          return;
+        }
+
+        aircraftInstanceIdsToMutate = aircraftInstanceIdsToMutate.slice(0, remainingCapacity);
+      }
+    }
+
     if (!aircraftInstanceIdsToMutate.length) {
       refreshRoutesModal(gameState.getState());
       return;
@@ -3524,7 +4817,10 @@ function syncRouteAircraftGroupRows({
   listEl,
   emptyMessage,
   isInActiveGame,
-  modelEditLockedUntilRealMs
+  modelEditLockedUntilRealMs,
+  assignedAircraftCountByCatalogId,
+  maxAircraftCapacity,
+  isRouteAtAircraftCapacity = false
 }) {
   const rowLookup = getRouteAircraftRowLookupByMode(mode);
   const currentCatalogIds = new Set();
@@ -3570,7 +4866,14 @@ function syncRouteAircraftGroupRows({
       row.groupMetaSecondaryEl.textContent = '';
       row.groupMetaSecondaryEl.classList.add('hidden');
     } else {
-      row.groupMetaPrimaryEl.textContent = `Assigned: ${INTEGER_FORMATTER.format(maxQuantity)}`;
+      const assignedAircraftCount = assignedAircraftCountByCatalogId instanceof Map
+        ? assignedAircraftCountByCatalogId.get(catalogId)
+        : maxQuantity;
+      const displayAssignedAircraftCount = Number.isFinite(assignedAircraftCount)
+        ? assignedAircraftCount
+        : maxQuantity;
+      row.groupMetaPrimaryEl.textContent =
+        `Assigned: ${INTEGER_FORMATTER.format(displayAssignedAircraftCount)}/${maxAircraftCapacity == null ? '—' : INTEGER_FORMATTER.format(maxAircraftCapacity)}`;
       row.groupMetaPrimaryEl.classList.remove('hidden');
       row.groupMetaSecondaryEl.textContent = '';
       row.groupMetaSecondaryEl.classList.add('hidden');
@@ -3605,9 +4908,20 @@ function syncRouteAircraftGroupRows({
       hasPendingAircraftMutation ||
       !aircraftInstanceIdsToMutate.length ||
       (mode === 'assign' ? isBulkUnassignInProgress : isBulkAssignInProgress) ||
-      isModelEditLocked;
-    row.quantityInputEl.disabled = !isInActiveGame || hasPendingAircraftMutation || maxQuantity < 1;
-    row.quantityMaxButtonEl.disabled = !isInActiveGame || hasPendingAircraftMutation || maxQuantity < 1;
+      isModelEditLocked ||
+      (mode === 'assign' && isRouteAtAircraftCapacity);
+    row.quantityInputEl.disabled =
+      !isInActiveGame ||
+      hasPendingAircraftMutation ||
+      maxQuantity < 1 ||
+      isModelEditLocked ||
+      (mode === 'assign' && isRouteAtAircraftCapacity);
+    row.quantityMaxButtonEl.disabled =
+      !isInActiveGame ||
+      hasPendingAircraftMutation ||
+      maxQuantity < 1 ||
+      isModelEditLocked ||
+      (mode === 'assign' && isRouteAtAircraftCapacity);
   });
 
   Array.from(rowLookup.keys()).forEach((catalogId) => {
@@ -3654,6 +4968,37 @@ function startRouteAircraftBulkOperation({ mode, routeId, aircraftInstanceIds })
       : 'No available aircraft are ready to assign.';
     refreshRoutesModal(gameState.getState());
     return;
+  }
+
+  const latestState = gameState.getState();
+  const latestGame = latestState && latestState.game;
+  const latestRoutes = Array.isArray(latestGame && latestGame.routes) ? latestGame.routes : [];
+  const latestRoute = latestRoutes.find((route) => {
+    return route && String(route.routeId || '').trim() === normalizedRouteId;
+  });
+  const latestOwnedAircraft = Array.isArray(latestGame && latestGame.ownedAircraft)
+    ? latestGame.ownedAircraft
+    : [];
+  const selectedAircraftCatalogIds = new Set(
+    queueAircraftInstanceIds
+      .map((aircraftInstanceId) => {
+        const aircraft = latestOwnedAircraft.find((candidate) => {
+          return candidate && String(candidate.aircraftInstanceId || '').trim() === aircraftInstanceId;
+        });
+        return String(aircraft && aircraft.aircraftCatalogId || '').trim();
+      })
+      .filter((catalogId) => catalogId.length > 0)
+  );
+
+  if (latestRoute && selectedAircraftCatalogIds.size === 1) {
+    const [catalogId] = selectedAircraftCatalogIds;
+    const modelEditLockedUntilRealMs = getRouteAircraftModelEditLocks(latestRoute);
+    const lockedUntil = Number(modelEditLockedUntilRealMs[catalogId]);
+    if (Number.isFinite(lockedUntil) && Date.now() < lockedUntil) {
+      routeAircraftManagementErrorMessage = '';
+      refreshRoutesModal(latestState);
+      return;
+    }
   }
 
   routeAircraftBulkOperation = {
@@ -3956,18 +5301,72 @@ function renderAirportInteractionPrice(state, airport, priceLabelEl, priceValueE
   priceValueEl.appendChild(listedPriceEl);
 }
 
+function renderAirportInteractionCapacity(state, airport, capacityLimitsValueEl, routesValueEl, assignedAircraftValueEl) {
+  const airportOwnerId = airport && airport.ownerPlayerId != null ? String(airport.ownerPlayerId) : null;
+  const capacity = airport && airport.capacity && typeof airport.capacity === 'object' ? airport.capacity : null;
+  const maxRoutes = capacity && Number.isFinite(capacity.maxRoutes) ? capacity.maxRoutes : null;
+  const maxAircraftPerRoute = capacity && Number.isFinite(capacity.maxAircraftPerRoute) ? capacity.maxAircraftPerRoute : null;
+  const airportId = airport ? String(airport.id || airport.iata || '') : '';
+  const isCapacityAvailable = maxRoutes != null && maxAircraftPerRoute != null && airportId !== '';
+
+  if (!capacityLimitsValueEl && !routesValueEl && !assignedAircraftValueEl) {
+    return;
+  }
+
+  if (!isCapacityAvailable) {
+    if (capacityLimitsValueEl) {
+      capacityLimitsValueEl.textContent = '—';
+    }
+    if (routesValueEl) {
+      routesValueEl.textContent = '—';
+    }
+    if (assignedAircraftValueEl) {
+      assignedAircraftValueEl.textContent = '—';
+    }
+    return;
+  }
+
+  const routes = Array.isArray(state && state.game && state.game.routes) ? state.game.routes : [];
+  const airportRoutes = airportOwnerId == null
+    ? []
+    : routes.filter((route) => {
+        if (!route || String(route.ownerPlayerId) !== airportOwnerId) {
+          return false;
+        }
+
+        return String(route.originAirportId) === airportId || String(route.destinationAirportId) === airportId;
+      });
+
+  let assignedAircraftCount = 0;
+  for (const route of airportRoutes) {
+    if (Array.isArray(route.assignedAircraftInstanceIds)) {
+      assignedAircraftCount += route.assignedAircraftInstanceIds.length;
+    }
+  }
+
+  if (capacityLimitsValueEl) {
+    capacityLimitsValueEl.textContent = String(maxAircraftPerRoute);
+  }
+  if (routesValueEl) {
+    routesValueEl.textContent = airportRoutes.length > 0 ? `${maxRoutes} (${airportRoutes.length})` : String(maxRoutes);
+  }
+  if (assignedAircraftValueEl) {
+    assignedAircraftValueEl.textContent = `${assignedAircraftCount}/${maxRoutes * maxAircraftPerRoute}`;
+  }
+}
+
 function resolveAirportOwnerText(state, airport) {
   const ownerPlayerId = airport.ownerPlayerId;
   if (ownerPlayerId == null) {
     return 'Unowned';
   }
 
+  const ownerPlayer = getAuthoritativePlayerById(state, ownerPlayerId);
   const localPlayerId = state && state.session ? state.session.playerId : null;
   if (localPlayerId != null && String(ownerPlayerId) === String(localPlayerId)) {
-    return 'You';
+    return ownerPlayer && ownerPlayer.username ? `${ownerPlayer.username} (You)` : 'You';
   }
 
-  const ownerPlayer = getAuthoritativePlayerById(state, ownerPlayerId);
   if (!ownerPlayer || !ownerPlayer.username) {
     return 'Unknown';
   }
@@ -3975,12 +5374,40 @@ function resolveAirportOwnerText(state, airport) {
   return ownerPlayer.isBot ? `[Bot] ${ownerPlayer.username}` : ownerPlayer.username;
 }
 
-function renderAirportInteractionContent({ titleEl, ownerValueEl, priceLabelEl, priceValueEl, actionsEl, messageEl }, state, airport) {
+function applyAirportOwnerTextColor(state, airport, ownerValueEl) {
+  ownerValueEl.style.removeProperty('color');
+  if (!airport || airport.ownerPlayerId == null) {
+    return;
+  }
+
+  const ownerPlayer = getAuthoritativePlayerById(state, airport.ownerPlayerId);
+  const ownerColorHex = ownerPlayer && typeof ownerPlayer.colorHex === 'string'
+    ? ownerPlayer.colorHex.trim()
+    : '';
+  if (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(ownerColorHex)) {
+    ownerValueEl.style.color = ownerColorHex;
+  }
+}
+
+function renderAirportInteractionContent({ titleEl, ownerValueEl, priceLabelEl, priceValueEl, capacityLimitsValueEl, routesValueEl, assignedAircraftValueEl, actionsEl, messageEl }, state, airport) {
   const airportCode = airport.iata || airport.id || selectedAirportId;
   const airportName = airport.name || 'Unknown Airport';
-  titleEl.textContent = `${airportName} (${airportCode})`;
+  titleEl.textContent = '';
+  const airportNameEl = document.createElement('span');
+  airportNameEl.className = 'airport-interaction-title-name';
+  airportNameEl.textContent = `${airportName} (${airportCode})`;
+  titleEl.appendChild(airportNameEl);
+  const tierBadgeEl =
+    window.airportTiers && typeof window.airportTiers.createAirportTierBadge === 'function'
+      ? window.airportTiers.createAirportTierBadge(document, airport.economicClass)
+      : null;
+  if (tierBadgeEl) {
+    titleEl.appendChild(tierBadgeEl);
+  }
   ownerValueEl.textContent = resolveAirportOwnerText(state, airport);
+  applyAirportOwnerTextColor(state, airport, ownerValueEl);
   renderAirportInteractionPrice(state, airport, priceLabelEl, priceValueEl);
+  renderAirportInteractionCapacity(state, airport, capacityLimitsValueEl, routesValueEl, assignedAircraftValueEl);
   renderAirportInteractionActions(state, airport, actionsEl);
   if (messageEl) {
     messageEl.textContent = '';
@@ -4141,6 +5568,9 @@ function refreshShopAirportInteractionPanel(state) {
     ownerValueEl: shopAirportOwnerValueEl,
     priceLabelEl: shopAirportPriceLabelEl,
     priceValueEl: shopAirportPriceValueEl,
+    capacityLimitsValueEl: shopAirportCapacityLimitsValueEl,
+    routesValueEl: shopAirportRoutesValueEl,
+    assignedAircraftValueEl: shopAirportAssignedAircraftValueEl,
     actionsEl: shopAirportActionsEl,
     messageEl: shopAirportMessageEl
   }, state, airport);
@@ -4160,6 +5590,12 @@ function openShopFromAirportMarker(airportId) {
 renderer.setAirportSelectHandler(openShopFromAirportMarker);
 renderer.setAircraftSelectHandler(openShopFromHud);
 
+if (typeof renderer.setCountryHoverChangeHandler === 'function') {
+  renderer.setCountryHoverChangeHandler((countryName) => {
+    simulationClockCountryEl.textContent = String(countryName || '').trim();
+  });
+}
+
 shopAirportsTabButtonEl.addEventListener('click', () => {
   setShopActiveTab(SHOP_MODAL_TAB.AIRPORTS);
   refreshShopModal(gameState.getState());
@@ -4175,11 +5611,47 @@ shopModalCloseButtonEl.addEventListener('click', () => {
 });
 
 routesHudButtonEl.addEventListener('click', () => {
+  if (RoutesModalState.isOpen) {
+    closeRoutesModal();
+    return;
+  }
+
+  if (ShopModalState.isOpen) {
+    closeShopModal();
+  }
+
   openRoutesModal({ openedFrom: ROUTES_MODAL_OPENED_FROM.HUD });
 });
 
 shopHudButtonEl.addEventListener('click', () => {
+  if (ShopModalState.isOpen) {
+    closeShopModal();
+    return;
+  }
+
+  if (RoutesModalState.isOpen) {
+    closeRoutesModal();
+  }
+
   openShopFromHud();
+});
+
+financesHudButtonEl.addEventListener('click', () => {
+  toggleFinancesModal();
+});
+
+financesModalCloseButtonEl.addEventListener('click', () => {
+  closeFinancesModal();
+});
+
+financesCashToggleEl.addEventListener('click', () => {
+  FinancesModalState.showCash = !FinancesModalState.showCash;
+  refreshFinancesModal(gameState.getState());
+});
+
+financesNetWorthToggleEl.addEventListener('click', () => {
+  FinancesModalState.showNetWorth = !FinancesModalState.showNetWorth;
+  refreshFinancesModal(gameState.getState());
 });
 
 routesModalCloseButtonEl.addEventListener('click', () => {
@@ -4319,6 +5791,23 @@ shopModalOverlayEl.addEventListener('click', (event) => {
     return;
   }
 
+  const isAnyShopSearchOpen = isAirportSearchResultsOpen || isAircraftSearchResultsOpen;
+  if (isAnyShopSearchOpen) {
+    if (isAirportSearchResultsOpen) {
+      closeAirportSearchResults();
+    }
+
+    if (isAircraftSearchResultsOpen) {
+      closeAircraftSearchResults();
+    }
+
+    refreshShopAirportInteractionPanel(gameState.getState());
+    refreshShopAircraftInteractionPanel(gameState.getState());
+    event.stopPropagation();
+    return;
+  }
+
+  event.stopPropagation();
   closeShopModal();
 });
 
@@ -4687,7 +6176,8 @@ function renderSimulationClockText(dateText, timeText) {
 }
 
 function formatElapsedSimulationClockText(snapshot, simulationNowGameMs) {
-  const formatDayOrHour = (value) => String(Math.max(0, Number(value) || 0)).padStart(2, '0');
+  const formatTwoDigit = (value) => String(Math.max(0, Number(value) || 0)).padStart(2, '0');
+  const formatYear = (value) => String(Math.max(0, Number(value) || 0));
 
   if (!Number.isFinite(simulationNowGameMs) || !snapshot || !Number.isFinite(snapshot.simulationStartedAtGameMs)) {
     return {
@@ -4701,36 +6191,17 @@ function formatElapsedSimulationClockText(snapshot, simulationNowGameMs) {
   const elapsedCompleteDays = Math.floor(totalElapsedHours / SIMULATION_HOURS_PER_DAY);
   const hourOfDay = totalElapsedHours % SIMULATION_HOURS_PER_DAY;
 
-  if (elapsedCompleteDays < SIMULATION_DAYS_PER_MONTH) {
-    const dayNumber = elapsedCompleteDays + 1;
-    return {
-      primaryText: `Day ${formatDayOrHour(dayNumber)}, Hour ${formatDayOrHour(hourOfDay)}`,
-      secondaryText: ''
-    };
-  }
-
-  if (elapsedCompleteDays < SIMULATION_DAYS_PER_YEAR) {
-    const monthNumber = Math.floor(elapsedCompleteDays / SIMULATION_DAYS_PER_MONTH);
-    const dayOfMonth = (elapsedCompleteDays % SIMULATION_DAYS_PER_MONTH) + 1;
-    return {
-      primaryText:
-        `Month ${formatDayOrHour(monthNumber)}, ` +
-        `Day ${formatDayOrHour(dayOfMonth)}, ` +
-        `Hour ${formatDayOrHour(hourOfDay)}`,
-      secondaryText: ''
-    };
-  }
-
-  const yearNumber = Math.floor(elapsedCompleteDays / SIMULATION_DAYS_PER_YEAR);
+  const yearNumber = Math.floor(elapsedCompleteDays / SIMULATION_DAYS_PER_YEAR) + 1;
   const dayOffsetInYear = elapsedCompleteDays % SIMULATION_DAYS_PER_YEAR;
   const monthOfYear = Math.floor(dayOffsetInYear / SIMULATION_DAYS_PER_MONTH) + 1;
   const dayOfMonth = (dayOffsetInYear % SIMULATION_DAYS_PER_MONTH) + 1;
+
   return {
     primaryText:
-      `Year ${INTEGER_FORMATTER.format(yearNumber)}, ` +
-      `Month ${formatDayOrHour(monthOfYear)}, ` +
-      `Day ${formatDayOrHour(dayOfMonth)}, ` +
-      `Hour ${formatDayOrHour(hourOfDay)}`,
+      `Year ${formatYear(yearNumber)}, ` +
+      `Month ${formatTwoDigit(monthOfYear)}, ` +
+      `Day ${formatTwoDigit(dayOfMonth)}, ` +
+      `Hour ${formatTwoDigit(hourOfDay + 1)}`,
     secondaryText: ''
   };
 }
@@ -5243,6 +6714,82 @@ socket.on('game:event', (eventPayload) => {
   appendGameEventToHistory(eventPayload);
 });
 
+const FINANCE_HISTORY_CLIENT_MAX_SAMPLES = 6500;
+
+function normalizeFinanceHistorySample(sample) {
+  if (!sample || typeof sample !== 'object' || !Number.isFinite(sample.worldElapsedSimulationMs)) {
+    return null;
+  }
+
+  return {
+    worldElapsedSimulationMs: sample.worldElapsedSimulationMs,
+    cash: Number.isFinite(sample.cash) ? sample.cash : 0,
+    netWorth: Number.isFinite(sample.netWorth) ? sample.netWorth : 0
+  };
+}
+
+function mergeFinanceHistorySamples(existingSamples, incomingSamples) {
+  const byElapsed = new Map();
+
+  for (const list of [existingSamples, incomingSamples]) {
+    if (!Array.isArray(list)) {
+      continue;
+    }
+    for (const raw of list) {
+      const sample = normalizeFinanceHistorySample(raw);
+      if (sample) {
+        byElapsed.set(sample.worldElapsedSimulationMs, sample);
+      }
+    }
+  }
+
+  const merged = [...byElapsed.values()].sort(
+    (a, b) => a.worldElapsedSimulationMs - b.worldElapsedSimulationMs
+  );
+
+  return merged.length > FINANCE_HISTORY_CLIENT_MAX_SAMPLES
+    ? merged.slice(merged.length - FINANCE_HISTORY_CLIENT_MAX_SAMPLES)
+    : merged;
+}
+
+socket.on('finance:history:result', (result = {}) => {
+  if (!result || result.ok !== true || !Array.isArray(result.samples)) {
+    return;
+  }
+
+  gameState.update((state) => ({
+    session: {
+      financeHistorySamples: mergeFinanceHistorySamples(
+        state.session.financeHistorySamples,
+        result.samples
+      )
+    }
+  }));
+});
+
+socket.on('finance:history:sample', (sample) => {
+  if (!normalizeFinanceHistorySample(sample)) {
+    return;
+  }
+
+  gameState.update((state) => ({
+    session: {
+      financeHistorySamples: mergeFinanceHistorySamples(
+        state.session.financeHistorySamples,
+        [sample]
+      )
+    }
+  }));
+});
+
+function requestFinanceHistory() {
+  if (!socket || socket.connected === false) {
+    return;
+  }
+
+  socket.emit('finance:history:request');
+}
+
 socket.on('route:create:result', (result = {}) => {
   if (!isRouteCreatePending) {
     return;
@@ -5304,19 +6851,12 @@ socket.on('route:aircraft:assign:bulk:result', (result = {}) => {
     return;
   }
 
+  rememberRouteAircraftModelEditLock(result);
   pendingRouteAircraftAssignAircraftInstanceId = null;
   pendingRouteAircraftUnassignAircraftInstanceId = null;
   routeAircraftBulkOperation = null;
 
-  if (!result.success) {
-    routeAircraftManagementFeedbackKind = 'error';
-    routeAircraftManagementErrorMessage = getRouteAircraftManagementResultMessage(result, 'Unable to assign aircraft.');
-    refreshRoutesModal(gameState.getState());
-    return;
-  }
-
-  routeAircraftManagementFeedbackKind = 'success';
-  routeAircraftManagementErrorMessage = '';
+  setRouteAircraftBulkResultFeedback(result, 'Unable to assign aircraft.');
   refreshRoutesModal(gameState.getState());
 });
 
@@ -5326,19 +6866,12 @@ socket.on('route:aircraft:unassign:bulk:result', (result = {}) => {
     return;
   }
 
+  rememberRouteAircraftModelEditLock(result);
   pendingRouteAircraftUnassignAircraftInstanceId = null;
   pendingRouteAircraftAssignAircraftInstanceId = null;
   routeAircraftBulkOperation = null;
 
-  if (!result.success) {
-    routeAircraftManagementFeedbackKind = 'error';
-    routeAircraftManagementErrorMessage = getRouteAircraftManagementResultMessage(result, 'Unable to unassign aircraft.');
-    refreshRoutesModal(gameState.getState());
-    return;
-  }
-
-  routeAircraftManagementFeedbackKind = 'success';
-  routeAircraftManagementErrorMessage = '';
+  setRouteAircraftBulkResultFeedback(result, 'Unable to unassign aircraft.');
   refreshRoutesModal(gameState.getState());
 });
 

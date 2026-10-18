@@ -58,7 +58,7 @@
         session: mergeSection(state.session, patch.session),
         lobby: mergeSection(state.lobby, patch.lobby),
         ui: mergeSection(state.ui, patch.ui),
-        game: typeof patch.game === 'undefined' ? state.game : mergeSection(undefined, patch.game),
+        game: typeof patch.game === 'undefined' ? state.game : mergeSection(state.game, patch.game),
         waitingAnimation: mergeSection(state.waitingAnimation, patch.waitingAnimation)
       };
 

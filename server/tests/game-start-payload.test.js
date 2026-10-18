@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Game = require('../Game');
 const { AIRCRAFT_CATALOG } = require('../aircraft/catalog');
+const { createGame } = require('../gameFactory');
 
 test('game:started public payload includes authoritative game wrapper', () => {
   const initialState = {
@@ -12,6 +13,7 @@ test('game:started public payload includes authoritative game wrapper', () => {
     endsAt: 1923456,
     durationMs: 1800000,
     scoreToWin: 1000,
+    worldCalendarStartYear: 2026,
     players: [
       { id: 'p1', username: 'Alice', capital: 1000000, colorId: 'red', colorHex: '#ef4444', internalOnlyField: 'secret' }
     ],
@@ -70,14 +72,16 @@ test('game:started public payload includes authoritative game wrapper', () => {
       scoreToWin: 1000,
       simulationStartedAtRealMs: null,
       simulationStartedAtGameMs: null,
-      simulationSpeedMultiplier: 10000,
+      simulationSpeedMultiplier: 15000,
       simulationEndedAtGameMs: null,
+      worldCalendarStartYear: 2026,
       simulationClock: {
         simulationStartedAtRealMs: null,
         simulationStartedAtGameMs: null,
-        simulationSpeedMultiplier: 10000,
+        simulationSpeedMultiplier: 15000,
         simulationEndedAtGameMs: null,
-        simulationNowGameMs: null
+        simulationNowGameMs: null,
+        worldCalendarStartYear: 2026
       },
       players: [
         {
@@ -166,6 +170,56 @@ test('game:started public payload includes authoritative game wrapper', () => {
   assert.equal('durationMs' in payload.game, true);
   assert.equal('scoreToWin' in payload.game, true);
   assert.equal('simulationClock' in payload.game, true);
+});
+
+test('public aircraft catalog includes the Airbus A320 definition', () => {
+  const game = new Game({
+    id: 'game-airbus-a320-public-catalog',
+    status: 'active',
+    players: [],
+    airports: [],
+    ownedAircraft: [],
+    routes: [],
+    flights: []
+  }, {
+    io: {
+      to() {
+        return { emit() {} };
+      }
+    }
+  });
+
+  const aircraft = game.getPublicState().game.aircraftCatalog.find(
+    (entry) => entry.aircraftCatalogId === 'AIRBUS_A320'
+  );
+
+  assert.deepEqual(aircraft, {
+    aircraftCatalogId: 'AIRBUS_A320',
+    manufacturer: 'Airbus',
+    model: 'A320',
+    purchasePrice: 280000,
+    rangeKm: 5700,
+    cruiseSpeedKmH: 830,
+    baseRevenuePerKm: 32,
+    fuelCostPerKm: 13,
+    monthlyMaintenanceCost: 72000
+  });
+});
+
+test('new-game duration and simulation speed are exposed in the public game snapshot', () => {
+  const game = new Game(createGame([]), {
+    io: {
+      to() {
+        return { emit() {} };
+      }
+    }
+  });
+
+  const { game: publicGame } = game.getPublicState();
+  assert.equal(publicGame.durationMs, 60 * 60 * 1000);
+  assert.equal(publicGame.endsAt - publicGame.startedAt, 60 * 60 * 1000);
+  assert.equal(publicGame.simulationSpeedMultiplier, 12500);
+  assert.equal(publicGame.simulationClock.simulationSpeedMultiplier, 12500);
 });
 
 test('game:started public player payload includes only explicit public fields', () => {

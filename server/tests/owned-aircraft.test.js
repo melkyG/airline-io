@@ -13,30 +13,73 @@ const {
   validateAircraftCatalogEntry
 } = require('../aircraft/catalog');
 
-test('active aircraft catalog is manually authored with BOEING_747 and BOEING_737 active', () => {
+test('active aircraft catalog contains all six expected aircraft', () => {
   assert.equal(Array.isArray(AIRCRAFT_CATALOG), true);
-  assert.equal(AIRCRAFT_CATALOG.length, 2);
+  assert.equal(AIRCRAFT_CATALOG.length, 6);
 
   const catalogById = AIRCRAFT_CATALOG.reduce((lookup, aircraft) => {
     lookup[aircraft.aircraftCatalogId] = aircraft;
     return lookup;
   }, Object.create(null));
 
-  assert.deepEqual(Object.keys(catalogById).sort(), ['BOEING_737', 'BOEING_747']);
+  assert.deepEqual(
+    Object.keys(catalogById).sort(),
+    ['AIRBUS_A320', 'AIRBUS_A350', 'ATR_72', 'BOEING_737', 'BOEING_747', 'BOMBARDIER_CRJ900']
+  );
 
-  assert.equal(catalogById.BOEING_747.manufacturer, 'Boeing');
-  assert.equal(catalogById.BOEING_747.model, '747');
-  assert.equal(catalogById.BOEING_747.purchasePrice, 300000);
-  assert.equal(catalogById.BOEING_747.rangeKm, 14000);
-  assert.equal(catalogById.BOEING_747.cruiseSpeedKmH, 900);
-  assert.equal(catalogById.BOEING_747.baseRevenuePerKm, 130);
+  assert.equal(catalogById.ATR_72.manufacturer, 'ATR');
+  assert.equal(catalogById.ATR_72.model, '72');
+  assert.equal(catalogById.ATR_72.purchasePrice, 100000);
+  assert.equal(catalogById.ATR_72.rangeKm, 1500);
+  assert.equal(catalogById.ATR_72.cruiseSpeedKmH, 510);
+  assert.equal(catalogById.ATR_72.baseRevenuePerKm, 11.25);
+  assert.equal(catalogById.ATR_72.fuelCostPerKm, 4);
+  assert.equal(catalogById.ATR_72.monthlyMaintenanceCost, 24000);
+
+  assert.equal(catalogById.BOMBARDIER_CRJ900.manufacturer, 'Bombardier');
+  assert.equal(catalogById.BOMBARDIER_CRJ900.model, 'CRJ900');
+  assert.equal(catalogById.BOMBARDIER_CRJ900.purchasePrice, 200000);
+  assert.equal(catalogById.BOMBARDIER_CRJ900.rangeKm, 3500);
+  assert.equal(catalogById.BOMBARDIER_CRJ900.cruiseSpeedKmH, 830);
+  assert.equal(catalogById.BOMBARDIER_CRJ900.baseRevenuePerKm, 23.25);
+  assert.equal(catalogById.BOMBARDIER_CRJ900.fuelCostPerKm, 9);
+  assert.equal(catalogById.BOMBARDIER_CRJ900.monthlyMaintenanceCost, 51000);
 
   assert.equal(catalogById.BOEING_737.manufacturer, 'Boeing');
   assert.equal(catalogById.BOEING_737.model, '737');
-  assert.equal(catalogById.BOEING_737.purchasePrice, 220000);
+  assert.equal(catalogById.BOEING_737.purchasePrice, 300000);
   assert.equal(catalogById.BOEING_737.rangeKm, 6500);
   assert.equal(catalogById.BOEING_737.cruiseSpeedKmH, 840);
-  assert.equal(catalogById.BOEING_737.baseRevenuePerKm, 105);
+  assert.equal(catalogById.BOEING_737.baseRevenuePerKm, 36.02);
+  assert.equal(catalogById.BOEING_737.fuelCostPerKm, 15);
+  assert.equal(catalogById.BOEING_737.monthlyMaintenanceCost, 80000);
+
+  assert.equal(catalogById.AIRBUS_A320.manufacturer, 'Airbus');
+  assert.equal(catalogById.AIRBUS_A320.model, 'A320');
+  assert.equal(catalogById.AIRBUS_A320.purchasePrice, 280000);
+  assert.equal(catalogById.AIRBUS_A320.rangeKm, 5700);
+  assert.equal(catalogById.AIRBUS_A320.cruiseSpeedKmH, 830);
+  assert.equal(catalogById.AIRBUS_A320.baseRevenuePerKm, 32);
+  assert.equal(catalogById.AIRBUS_A320.fuelCostPerKm, 13);
+  assert.equal(catalogById.AIRBUS_A320.monthlyMaintenanceCost, 72000);
+
+  assert.equal(catalogById.BOEING_747.manufacturer, 'Boeing');
+  assert.equal(catalogById.BOEING_747.model, '747');
+  assert.equal(catalogById.BOEING_747.purchasePrice, 400000);
+  assert.equal(catalogById.BOEING_747.rangeKm, 14000);
+  assert.equal(catalogById.BOEING_747.cruiseSpeedKmH, 900);
+  assert.equal(catalogById.BOEING_747.baseRevenuePerKm, 49.5);
+  assert.equal(catalogById.BOEING_747.fuelCostPerKm, 22);
+  assert.equal(catalogById.BOEING_747.monthlyMaintenanceCost, 112000);
+
+  assert.equal(catalogById.AIRBUS_A350.manufacturer, 'Airbus');
+  assert.equal(catalogById.AIRBUS_A350.model, 'A350');
+  assert.equal(catalogById.AIRBUS_A350.purchasePrice, 500000);
+  assert.equal(catalogById.AIRBUS_A350.rangeKm, 15500);
+  assert.equal(catalogById.AIRBUS_A350.cruiseSpeedKmH, 905);
+  assert.equal(catalogById.AIRBUS_A350.baseRevenuePerKm, 64);
+  assert.equal(catalogById.AIRBUS_A350.fuelCostPerKm, 24);
+  assert.equal(catalogById.AIRBUS_A350.monthlyMaintenanceCost, 148000);
 
   AIRCRAFT_CATALOG.forEach((entry) => {
     assert.equal('passengerCapacity' in entry, false);
@@ -45,8 +88,10 @@ test('active aircraft catalog is manually authored with BOEING_747 and BOEING_73
       'aircraftCatalogId',
       'baseRevenuePerKm',
       'cruiseSpeedKmH',
+      'fuelCostPerKm',
       'manufacturer',
       'model',
+      'monthlyMaintenanceCost',
       'purchasePrice',
       'rangeKm'
     ]);
@@ -68,7 +113,9 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         purchasePrice: 300000,
         rangeKm: 14000,
         cruiseSpeedKmH: 900,
-        baseRevenuePerKm: 130
+        baseRevenuePerKm: 130,
+        fuelCostPerKm: 18,
+        monthlyMaintenanceCost: 100000
       });
     },
     /aircraftCatalogId must be a non-empty string/
@@ -84,6 +131,8 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         rangeKm: 14000,
         cruiseSpeedKmH: 900,
         baseRevenuePerKm: 130,
+        fuelCostPerKm: 18,
+        monthlyMaintenanceCost: 100000,
         speed: 900
       });
     },
@@ -99,7 +148,9 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         purchasePrice: -1,
         rangeKm: 14000,
         cruiseSpeedKmH: 900,
-        baseRevenuePerKm: 130
+        baseRevenuePerKm: 130,
+        fuelCostPerKm: 18,
+        monthlyMaintenanceCost: 100000
       });
     },
     /purchasePrice must be a finite non-negative number/
@@ -114,7 +165,9 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         purchasePrice: 300000,
         rangeKm: 14000,
         cruiseSpeedKmH: 0,
-        baseRevenuePerKm: 130
+        baseRevenuePerKm: 130,
+        fuelCostPerKm: 18,
+        monthlyMaintenanceCost: 100000
       });
     },
     /cruiseSpeedKmH must be a finite positive number/
@@ -129,7 +182,9 @@ test('validateAircraftCatalogEntry enforces required schema and rejects unknown 
         purchasePrice: 300000,
         rangeKm: 14000,
         cruiseSpeedKmH: 900,
-        baseRevenuePerKm: 0
+        baseRevenuePerKm: 0,
+        fuelCostPerKm: 18,
+        monthlyMaintenanceCost: 100000
       });
     },
     /baseRevenuePerKm must be a finite positive number/

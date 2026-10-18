@@ -530,6 +530,42 @@ test('assignAircraftToRoute assigns an available owned aircraft atomically and b
   assert.equal(emitted[0].payload.game.flights.length, 1);
 });
 
+test('Airbus A320 assignment accepts a 5,700 km route and rejects a longer route', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const createA320RouteGame = (distanceKm) => new Game(
+    createGameState({
+      routes: [{
+        routeId: 'route-a320',
+        ownerPlayerId: 'p1',
+        originAirportId: 'YYZ',
+        destinationAirportId: 'JFK',
+        routeKey: canonicalRouteKey('YYZ', 'JFK'),
+        distanceKm,
+        assignedAircraftInstanceIds: []
+      }],
+      ownedAircraft: [{
+        aircraftInstanceId: 'acft-a320',
+        ownerPlayerId: 'p1',
+        aircraftCatalogId: 'AIRBUS_A320',
+        acquisitionPrice: 280000,
+        status: OWNED_AIRCRAFT_STATUS.AVAILABLE,
+        assignedRouteId: null
+      }]
+    }),
+    manager
+  );
+
+  const atRangeGame = createA320RouteGame(5700);
+  const atRangeResult = atRangeGame.assignAircraftToRoute('p1', 'route-a320', 'acft-a320');
+  assert.equal(atRangeResult.success, true);
+  assert.equal(atRangeGame.authoritativeState.flights[0].aircraftInstanceId, 'acft-a320');
+
+  const beyondRangeGame = createA320RouteGame(5701);
+  const beyondRangeResult = beyondRangeGame.assignAircraftToRoute('p1', 'route-a320', 'acft-a320');
+  assert.equal(beyondRangeResult.success, false);
+  assert.equal(beyondRangeResult.code, 'AIRCRAFT_RANGE_INSUFFICIENT');
+});
+
 test('assignAircraftToRoute validates player/route/aircraft existence, ownership, availability, assignment, and range with no mutation on failure', () => {
   const { manager, emitted } = createManagerWithEmitCapture();
   const baseState = createGameState({
@@ -935,4 +971,466 @@ test('GameManager route-aircraft socket handlers validate payloads and delegate 
   assert.equal(unassignResult.code, 'OK');
   assert.equal(emitted.filter((entry) => entry.eventName === 'game:event').length, 0);
   assert.equal(emitted.filter((entry) => entry.eventName === 'game:state').length, 2);
+});
+
+function createOwnedAirportStates(airportIds, ownerPlayerId = 'p1') {
+  return airportIds.map((airportId) => ({
+    airportId,
+    ownerPlayerId,
+    saleListing: null
+  }));
+}
+
+function createSeededRoute(routeId, ownerPlayerId, originAirportId, destinationAirportId, overrides = {}) {
+  return {
+    routeId,
+    ownerPlayerId,
+    originAirportId,
+    destinationAirportId,
+    routeKey: `seeded-${routeId}`,
+    distanceKm: 550,
+    assignedAircraftInstanceIds: [],
+    pendingRemoval: false,
+    ...overrides
+  };
+}
+
+function captureLogs(fn) {
+  const original = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(' '));
+  try {
+    fn();
+  } finally {
+    console.log = original;
+  }
+  return logs;
+}
+
+test('createRoute enforces Cheap route capacity, consumes slots at both endpoints, and blocks when either endpoint is full', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'GOH', 'JFK', 'LAX', 'SIN', 'HND'])
+    }),
+    manager
+  );
+
+  assert.equal(game.createRoute('p1', 'JFK', 'YZF').success, true);
+  assert.equal(game.createRoute('p1', 'YZF', 'LAX').success, true);
+  assert.equal(game.createRoute('p1', 'YZF', 'SIN').success, true);
+
+  const emittedBeforeReject = emitted.length;
+  const stateBeforeReject = JSON.stringify(game.authoritativeState);
+  const logs = captureLogs(() => {
+    const rejected = game.createRoute('p1', 'YZF', 'HND');
+    assert.equal(rejected.success, false);
+    assert.equal(rejected.code, 'AIRPORT_ROUTE_CAPACITY_REACHED');
+  });
+
+  assert.equal(JSON.stringify(game.authoritativeState), stateBeforeReject);
+  assert.equal(emitted.length, emittedBeforeReject);
+  assert.equal(game.authoritativeState.routes.length, 3);
+
+  const capacityLogs = logs.filter((line) => line.startsWith('[CAPACITY]'));
+  assert.equal(capacityLogs.length, 1);
+  assert.equal(capacityLogs[0], '[CAPACITY] Route creation blocked: YZF (Cheap) — 3/3 routes');
+
+  const destinationBlocked = game.createRoute('p1', 'HND', 'YZF');
+  assert.equal(destinationBlocked.success, false);
+  assert.equal(destinationBlocked.code, 'AIRPORT_ROUTE_CAPACITY_REACHED');
+  assert.equal(game.authoritativeState.routes.length, 3);
+
+  assert.equal(game.createRoute('p1', 'GOH', 'JFK').success, true);
+  assert.equal(game.createRoute('p1', 'GOH', 'LAX').success, true);
+  assert.equal(game.createRoute('p1', 'GOH', 'SIN').success, true);
+  const gohRejected = game.createRoute('p1', 'HND', 'GOH');
+  assert.equal(gohRejected.success, false);
+  assert.equal(gohRejected.code, 'AIRPORT_ROUTE_CAPACITY_REACHED');
+
+  assert.equal(game.createRoute('p1', 'JFK', 'LAX').success, true);
+});
+
+test('createRoute counts pending-removal routes and ignores other players\' routes at each endpoint', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const pendingRemovalGame = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK', 'LAX', 'SIN', 'HND']),
+      routes: [
+        createSeededRoute('r1', 'p1', 'YZF', 'JFK', { pendingRemoval: true }),
+        createSeededRoute('r2', 'p1', 'YZF', 'LAX', { pendingRemoval: true }),
+        createSeededRoute('r3', 'p1', 'YZF', 'SIN', { pendingRemoval: true })
+      ]
+    }),
+    manager
+  );
+
+  const blocked = pendingRemovalGame.createRoute('p1', 'YZF', 'HND');
+  assert.equal(blocked.success, false);
+  assert.equal(blocked.code, 'AIRPORT_ROUTE_CAPACITY_REACHED');
+  assert.equal(pendingRemovalGame.authoritativeState.routes.length, 3);
+
+  const otherPlayerGame = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK', 'LAX', 'SIN', 'HND', 'DXB']),
+      routes: [
+        createSeededRoute('r4', 'p2', 'YZF', 'JFK'),
+        createSeededRoute('r5', 'p2', 'YZF', 'LAX'),
+        createSeededRoute('r6', 'p2', 'YZF', 'SIN')
+      ]
+    }),
+    manager
+  );
+
+  assert.equal(otherPlayerGame.createRoute('p1', 'YZF', 'JFK').success, true);
+  assert.equal(otherPlayerGame.createRoute('p1', 'YZF', 'LAX').success, true);
+  assert.equal(otherPlayerGame.createRoute('p1', 'YZF', 'SIN').success, true);
+  const blockedAtLimit = otherPlayerGame.createRoute('p1', 'YZF', 'HND');
+  assert.equal(blockedAtLimit.success, false);
+  assert.equal(blockedAtLimit.code, 'AIRPORT_ROUTE_CAPACITY_REACHED');
+  assert.equal(otherPlayerGame.authoritativeState.routes.length, 6);
+});
+
+test('createRoute applies each airport class limit (Standard airports allow 5 routes)', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['ACC', 'JFK', 'LAX', 'SIN', 'HND', 'DXB', 'ATL'])
+    }),
+    manager
+  );
+
+  ['JFK', 'LAX', 'SIN', 'HND', 'DXB'].forEach((destination) => {
+    assert.equal(game.createRoute('p1', 'ACC', destination).success, true);
+  });
+
+  const rejected = game.createRoute('p1', 'ACC', 'ATL');
+  assert.equal(rejected.success, false);
+  assert.equal(rejected.code, 'AIRPORT_ROUTE_CAPACITY_REACHED');
+  assert.equal(game.authoritativeState.routes.length, 5);
+});
+
+function createAvailableAircraft(aircraftInstanceId, ownerPlayerId = 'p1', overrides = {}) {
+  return {
+    aircraftInstanceId,
+    ownerPlayerId,
+    aircraftCatalogId: 'BOEING_747',
+    acquisitionPrice: 300000,
+    status: OWNED_AIRCRAFT_STATUS.AVAILABLE,
+    assignedRouteId: null,
+    ...overrides
+  };
+}
+
+function createRouteFlightRecord(flightId, aircraftInstanceId, routeId, overrides = {}) {
+  return {
+    flightId,
+    ownerPlayerId: 'p1',
+    routeId,
+    aircraftInstanceId,
+    originAirportId: 'YYZ',
+    destinationAirportId: 'JFK',
+    direction: 'outbound',
+    status: 'ready',
+    departedAtSimulationMs: null,
+    arrivesAtSimulationMs: null,
+    nextTransitionAtSimulationMs: null,
+    ...overrides
+  };
+}
+
+test('assignAircraftToRoute enforces per-route aircraft capacity at the lower-capacity endpoint regardless of direction', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const ownedAircraft = [];
+  for (let i = 1; i <= 11; i += 1) {
+    ownedAircraft.push(createAvailableAircraft(`acft-${i}`));
+  }
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK']),
+      ownedAircraft
+    }),
+    manager
+  );
+
+  const routeResult = game.createRoute('p1', 'YZF', 'JFK');
+  assert.equal(routeResult.success, true);
+
+  for (let i = 1; i <= 10; i += 1) {
+    const assignResult = game.assignAircraftToRoute('p1', routeResult.routeId, `acft-${i}`);
+    assert.equal(assignResult.success, true);
+  }
+
+  const emittedBeforeReject = emitted.length;
+  const stateBeforeReject = JSON.stringify(game.authoritativeState);
+  const logs = captureLogs(() => {
+    const rejected = game.assignAircraftToRoute('p1', routeResult.routeId, 'acft-11');
+    assert.equal(rejected.success, false);
+    assert.equal(rejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+  });
+
+  assert.equal(JSON.stringify(game.authoritativeState), stateBeforeReject);
+  assert.equal(emitted.length, emittedBeforeReject);
+  assert.equal(game.authoritativeState.routes[0].assignedAircraftInstanceIds.length, 10);
+
+  const capacityLogs = logs.filter((line) => line.startsWith('[CAPACITY]'));
+  assert.equal(capacityLogs.length, 1);
+  assert.equal(
+    capacityLogs[0],
+    `[CAPACITY] Aircraft assignment blocked: route ${routeResult.routeId} — 10/10 aircraft`
+  );
+
+  const reversedGame = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK']),
+      ownedAircraft: [createAvailableAircraft('acft-extra')]
+    }),
+    manager
+  );
+  const reversedRoute = reversedGame.createRoute('p1', 'JFK', 'YZF');
+  assert.equal(reversedRoute.success, true);
+  const authoritativeRoute = reversedGame.authoritativeState.routes.find(
+    (route) => route.routeId === reversedRoute.routeId
+  );
+  authoritativeRoute.assignedAircraftInstanceIds = Array.from({ length: 10 }, (_, i) => `seeded-${i}`);
+  const reversedRejected = reversedGame.assignAircraftToRoute('p1', reversedRoute.routeId, 'acft-extra');
+  assert.equal(reversedRejected.success, false);
+  assert.equal(reversedRejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+});
+
+test('assignAircraftToRoute uses each endpoint class limit (Standard ↔ Major = 25, Hub ↔ Elite = 200)', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['ACC', 'AKL', 'ORD', 'JFK']),
+      routes: [
+        createSeededRoute('route-standard-major', 'p1', 'ACC', 'AKL', {
+          assignedAircraftInstanceIds: Array.from({ length: 25 }, (_, i) => `seeded-${i}`)
+        }),
+        createSeededRoute('route-hub-elite', 'p1', 'ORD', 'JFK', {
+          assignedAircraftInstanceIds: Array.from({ length: 200 }, (_, i) => `seeded-${i}`)
+        })
+      ],
+      ownedAircraft: [createAvailableAircraft('acft-1'), createAvailableAircraft('acft-2')]
+    }),
+    manager
+  );
+
+  const standardMajorRejected = game.assignAircraftToRoute('p1', 'route-standard-major', 'acft-1');
+  assert.equal(standardMajorRejected.success, false);
+  assert.equal(standardMajorRejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+
+  const hubEliteRejected = game.assignAircraftToRoute('p1', 'route-hub-elite', 'acft-2');
+  assert.equal(hubEliteRejected.success, false);
+  assert.equal(hubEliteRejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+});
+
+test('assignAircraftToRoute counts flying, turnaround, pending-unassign, and pending-sale aircraft toward capacity', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const assignedIds = Array.from({ length: 10 }, (_, i) => `acft-occupied-${i}`);
+  const ownedAircraft = assignedIds.map((aircraftInstanceId, index) => {
+    return createAvailableAircraft(aircraftInstanceId, 'p1', {
+      status: OWNED_AIRCRAFT_STATUS.ASSIGNED,
+      assignedRouteId: 'route-1',
+      pendingRouteExitAction: index === 2 ? 'unassign' : index === 3 ? 'sell' : undefined,
+      pendingSaleRefund: index === 3 ? 240000 : undefined
+    });
+  });
+  ownedAircraft.push(createAvailableAircraft('acft-new'));
+
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK']),
+      routes: [
+        createSeededRoute('route-1', 'p1', 'YZF', 'JFK', {
+          assignedAircraftInstanceIds: assignedIds
+        })
+      ],
+      flights: assignedIds.map((aircraftInstanceId, index) => {
+        return createRouteFlightRecord(`flight-${index}`, aircraftInstanceId, 'route-1', {
+          status: index === 0 ? 'in-flight' : index === 1 ? 'turnaround' : 'ready'
+        });
+      }),
+      ownedAircraft
+    }),
+    manager
+  );
+
+  const rejected = game.assignAircraftToRoute('p1', 'route-1', 'acft-new');
+  assert.equal(rejected.success, false);
+  assert.equal(rejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+  assert.equal(game.authoritativeState.routes[0].assignedAircraftInstanceIds.length, 10);
+});
+
+test('assignAircraftToRoute rejects pending-removal routes and fails closed on missing endpoints', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK']),
+      routes: [
+        createSeededRoute('route-pending', 'p1', 'YZF', 'JFK', { pendingRemoval: true }),
+        createSeededRoute('route-missing-endpoint', 'p1', 'MISSING_AIRPORT', 'JFK')
+      ],
+      ownedAircraft: [createAvailableAircraft('acft-1'), createAvailableAircraft('acft-2')]
+    }),
+    manager
+  );
+
+  const pendingResult = game.assignAircraftToRoute('p1', 'route-pending', 'acft-1');
+  assert.equal(pendingResult.success, false);
+  assert.equal(pendingResult.code, 'ROUTE_REMOVAL_PENDING');
+
+  const missingEndpointResult = game.assignAircraftToRoute('p1', 'route-missing-endpoint', 'acft-2');
+  assert.equal(missingEndpointResult.success, false);
+  assert.equal(missingEndpointResult.code, 'AIRPORT_NOT_FOUND');
+});
+
+test('assignAircraftToRouteBulk accepts a batch that exactly fills capacity and rejects one aircraft over', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const ownedAircraft = [];
+  for (let i = 1; i <= 11; i += 1) {
+    ownedAircraft.push(createAvailableAircraft(`acft-${i}`));
+  }
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK']),
+      ownedAircraft
+    }),
+    manager
+  );
+
+  const routeResult = game.createRoute('p1', 'YZF', 'JFK');
+  assert.equal(routeResult.success, true);
+
+  const fillResult = game.assignAircraftToRouteBulk(
+    'p1',
+    routeResult.routeId,
+    Array.from({ length: 10 }, (_, i) => `acft-${i + 1}`)
+  );
+  assert.equal(fillResult.success, true);
+  assert.equal(fillResult.assignedCount, 10);
+  assert.equal(game.authoritativeState.routes[0].assignedAircraftInstanceIds.length, 10);
+
+  const emittedBeforeReject = emitted.length;
+  const stateBeforeReject = JSON.stringify(game.authoritativeState);
+  const logs = captureLogs(() => {
+    const rejected = game.assignAircraftToRouteBulk('p1', routeResult.routeId, ['acft-11']);
+    assert.equal(rejected.success, false);
+    assert.equal(rejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+  });
+
+  assert.equal(JSON.stringify(game.authoritativeState), stateBeforeReject);
+  assert.equal(emitted.length, emittedBeforeReject);
+  const capacityLogs = logs.filter((line) => line.startsWith('[CAPACITY]'));
+  assert.equal(capacityLogs.length, 1);
+  assert.equal(
+    capacityLogs[0],
+    `[CAPACITY] Bulk aircraft assignment blocked: route ${routeResult.routeId} — 10/10 aircraft, 1 requested`
+  );
+});
+
+test('assignAircraftToRouteBulk counts existing allocations together with requested aircraft', () => {
+  const { manager, emitted } = createManagerWithEmitCapture();
+  const ownedAircraft = [];
+  for (let i = 1; i <= 4; i += 1) {
+    ownedAircraft.push(createAvailableAircraft(`acft-${i}`));
+  }
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK']),
+      ownedAircraft
+    }),
+    manager
+  );
+
+  const routeResult = game.createRoute('p1', 'YZF', 'JFK');
+  assert.equal(routeResult.success, true);
+  const authoritativeRoute = game.authoritativeState.routes.find(
+    (route) => route.routeId === routeResult.routeId
+  );
+  authoritativeRoute.assignedAircraftInstanceIds = Array.from({ length: 8 }, (_, i) => `occupied-${i}`);
+
+  const rejected = game.assignAircraftToRouteBulk('p1', routeResult.routeId, [
+    'acft-1',
+    'acft-2',
+    'acft-3'
+  ]);
+  assert.equal(rejected.success, false);
+  assert.equal(rejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+  assert.equal(emitted.length, 1);
+
+  const accepted = game.assignAircraftToRouteBulk('p1', routeResult.routeId, ['acft-1', 'acft-2']);
+  assert.equal(accepted.success, true);
+  assert.equal(authoritativeRoute.assignedAircraftInstanceIds.length, 10);
+});
+
+test('assignAircraftToRouteBulk enforces the lower-capacity endpoint (Standard ↔ Major = 25)', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const ownedAircraft = Array.from({ length: 26 }, (_, i) => createAvailableAircraft(`acft-${i}`));
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['ACC', 'AKL']),
+      routes: [createSeededRoute('route-1', 'p1', 'ACC', 'AKL')],
+      ownedAircraft
+    }),
+    manager
+  );
+
+  const fillResult = game.assignAircraftToRouteBulk(
+    'p1',
+    'route-1',
+    Array.from({ length: 25 }, (_, i) => `acft-${i}`)
+  );
+  assert.equal(fillResult.success, true);
+  assert.equal(fillResult.assignedCount, 25);
+
+  const rejected = game.assignAircraftToRouteBulk('p1', 'route-1', ['acft-25']);
+  assert.equal(rejected.success, false);
+  assert.equal(rejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+});
+
+test('assignAircraftToRouteBulk counts flying and pending-exit aircraft and fails closed on missing endpoints', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const occupiedIds = Array.from({ length: 10 }, (_, i) => `occupied-${i}`);
+  const ownedAircraft = occupiedIds.map((aircraftInstanceId, index) => {
+    return createAvailableAircraft(aircraftInstanceId, 'p1', {
+      status: OWNED_AIRCRAFT_STATUS.ASSIGNED,
+      assignedRouteId: 'route-1',
+      pendingRouteExitAction: index === 0 ? 'unassign' : undefined
+    });
+  });
+  ownedAircraft.push(createAvailableAircraft('acft-new'), createAvailableAircraft('acft-extra'));
+
+  const game = new Game(
+    createGameState({
+      airports: createOwnedAirportStates(['YZF', 'JFK']),
+      routes: [
+        createSeededRoute('route-1', 'p1', 'YZF', 'JFK', {
+          assignedAircraftInstanceIds: occupiedIds
+        }),
+        createSeededRoute('route-missing-endpoint', 'p1', 'MISSING_AIRPORT', 'JFK')
+      ],
+      flights: occupiedIds.map((aircraftInstanceId, index) => {
+        return createRouteFlightRecord(`flight-${index}`, aircraftInstanceId, 'route-1', {
+          status: index === 1 ? 'in-flight' : 'ready'
+        });
+      }),
+      ownedAircraft
+    }),
+    manager
+  );
+
+  const occupiedRejected = game.assignAircraftToRouteBulk('p1', 'route-1', ['acft-new']);
+  assert.equal(occupiedRejected.success, false);
+  assert.equal(occupiedRejected.code, 'ROUTE_AIRCRAFT_CAPACITY_REACHED');
+
+  const duplicateRejected = game.assignAircraftToRouteBulk('p1', 'route-1', ['acft-new', 'acft-new']);
+  assert.equal(duplicateRejected.success, false);
+  assert.equal(duplicateRejected.code, 'DUPLICATE_AIRCRAFT_IDS');
+
+  const missingEndpointResult = game.assignAircraftToRouteBulk('p1', 'route-missing-endpoint', [
+    'acft-new'
+  ]);
+  assert.equal(missingEndpointResult.success, false);
+  assert.equal(missingEndpointResult.code, 'AIRPORT_NOT_FOUND');
 });

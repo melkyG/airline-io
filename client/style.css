@@ -599,16 +599,28 @@ body {
   opacity: 0.76;
 }
 
+.simulation-clock-date-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+}
+
 .simulation-clock-date,
-.simulation-clock-time {
+.simulation-clock-time,
+.simulation-clock-country {
   margin: 0;
   white-space: nowrap;
 }
 
-.simulation-clock-date {
+.simulation-clock-date,
+.simulation-clock-country {
   font-size: 0.72rem;
   color: #64748b;
   font-weight: 500;
+}
+
+.simulation-clock-country {
+  white-space: normal;
 }
 
 .simulation-clock-time {
@@ -651,6 +663,7 @@ body {
   letter-spacing: 0.01em;
   font-variant-numeric: tabular-nums;
   backdrop-filter: blur(6px);
+  pointer-events: none;
 }
 
 .capital-hud-content {
@@ -820,6 +833,33 @@ body {
   overflow: visible;
 }
 
+.airport-marker-root--filtered {
+  pointer-events: none;
+}
+
+.airport-marker-root--filtered .airport-marker-pulse-wrapper,
+.airport-marker-root--filtered .airport-marker-label {
+  display: none;
+}
+
+.airport-marker-filtered-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 10px;
+  height: 10px; 
+  border-radius: 50%;
+  border: 2.5px solid #000000;
+  background: var(--airport-marker-badge-fill);
+  transform: translate(-50%, -50%) scale(var(--airport-filtered-marker-scale-adjustment, 1));
+  pointer-events: none;
+  display: none;
+}
+
+.airport-marker-root--filtered .airport-marker-filtered-dot {
+  display: block;
+}
+
 .airport-marker-content {
   position: relative;
   width: var(--airport-marker-size);
@@ -980,6 +1020,30 @@ body {
 .airport-tooltip-code { 
   font-weight: 700;
   color: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.airport-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0.06rem 0.42rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(148, 163, 184, 0.16);
+  color: #cbd5e1;
+  font-size: 0.62rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.airport-tier-badge-hidden {
+  display: none;
 }
 
 .airport-tooltip-price {
@@ -992,11 +1056,34 @@ body {
   color: #cbd5e1;
 }
 
+.country-tooltip {
+  max-width: 14rem;
+  white-space: normal;
+}
+
+.country-tooltip .airport-tooltip-code {
+  overflow-wrap: anywhere;
+}
+
 .airport-interaction-title {
   margin: 0 1.3rem 0.6rem 0;
   font-size: 0.98rem;
   line-height: 1.25;
   color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.airport-interaction-title-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.airport-interaction-title .airport-tier-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .airport-interaction-row {
@@ -1073,6 +1160,229 @@ body {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.56rem;
+  pointer-events: none;
+}
+
+.main-content.game-active .airport-price-filter {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.18rem;
+  width: 3.7rem;
+  padding: 0.4rem 0.3rem 0.4rem 0.2rem;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.6);
+  pointer-events: none;
+}
+
+.airport-price-filter-label {
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: #f8fafc;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.airport-price-filter-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.airport-price-filter-action-button {
+  flex: 1;
+  min-width: 0;
+  height: 1rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #38bdf8;
+  border-radius: 5px;
+  background: #7dd3fc;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.48rem;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.airport-price-filter-action-button:hover {
+  background: #38bdf8;
+}
+
+.airport-price-filter-action-button:active {
+  background: #0ea5e9;
+}
+
+.airport-price-filter-action-button:focus-visible {
+  outline: 2px solid #f8fafc;
+  outline-offset: 2px;
+}
+
+.airport-price-filter-reset {
+  flex: 1;
+  font-size: 0.75rem;
+}
+
+.airport-price-filter-budget {
+  flex: 1;
+  font-size: 0.48rem;
+}
+
+.airport-price-filter-track {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 0.2rem;
+  height: 22.5rem;
+}
+
+.airport-price-filter-ticks {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 1.9rem;
+  padding: 0.32rem 0;
+}
+
+.airport-price-filter-tick {
+  font-size: 0.55rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  color: #94a3b8;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.airport-price-filter-tick--active {
+  color: #7dd3fc;
+}
+
+.airport-price-filter-slider {
+  position: absolute;
+  inset: 0;
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 1.1rem;
+  height: 22.1rem;
+  align-self: center;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  accent-color: transparent;
+  cursor: pointer;
+  pointer-events: none;
+}
+
+.airport-price-filter-slider::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+  border: 0;
+}
+
+.airport-price-filter-slider::-webkit-slider-thumb {
+  pointer-events: auto;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(99, 99, 99, 0.65);
+  border-radius: 50%;
+  background: #7dd3fc;
+  cursor: pointer;
+}
+
+.airport-price-filter-slider::-moz-range-track {
+  height: 100%;
+  background: transparent;
+  border: 0;
+}
+
+.airport-price-filter-slider::-moz-range-progress {
+  background: transparent;
+}
+
+.airport-price-filter-slider::-moz-range-thumb {
+  pointer-events: auto;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(99, 99, 99, 0.65);
+  border-radius: 50%;
+  background: #7dd3fc;
+  cursor: pointer;
+}
+
+.airport-price-filter-slider-stack {
+  position: relative;
+  width: 1.1rem;
+  height: 22.1rem;
+  align-self: center;
+}
+
+.airport-price-filter-slider--min {
+  z-index: 2;
+}
+
+.airport-price-filter-slider--max {
+  z-index: 3;
+}
+
+.airport-price-filter-hit-target {
+  position: absolute;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  pointer-events: auto;
+  z-index: 4;
+}
+
+.airport-price-filter-hit-target:active {
+  cursor: grabbing;
+}
+
+.airport-price-filter-hit-target--min {
+  top: var(--airport-price-filter-min-hit-top, 100%);
+}
+
+.airport-price-filter-hit-target--max {
+  top: var(--airport-price-filter-max-hit-top, 0%);
+}
+
+.airport-price-filter-rail {
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 0.24rem;
+  border-radius: 999px;
+  background: #475569;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.airport-price-filter-range {
+  position: absolute;
+  top: var(--airport-price-filter-range-top, 0%);
+  bottom: var(--airport-price-filter-range-bottom, 0%);
+  left: 50%;
+  width: 0.24rem;
+  border-radius: 999px;
+  background: #7dd3fc;
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .main-content.game-active .hud-icon-column {
@@ -1080,6 +1390,7 @@ body {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.52rem;
+  pointer-events: none;
 }
 
 .hud-icon-button {
@@ -1093,6 +1404,7 @@ body {
   place-items: center;
   cursor: pointer;
   backdrop-filter: blur(6px);
+  pointer-events: auto;
 }
 
 .hud-icon-button:hover {
@@ -1284,6 +1596,208 @@ body {
   background: rgba(2, 6, 23, 0.45);
 }
 
+.finances-modal {
+  position: absolute;
+  left: 4.75rem;
+  bottom: 1rem;
+  z-index: 1350;
+  width: min(80vw, 380px);
+  min-height: 320px;
+  max-height: 70vh;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.96);
+  box-shadow: 0 16px 40px rgba(2, 6, 23, 0.6);
+  padding: 0.9rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.finances-modal-title {
+  margin-bottom: 0.5rem;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.finances-modal--dragging {
+  user-select: none;
+}
+
+.finances-modal--dragging .finances-modal-title {
+  cursor: grabbing;
+}
+
+.finances-modal-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.finances-modal-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.finances-modal-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.finances-modal-row--summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.finances-modal-summary-group {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.finances-modal-summary-group--net-worth {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.finances-modal-label {
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.finances-modal-value {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.finances-modal-history-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #94a3b8;
+}
+
+.finances-chart-toggles {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0;
+}
+
+.finances-chart-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  background: rgba(7, 12, 24, 0.6);
+  color: #f8fafc;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.35rem;
+  cursor: pointer;
+}
+
+.finances-chart-toggle:hover {
+  filter: brightness(1.1);
+}
+
+.finances-chart-toggle--off {
+  opacity: 0.45;
+}
+
+.finances-chart-toggle-swatch {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+
+.finances-chart-toggle-swatch--cash {
+  background: #34d399;
+}
+
+.finances-chart-toggle-swatch--net-worth {
+  background: #60a5fa;
+}
+
+.finances-chart-svg {
+  display: block;
+  flex: 1 1 auto;
+  min-height: 150px;
+  width: 100%;
+  height: auto;
+}
+
+.finances-timeframe-toggles {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-top: 0.35rem;
+}
+
+.finances-timeframe-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  background: rgba(7, 12, 24, 0.6);
+  color: #cbd5e1;
+  font-size: 0.65rem;
+  padding: 0.1rem 0.25rem;
+  min-width: 2rem;
+  cursor: pointer;
+}
+
+.finances-timeframe-toggle:hover {
+  filter: brightness(1.1);
+}
+
+.finances-timeframe-toggle--off {
+  opacity: 0.55;
+}
+
+.finances-chart-grid-line {
+  stroke: rgba(148, 163, 184, 0.15);
+  stroke-width: 1;
+}
+
+.finances-chart-tick-label {
+  fill: #94a3b8;
+  font-size: 9px;
+}
+
+.finances-chart-line {
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.finances-chart-line--cash {
+  stroke: #34d399;
+}
+
+.finances-chart-line--net-worth {
+  stroke: #60a5fa;
+}
+
+.finances-chart-empty-label {
+  fill: #94a3b8;
+  font-size: 11px;
+}
+
 .shop-modal {
   position: relative;
   width: min(90vw, 480px);
@@ -1393,6 +1907,33 @@ body {
   color: #e2e8f0;
   font-size: 0.9rem;
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.shop-store-modal {
+  overflow: visible;
+}
+
+.shop-store-modal .shop-tab-content {
+  overflow: visible;
+}
+
+.shop-store-modal .shop-modal-panel:not(.hidden) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.shop-store-modal .shop-airport-search-container {
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 2;
+}
+
+.shop-store-modal .shop-airport-details {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
 }
@@ -1618,6 +2159,10 @@ body {
   color: #86efac;
 }
 
+.routes-aircraft-management-feedback.routes-aircraft-management-feedback--info {
+  color: #cbd5e1;
+}
+
 .routes-aircraft-section {
   display: grid;
   gap: 0.45rem;
@@ -1738,6 +2283,10 @@ body {
   text-transform: uppercase;
 }
 
+.shop-store-modal .shop-airport-results-title {
+  display: none;
+}
+
 .shop-airport-results-list {
   margin-top: 0.35rem;
   display: grid;
@@ -1745,6 +2294,20 @@ body {
   max-height: 285px;
   overflow-y: auto;
   padding-right: 0.2rem;
+}
+
+.shop-store-modal .shop-airport-results-list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.28rem);
+  margin-top: 0;
+  border: 1px solid rgba(71, 85, 105, 0.9);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.96);
+  padding: 0.32rem;
+  z-index: 100;
+  box-shadow: 0 10px 18px rgba(2, 6, 23, 0.45);
 }
 
 .shop-airport-results-empty {
@@ -2302,7 +2865,8 @@ body {
     left: 0.75rem;
   }
 
-  .simulation-clock-date {
+  .simulation-clock-date,
+  .simulation-clock-country {
     font-size: 0.68rem;
   }
 

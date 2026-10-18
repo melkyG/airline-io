@@ -68,3 +68,29 @@ test('client stores authoritative game without leaderboard property', () => {
 
   delete global.window;
 });
+
+test('client retains authoritative owned aircraft when a game update omits the field', () => {
+  const createGameState = createStateFactory();
+  const ownedAircraft = [
+    { aircraftInstanceId: 'acft-1', ownerPlayerId: 'p1', assignedRouteId: 'route-1' }
+  ];
+  const state = createGameState({
+    connection: { status: 'connected' },
+    session: {},
+    lobby: { players: [] },
+    ui: { screen: 'game' },
+    game: { ownedAircraft },
+    waitingAnimation: {}
+  });
+
+  state.update(() => ({
+    game: {
+      status: 'active',
+      routes: [{ routeId: 'route-1', ownerPlayerId: 'p1', assignedAircraftInstanceIds: ['acft-1'] }]
+    }
+  }));
+
+  assert.deepEqual(state.getState().game.ownedAircraft, ownedAircraft);
+
+  delete global.window;
+});

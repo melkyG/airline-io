@@ -8,7 +8,9 @@ const AIRCRAFT_SCHEMA_KEYS = Object.freeze([
   'purchasePrice',
   'rangeKm',
   'cruiseSpeedKmH',
-  'baseRevenuePerKm'
+  'baseRevenuePerKm',
+  'fuelCostPerKm',
+  'monthlyMaintenanceCost'
 ]);
 
 function assertNonEmptyString(value, fieldName) {
@@ -52,6 +54,8 @@ function validateAircraftCatalogEntry(entry) {
   assertFiniteNonNegativeNumber(entry.rangeKm, 'rangeKm');
   assertFinitePositiveNumber(entry.cruiseSpeedKmH, 'cruiseSpeedKmH');
   assertFinitePositiveNumber(entry.baseRevenuePerKm, 'baseRevenuePerKm');
+  assertFiniteNonNegativeNumber(entry.fuelCostPerKm, 'fuelCostPerKm');
+  assertFiniteNonNegativeNumber(entry.monthlyMaintenanceCost, 'monthlyMaintenanceCost');
 
   return Object.freeze({
     aircraftCatalogId: entry.aircraftCatalogId.trim(),
@@ -60,32 +64,89 @@ function validateAircraftCatalogEntry(entry) {
     purchasePrice: entry.purchasePrice,
     rangeKm: entry.rangeKm,
     cruiseSpeedKmH: entry.cruiseSpeedKmH,
-    baseRevenuePerKm: entry.baseRevenuePerKm
+    baseRevenuePerKm: entry.baseRevenuePerKm,
+    fuelCostPerKm: entry.fuelCostPerKm,
+    monthlyMaintenanceCost: entry.monthlyMaintenanceCost
   });
 }
 
 const FULL_AIRCRAFT_CATALOG = Object.freeze([
   validateAircraftCatalogEntry({
-    aircraftCatalogId: 'BOEING_747',
-    manufacturer: 'Boeing',
-    model: '747',
-    purchasePrice: 300000,
-    rangeKm: 14000,
-    cruiseSpeedKmH: 900,
-    baseRevenuePerKm: 130
+    aircraftCatalogId: 'ATR_72',
+    manufacturer: 'ATR',
+    model: '72',
+    purchasePrice: 100000,
+    rangeKm: 1500,
+    cruiseSpeedKmH: 510,
+    baseRevenuePerKm: 11.25,
+    fuelCostPerKm: 4,
+    monthlyMaintenanceCost: 24000
+  }),
+  validateAircraftCatalogEntry({
+    aircraftCatalogId: 'BOMBARDIER_CRJ900',
+    manufacturer: 'Bombardier',
+    model: 'CRJ900',
+    purchasePrice: 200000,
+    rangeKm: 3500,
+    cruiseSpeedKmH: 830,
+    baseRevenuePerKm: 23.25,
+    fuelCostPerKm: 9,
+    monthlyMaintenanceCost: 51000
   }),
   validateAircraftCatalogEntry({
     aircraftCatalogId: 'BOEING_737',
     manufacturer: 'Boeing',
     model: '737',
-    purchasePrice: 220000,
+    purchasePrice: 300000,
     rangeKm: 6500,
     cruiseSpeedKmH: 840,
-    baseRevenuePerKm: 105
+    baseRevenuePerKm: 36.02,
+    fuelCostPerKm: 15,
+    monthlyMaintenanceCost: 80000
+  }),
+  validateAircraftCatalogEntry({
+    aircraftCatalogId: 'AIRBUS_A320',
+    manufacturer: 'Airbus',
+    model: 'A320',
+    purchasePrice: 280000,
+    rangeKm: 5700,
+    cruiseSpeedKmH: 830,
+    baseRevenuePerKm: 32,
+    fuelCostPerKm: 13,
+    monthlyMaintenanceCost: 72000
+  }),
+  validateAircraftCatalogEntry({
+    aircraftCatalogId: 'BOEING_747',
+    manufacturer: 'Boeing',
+    model: '747',
+    purchasePrice: 400000,
+    rangeKm: 14000,
+    cruiseSpeedKmH: 900,
+    baseRevenuePerKm: 49.5,
+    fuelCostPerKm: 22,
+    monthlyMaintenanceCost: 112000
+  }),
+  validateAircraftCatalogEntry({
+    aircraftCatalogId: 'AIRBUS_A350',
+    manufacturer: 'Airbus',
+    model: 'A350',
+    purchasePrice: 500000,
+    rangeKm: 15500,
+    cruiseSpeedKmH: 905,
+    baseRevenuePerKm: 64,
+    fuelCostPerKm: 24,
+    monthlyMaintenanceCost: 148000
   })
 ]);
 
-const ACTIVE_AIRCRAFT_CATALOG_IDS = Object.freeze(['BOEING_747', 'BOEING_737']);
+const ACTIVE_AIRCRAFT_CATALOG_IDS = Object.freeze([
+  'ATR_72',
+  'BOMBARDIER_CRJ900',
+  'BOEING_737',
+  'AIRBUS_A320',
+  'BOEING_747',
+  'AIRBUS_A350'
+]);
 const ACTIVE_AIRCRAFT_CATALOG_ID_SET = new Set(ACTIVE_AIRCRAFT_CATALOG_IDS);
 
 const AIRCRAFT_CATALOG = Object.freeze(

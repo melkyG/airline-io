@@ -1,5 +1,6 @@
 const { randomUUID } = require('node:crypto');
 const { AIRPORT_CATALOG } = require('./airports/catalog');
+const { AIRPORT_CAPACITY } = require('./airports/capacity');
 const { AIRCRAFT_CATALOG, AIRCRAFT_CATALOG_BY_ID } = require('./aircraft/catalog');
 const { createOwnedAircraftInstance, OWNED_AIRCRAFT_STATUS } = require('./aircraft/ownership');
 const { canonicalRouteKey, calculateRouteDistanceKm } = require('./routes');
@@ -10,23 +11,98 @@ const {
 } = require('./flights/rules');
 const { createBoundedScheduler } = require('./flights/scheduler');
 const FlightEngine = require('./FlightEngine');
-const { calculateFlightSettlement } = require('./economy/flightSettlement');
+const { calculateFlightSettlement, resolveAirportValueFactor } = require('./economy/flightSettlement');
 const {
   calculateAirportSellToGamePrice,
   calculateAircraftSellToGamePrice
 } = require('./economy/liquidation');
 const { calculateNetWorthByPlayer } = require('./economy/netWorth');
-const { calculateScoreByPlayer } = require('./economy/score');
+const {
+  calculateAirportOperatingFee,
+  calculateAircraftFuelExpense,
+  calculateAircraftMaintenanceExpense
+} = require('./economy/expenses');
+const {
+  calculateNetWorthScore,
+  calculateAirportScore,
+  calculateRouteScore,
+  calculatePlayerScore,
+  calculateScoreByPlayer
+} = require('./economy/score');
+const {
+  WORLD_EVENT_NEUTRAL_FACTOR,
+  WORLD_EVENT_TYPE_TRAVEL_BOOM,
+  WORLD_EVENT_TYPE_TRAVEL_SLUMP,
+  WORLD_EVENT_TYPE_MAJOR_SPORTING_EVENT,
+  SPORTING_EVENT_PEAK_MIN_FACTOR,
+  SPORTING_EVENT_PEAK_MAX_FACTOR,
+  resolveSimMsPerRealSecond,
+  createMajorSportingEvent,
+  WORLD_EVENT_DAY_SIMULATION_MS,
+  WORLD_EVENT_DAILY_TRIGGER_PROBABILITY,
+  WORLD_EVENT_BOOM_PROBABILITY,
+  WorldEventEngine,
+  createSpontaneousTravelEvent,
+  isWorldEventBlockingCountry,
+  getWorldEventFactorAtTime
+} = require('./world/worldEvents');
 
 const AIRPORT_DEFINITIONS_BY_ID = AIRPORT_CATALOG.reduce((lookup, airport) => {
   lookup.set(airport.id, airport);
   return lookup;
 }, new Map());
 
-const DEFAULT_SIMULATION_SPEED_MULTIPLIER = 10000;
+const WORLD_MONTH_ABBREVIATIONS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+];
+const WORLD_DAYS_PER_MONTH = 30;
+const WORLD_MONTHS_PER_YEAR = WORLD_MONTH_ABBREVIATIONS.length;
+const WORLD_DAY_MS = 24 * 60 * 60 * 1000;
+const WORLD_MONTH_MS = WORLD_DAYS_PER_MONTH * WORLD_DAY_MS;
+
+const SPORTING_EVENT_MIN_COUNT = 1;
+const SPORTING_EVENT_MAX_COUNT = 3;
+const SPORTING_EVENT_EARLIEST_START_REAL_MINUTES = 5;
+const SPORTING_EVENT_LATEST_START_REAL_MINUTES = 33;
+const SPORTING_EVENT_MIN_GAP_REAL_MINUTES = 8;
+const SPORTING_EVENT_ANNOUNCE_LEAD_MIN_REAL_MINUTES = 2;
+const SPORTING_EVENT_ANNOUNCE_LEAD_MAX_REAL_MINUTES = 3;
+const SPORTING_EVENT_PLACEMENT_ATTEMPTS = 64;
+const SPORTING_EVENT_HOST_COUNTRIES = [
+  'United States',
+  'Canada',
+  'Brazil',
+  'United Kingdom',
+  'France',
+  'Germany',
+  'Spain',
+  'Italy',
+  'Japan',
+  'China',
+  'South Korea',
+  'Australia',
+  'Mexico',
+  'Argentina',
+  'Turkey',
+  'Saudi Arabia',
+  'South Africa'
+];
+
+const WORLD_EVENT_ELIGIBLE_COUNTRIES = [
+  ...new Set(
+    AIRPORT_CATALOG.map((airport) => (airport && typeof airport.country === 'string' ? airport.country.trim() : ''))
+      .filter(Boolean)
+  )
+];
+
+const DEFAULT_SIMULATION_SPEED_MULTIPLIER = 12500;
+const FLIGHT_STATE_BROADCAST_MIN_INTERVAL_MS = 250;
+const FINANCE_HISTORY_SAMPLE_INTERVAL_SIMULATION_MS = 15 * 1000 * 1000;
+const FINANCE_HISTORY_MAX_SAMPLES = 6500;
 
 class Game {
-  constructor(initialState, manager) {
+  constructor(initialState, manager, options = {}) {
     this.id = initialState.id;
     this.status = initialState.status;
     this.players = new Map();
@@ -49,7 +125,13 @@ class Game {
         : null,
       ownedAircraft: Array.isArray(initialState.ownedAircraft) ? initialState.ownedAircraft : [],
       routes: Array.isArray(initialState.routes) ? initialState.routes : [],
-      flights: Array.isArray(initialState.flights) ? initialState.flights : []
+      flights: Array.isArray(initialState.flights) ? initialState.flights : [],
+      world: initialState.world ? { ...initialState.world } : { countryProfitFactors: {} },
+      worldCalendarStartYear: Number.isFinite(initialState.worldCalendarStartYear)
+        ? initialState.worldCalendarStartYear
+        : Number.isFinite(initialState.createdAt)
+          ? new Date(initialState.createdAt).getUTCFullYear()
+          : new Date().getUTCFullYear()
     };
     this.endTimeoutId = null;
     this.hasBroadcastStarted = false;
@@ -60,12 +142,51 @@ class Game {
     this.flightEngine = new FlightEngine({
       authoritativeState: this.authoritativeState,
       getSimulationTimeMs: (realNowMs) => this.getSimulationTimeMs(realNowMs),
-      resolveFlightArrivalSettlementContext: (transitionContext) => {
-        return this.resolveFlightArrivalSettlementContext(transitionContext);
+      resolveFlightArrivalSettlementContext: (transitionContext, simulationNowMs) => {
+        return this.resolveFlightArrivalSettlementContext(transitionContext, simulationNowMs);
       },
       createBoundedScheduler,
+      onRevenueCredited: (player, amount) => this.recordRevenueCredited(player, amount),
+      onFlightLegCompleted: (aircraftInstance, completedLegDistanceKm) => this.recordFlightLegDistance(aircraftInstance, completedLegDistanceKm),
+      onTransitionProcessed: (lagMs) => this.recordTransitionLag(lagMs),
+      onSchedulerProfile: (metrics) => this.recordSchedulerProfile(metrics),
       onTick: (realNowMs) => this.processFlightSchedulerTick(realNowMs)
     });
+    this.worldEventEngine = new WorldEventEngine();
+    this.worldEventRng = options && typeof options.rng === 'function' ? options.rng : Math.random;
+    this.worldEventLastDayIndex = null;
+    this.lastDailyExpenseDayIndex = null;
+    this.lastFuelExpenseWeekIndex = null;
+    this.lastMaintenanceExpenseMonthIndex = null;
+    this.financeHistoryByPlayerId = {};
+    this.financeHistoryLastSampledElapsedMs = null;
+    this.lastFlightStateBroadcastRealMs = null;
+    this.flightStateBroadcastPending = false;
+    this.flightStateBroadcastNeedsOwnedAircraft = false;
+    this.weeklyAircraftDistanceKm = new Map();
+    this.economyDiagnostics = {
+      expectedCapitalByPlayerId: new Map(),
+      revenueEvents: 0,
+      revenueCredited: 0,
+      transitionsProcessed: 0,
+      totalTransitionLagMs: 0,
+      maxTransitionLagMs: 0,
+      schedulerTicks: 0,
+      transitionCapHits: 0,
+      processingTimeCapHits: 0,
+      totalSchedulerWorkMs: 0,
+      maxSchedulerWorkMs: 0,
+      dueScanMs: 0,
+      applyTransitionMs: 0,
+      routeCleanupMs: 0,
+      airportCleanupMs: 0,
+      broadcastPrepMs: 0,
+      fullFlightScans: 0,
+      aircraftLinearLookups: 0,
+      routeLinearLookups: 0,
+      scheduleRebuilds: 0
+    };
+    this._initializeExpectedCapital();
   }
 
   initialize() {
@@ -103,6 +224,625 @@ class Game {
     if (!Number.isFinite(this.authoritativeState.simulationEndedAtGameMs)) {
       this.authoritativeState.simulationEndedAtGameMs = null;
     }
+
+    const initialWorldElapsedMs = this.getWorldElapsedSimulationMs(this.getSimulationTimeMs(realNowMs));
+    this.worldEventLastDayIndex = Number.isFinite(initialWorldElapsedMs)
+      ? Math.floor(initialWorldElapsedMs / WORLD_EVENT_DAY_SIMULATION_MS)
+      : null;
+    this.ensureScheduledWorldEvents();
+    this.sampleFinanceHistory(this.getSimulationTimeMs(realNowMs));
+  }
+
+  sampleFinanceHistory(simulationNowMs) {
+    if (!Number.isFinite(simulationNowMs)) {
+      return false;
+    }
+
+    const worldElapsedSimulationMs = this.getWorldElapsedSimulationMs(simulationNowMs);
+    if (
+      Number.isFinite(this.financeHistoryLastSampledElapsedMs) &&
+      worldElapsedSimulationMs - this.financeHistoryLastSampledElapsedMs < FINANCE_HISTORY_SAMPLE_INTERVAL_SIMULATION_MS
+    ) {
+      return false;
+    }
+
+    const players = Array.isArray(this.authoritativeState.players) ? this.authoritativeState.players : [];
+    const netWorthByPlayerId = calculateNetWorthByPlayer(this.authoritativeState);
+
+    for (const player of players) {
+      if (!player || player.id == null || player.isBot) {
+        continue;
+      }
+
+      const playerId = String(player.id);
+      const history = Array.isArray(this.financeHistoryByPlayerId[playerId])
+        ? this.financeHistoryByPlayerId[playerId]
+        : (this.financeHistoryByPlayerId[playerId] = []);
+
+      const sample = {
+        worldElapsedSimulationMs,
+        cash: Number.isFinite(player.capital) ? player.capital : 0,
+        netWorth: netWorthByPlayerId.has(playerId) ? netWorthByPlayerId.get(playerId) : 0
+      };
+      history.push(sample);
+
+      if (history.length > FINANCE_HISTORY_MAX_SAMPLES) {
+        history.splice(0, history.length - FINANCE_HISTORY_MAX_SAMPLES);
+      }
+
+      if (this.manager && typeof this.manager.emitFinanceSampleToPlayer === 'function') {
+        this.manager.emitFinanceSampleToPlayer(playerId, { ...sample });
+      }
+    }
+
+    this.financeHistoryLastSampledElapsedMs = worldElapsedSimulationMs;
+    return true;
+  }
+
+  ensureScheduledWorldEvents() {
+    if (!this.worldEventEngine) {
+      return;
+    }
+
+    const simulationStartedAtGameMs = this.authoritativeState.simulationStartedAtGameMs;
+    if (!Number.isFinite(simulationStartedAtGameMs)) {
+      return;
+    }
+
+    const alreadyScheduled = this.worldEventEngine.events.some(
+      (event) => event && event.type === WORLD_EVENT_TYPE_MAJOR_SPORTING_EVENT
+    );
+    if (alreadyScheduled) {
+      return;
+    }
+
+    const rng = this.worldEventRng;
+    const clampRoll = (value) => {
+      const roll = Number.isFinite(value) ? value : 0;
+      return Math.max(0, Math.min(0.999999, roll));
+    };
+
+    const simulationSpeedMultiplier =
+      Number.isFinite(this.authoritativeState.simulationSpeedMultiplier) &&
+      this.authoritativeState.simulationSpeedMultiplier > 0
+        ? this.authoritativeState.simulationSpeedMultiplier
+        : DEFAULT_SIMULATION_SPEED_MULTIPLIER;
+    const simMsPerRealMinute = resolveSimMsPerRealSecond(simulationSpeedMultiplier) * 60;
+
+    const earliestStartOffset = SPORTING_EVENT_EARLIEST_START_REAL_MINUTES * simMsPerRealMinute;
+    const latestStartOffset = SPORTING_EVENT_LATEST_START_REAL_MINUTES * simMsPerRealMinute;
+    const minGap = SPORTING_EVENT_MIN_GAP_REAL_MINUTES * simMsPerRealMinute;
+
+    const count =
+      SPORTING_EVENT_MIN_COUNT +
+      Math.floor(clampRoll(rng()) * (SPORTING_EVENT_MAX_COUNT - SPORTING_EVENT_MIN_COUNT + 1));
+
+    const windowSize = latestStartOffset - earliestStartOffset;
+
+    const acceptedOffsets = [];
+    for (let i = 0; i < count; i += 1) {
+      for (let attempt = 0; attempt < SPORTING_EVENT_PLACEMENT_ATTEMPTS; attempt += 1) {
+        const offset = earliestStartOffset + clampRoll(rng()) * windowSize;
+        const clear = acceptedOffsets.every(
+          (existing) => Math.abs(existing - offset) >= minGap
+        );
+        if (clear) {
+          acceptedOffsets.push(offset);
+          break;
+        }
+      }
+    }
+
+    acceptedOffsets.sort((a, b) => a - b);
+    const scheduledEvents = acceptedOffsets.map((offset, index) => {
+      const hostCountry = SPORTING_EVENT_HOST_COUNTRIES[
+        Math.min(
+          SPORTING_EVENT_HOST_COUNTRIES.length - 1,
+          Math.floor(clampRoll(rng()) * SPORTING_EVENT_HOST_COUNTRIES.length)
+        )
+      ];
+      const peakFactor =
+        SPORTING_EVENT_PEAK_MIN_FACTOR +
+        (SPORTING_EVENT_PEAK_MAX_FACTOR - SPORTING_EVENT_PEAK_MIN_FACTOR) * clampRoll(rng());
+      const announceLeadRealMinutes =
+        SPORTING_EVENT_ANNOUNCE_LEAD_MIN_REAL_MINUTES +
+        (SPORTING_EVENT_ANNOUNCE_LEAD_MAX_REAL_MINUTES - SPORTING_EVENT_ANNOUNCE_LEAD_MIN_REAL_MINUTES) * clampRoll(rng());
+      const event = createMajorSportingEvent({
+        id: `major-sporting-event-${index + 1}`,
+        hostCountry,
+        eventStartAtSimulationMs: simulationStartedAtGameMs + offset,
+        announceAtSimulationMs:
+          simulationStartedAtGameMs + offset - announceLeadRealMinutes * simMsPerRealMinute,
+        peakFactor,
+        rng,
+        simulationSpeedMultiplier
+      });
+      this.worldEventEngine.events.push(event);
+      return event;
+    });
+
+    this.logScheduledWorldEvents(scheduledEvents, simulationSpeedMultiplier, simulationStartedAtGameMs);
+  }
+
+  logScheduledWorldEvents(events, simulationSpeedMultiplier, simulationStartedAtGameMs) {
+    if (!Array.isArray(events) || events.length === 0) {
+      return;
+    }
+
+    const simMsPerRealSecond = resolveSimMsPerRealSecond(simulationSpeedMultiplier);
+    const toRealMinutes = (simMs) =>
+      Number.isFinite(simMs)
+        ? ((simMs - simulationStartedAtGameMs) / (simMsPerRealSecond * 60)).toFixed(1)
+        : '?';
+    const toRealSeconds = (simMs) =>
+      Number.isFinite(simMs) ? `${Math.round(simMs / simMsPerRealSecond)}s` : '?';
+    const toMonthYear = (simMs) => this.formatWorldCalendarMonthYear(simMs) || '?';
+
+    const lines = events.map((event, index) => {
+      const host = Array.isArray(event.countries) && event.countries.length > 0
+        ? event.countries[0]
+        : 'Unknown';
+      const holdDays = Math.round(event.holdDurationSimulationMs / WORLD_EVENT_DAY_SIMULATION_MS);
+      return (
+        `${index + 1}. ${host}\n` +
+        `   announce: ${toRealMinutes(event.announceAtSimulationMs)} min | ${toMonthYear(event.announceAtSimulationMs)}\n` +
+        `   start:    ${toRealMinutes(event.candidateAtSimulationMs)} min | ${toMonthYear(event.candidateAtSimulationMs)}\n` +
+        `   peak:     ${Number.isFinite(event.peakFactor) ? event.peakFactor.toFixed(2) : '?'}\n` +
+        `   onset:    ${toRealSeconds(event.onsetDurationSimulationMs)}\n` +
+        `   hold:     ${holdDays} sim days\n` +
+        `   decay:    ${toRealSeconds(event.decayDurationSimulationMs)}`
+      );
+    });
+
+    console.log(`[WorldEvents] Sporting Events:\n${lines.join('\n')}`);
+  }
+
+  maybeTriggerDailyWorldEvent(simulationNowMs) {
+    if (!this.worldEventEngine || !Number.isFinite(simulationNowMs) || this.status !== 'active') {
+      return null;
+    }
+
+    const worldElapsedSimulationMs = this.getWorldElapsedSimulationMs(simulationNowMs);
+    if (!Number.isFinite(worldElapsedSimulationMs)) {
+      return null;
+    }
+    const dayIndex = Math.floor(worldElapsedSimulationMs / WORLD_EVENT_DAY_SIMULATION_MS);
+
+    if (this.worldEventLastDayIndex === null) {
+      this.worldEventLastDayIndex = dayIndex;
+      return null;
+    }
+
+    if (dayIndex === this.worldEventLastDayIndex) {
+      return null;
+    }
+
+    this.worldEventLastDayIndex = dayIndex;
+
+    const rng = this.worldEventRng;
+    if (rng() >= WORLD_EVENT_DAILY_TRIGGER_PROBABILITY) {
+      return null;
+    }
+
+    const eligibleCountries = WORLD_EVENT_ELIGIBLE_COUNTRIES.filter(
+      (country) => !this.worldEventEngine.events.some(
+        (event) => isWorldEventBlockingCountry(event, country, simulationNowMs)
+      )
+    );
+    if (eligibleCountries.length === 0) {
+      return null;
+    }
+
+    const country = eligibleCountries[
+      Math.min(eligibleCountries.length - 1, Math.floor(rng() * eligibleCountries.length))
+    ];
+    const type = rng() < WORLD_EVENT_BOOM_PROBABILITY
+      ? WORLD_EVENT_TYPE_TRAVEL_BOOM
+      : WORLD_EVENT_TYPE_TRAVEL_SLUMP;
+
+    const event = createSpontaneousTravelEvent({
+      id: `world-event-${randomUUID()}`,
+      type,
+      country,
+      startedAtSimulationMs: simulationNowMs,
+      rng,
+      simulationSpeedMultiplier: this.authoritativeState.simulationSpeedMultiplier
+    });
+    this.worldEventEngine.events.push(event);
+
+    this.broadcastWorldEventLogEntry(event, worldElapsedSimulationMs);
+    return event;
+  }
+
+  processDailyExpenses(simulationNowMs) {
+    if (this.authoritativeState.status !== 'active' || !Number.isFinite(simulationNowMs)) {
+      return false;
+    }
+
+    const worldElapsedSimulationMs = this.getWorldElapsedSimulationMs(simulationNowMs);
+    if (!Number.isFinite(worldElapsedSimulationMs)) {
+      return false;
+    }
+
+    const dayIndex = Math.floor(worldElapsedSimulationMs / WORLD_EVENT_DAY_SIMULATION_MS);
+    if (!Number.isFinite(dayIndex)) {
+      return false;
+    }
+
+    if (this.lastDailyExpenseDayIndex === null) {
+      this.lastDailyExpenseDayIndex = dayIndex;
+      return false;
+    }
+
+    if (dayIndex <= this.lastDailyExpenseDayIndex) {
+      return false;
+    }
+
+    const players = Array.isArray(this.authoritativeState.players)
+      ? this.authoritativeState.players
+      : [];
+    const airports = Array.isArray(this.authoritativeState.airports)
+      ? this.authoritativeState.airports
+      : [];
+
+    const totalByPlayerId = new Map();
+    for (const airportState of airports) {
+      if (!airportState || airportState.ownerPlayerId == null) {
+        continue;
+      }
+
+      const airportId = String(airportState.airportId || '').trim();
+      const definition = AIRPORT_DEFINITIONS_BY_ID.get(airportId);
+      if (!definition) {
+        continue;
+      }
+
+      const feeResult = calculateAirportOperatingFee({
+        basePrice: definition.basePrice,
+        expenseFactor: 1.0
+      });
+
+      const ownerPlayerId = String(airportState.ownerPlayerId);
+      const currentTotal = totalByPlayerId.get(ownerPlayerId) || 0;
+      totalByPlayerId.set(ownerPlayerId, currentTotal + feeResult.finalFee);
+    }
+
+    const daysElapsed = dayIndex - this.lastDailyExpenseDayIndex;
+    let anyCharge = false;
+
+    for (const player of players) {
+      if (!player || player.id == null) {
+        continue;
+      }
+
+      const total = totalByPlayerId.get(String(player.id));
+      if (!Number.isFinite(total) || total === 0) {
+        continue;
+      }
+
+      const charge = total * daysElapsed;
+      const currentCapital = Number(player.capital);
+      player.capital = Number.isFinite(currentCapital)
+        ? currentCapital - charge
+        : -charge;
+      this.recordCapitalDelta(player, -charge);
+      anyCharge = true;
+    }
+
+    this.lastDailyExpenseDayIndex = dayIndex;
+    return anyCharge;
+  }
+
+  processWeeklyFuelExpenses(simulationNowMs) {
+    if (this.authoritativeState.status !== 'active' || !Number.isFinite(simulationNowMs)) {
+      return false;
+    }
+
+    const worldElapsedSimulationMs = this.getWorldElapsedSimulationMs(simulationNowMs);
+    if (!Number.isFinite(worldElapsedSimulationMs)) {
+      return false;
+    }
+
+    const dayIndex = Math.floor(worldElapsedSimulationMs / WORLD_EVENT_DAY_SIMULATION_MS);
+    if (!Number.isFinite(dayIndex)) {
+      return false;
+    }
+
+    const currentWeekIndex = Math.floor(dayIndex / 7);
+
+    if (this.lastFuelExpenseWeekIndex === null) {
+      this.lastFuelExpenseWeekIndex = currentWeekIndex;
+      return false;
+    }
+
+    if (currentWeekIndex <= this.lastFuelExpenseWeekIndex) {
+      return false;
+    }
+
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+    const aircraftByInstanceId = new Map();
+    for (const aircraft of ownedAircraft) {
+      if (aircraft && aircraft.aircraftInstanceId) {
+        aircraftByInstanceId.set(String(aircraft.aircraftInstanceId || '').trim(), aircraft);
+      }
+    }
+
+    const authoritativePlayers = Array.isArray(this.authoritativeState.players)
+      ? this.authoritativeState.players
+      : [];
+    const playerById = new Map();
+    for (const player of authoritativePlayers) {
+      if (player && player.id) {
+        playerById.set(String(player.id || '').trim(), player);
+      }
+    }
+
+    let anyCharge = false;
+    const weeksToProcess = currentWeekIndex - this.lastFuelExpenseWeekIndex;
+    for (let weekOffset = 0; weekOffset < weeksToProcess; weekOffset += 1) {
+      const totalFuelByPlayerId = new Map();
+      for (const [aircraftInstanceId, distanceKm] of this.weeklyAircraftDistanceKm) {
+        if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
+          continue;
+        }
+
+        const aircraft = aircraftByInstanceId.get(aircraftInstanceId);
+        if (!aircraft) {
+          continue;
+        }
+
+        const aircraftDefinition = AIRCRAFT_CATALOG_BY_ID[String(aircraft.aircraftCatalogId || '').trim()];
+        const fuelCostPerKm = aircraftDefinition ? Number(aircraftDefinition.fuelCostPerKm) : 0;
+        if (!Number.isFinite(fuelCostPerKm) || fuelCostPerKm < 0) {
+          continue;
+        }
+
+        const fuelResult = calculateAircraftFuelExpense({
+          distanceKm,
+          fuelCostPerKm,
+          expenseFactor: 1.0
+        });
+        const finalFuelCost = Number(fuelResult.finalFuelCost);
+        if (!Number.isFinite(finalFuelCost) || finalFuelCost <= 0) {
+          continue;
+        }
+
+        const player = playerById.get(String(aircraft.ownerPlayerId || '').trim());
+        if (!player) {
+          continue;
+        }
+
+        const currentCapital = Number(player.capital);
+        player.capital = Number.isFinite(currentCapital)
+          ? currentCapital - finalFuelCost
+          : -finalFuelCost;
+        this.recordCapitalDelta(player, -finalFuelCost);
+        anyCharge = true;
+
+        const previousTotal = totalFuelByPlayerId.get(String(player.id)) || 0;
+        totalFuelByPlayerId.set(String(player.id), previousTotal + finalFuelCost);
+      }
+
+      for (const [playerId, totalFuel] of totalFuelByPlayerId) {
+        console.log(`[FUEL-SUMMARY] player=${playerId} total=$${totalFuel}`);
+      }
+
+      this.weeklyAircraftDistanceKm.clear();
+    }
+
+    this.lastFuelExpenseWeekIndex = currentWeekIndex;
+    return anyCharge;
+  }
+
+  processMonthlyMaintenanceExpenses(simulationNowMs) {
+    if (this.authoritativeState.status !== 'active' || !Number.isFinite(simulationNowMs)) {
+      return false;
+    }
+
+    const worldElapsedSimulationMs = this.getWorldElapsedSimulationMs(simulationNowMs);
+    if (!Number.isFinite(worldElapsedSimulationMs)) {
+      return false;
+    }
+
+    const dayIndex = Math.floor(worldElapsedSimulationMs / WORLD_EVENT_DAY_SIMULATION_MS);
+    if (!Number.isFinite(dayIndex)) {
+      return false;
+    }
+
+    const currentMonthIndex = Math.floor(dayIndex / 30);
+
+    if (this.lastMaintenanceExpenseMonthIndex === null) {
+      this.lastMaintenanceExpenseMonthIndex = currentMonthIndex;
+      return false;
+    }
+
+    if (currentMonthIndex <= this.lastMaintenanceExpenseMonthIndex) {
+      return false;
+    }
+
+    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
+      ? this.authoritativeState.ownedAircraft
+      : [];
+
+    const authoritativePlayers = Array.isArray(this.authoritativeState.players)
+      ? this.authoritativeState.players
+      : [];
+    const playerById = new Map();
+    for (const player of authoritativePlayers) {
+      if (player && player.id) {
+        playerById.set(String(player.id || '').trim(), player);
+      }
+    }
+
+    let anyCharge = false;
+    const monthsToProcess = currentMonthIndex - this.lastMaintenanceExpenseMonthIndex;
+    for (let monthOffset = 0; monthOffset < monthsToProcess; monthOffset += 1) {
+      for (const aircraft of ownedAircraft) {
+        if (!aircraft || !aircraft.aircraftInstanceId) {
+          continue;
+        }
+
+        const aircraftDefinition = AIRCRAFT_CATALOG_BY_ID[String(aircraft.aircraftCatalogId || '').trim()];
+        const monthlyMaintenanceCost = aircraftDefinition ? Number(aircraftDefinition.monthlyMaintenanceCost) : 0;
+        if (!Number.isFinite(monthlyMaintenanceCost) || monthlyMaintenanceCost < 0) {
+          continue;
+        }
+
+        const maintenanceResult = calculateAircraftMaintenanceExpense({
+          monthlyMaintenanceCost,
+          expenseFactor: 1.0
+        });
+        const finalMaintenanceCost = Number(maintenanceResult.finalMaintenanceCost);
+        if (!Number.isFinite(finalMaintenanceCost) || finalMaintenanceCost <= 0) {
+          continue;
+        }
+
+        const player = playerById.get(String(aircraft.ownerPlayerId || '').trim());
+        if (!player) {
+          continue;
+        }
+
+        const currentCapital = Number(player.capital);
+        player.capital = Number.isFinite(currentCapital)
+          ? currentCapital - finalMaintenanceCost
+          : -finalMaintenanceCost;
+        this.recordCapitalDelta(player, -finalMaintenanceCost);
+        anyCharge = true;
+      }
+    }
+
+    this.lastMaintenanceExpenseMonthIndex = currentMonthIndex;
+    return anyCharge;
+  }
+
+  emitPendingWorldEventAnnouncements(simulationNowMs) {
+    if (!this.worldEventEngine || !Number.isFinite(simulationNowMs)) {
+      return;
+    }
+
+    for (const event of this.worldEventEngine.events) {
+      if (
+        !event ||
+        event.status !== 'scheduled' ||
+        event.announcementEmitted === true ||
+        !Number.isFinite(event.announceAtSimulationMs) ||
+        simulationNowMs < event.announceAtSimulationMs
+      ) {
+        continue;
+      }
+
+      event.announcementEmitted = true;
+      this.broadcastWorldEventLogEntry(event, this.getWorldElapsedSimulationMs(simulationNowMs));
+    }
+  }
+
+  broadcastWorldEventLogEntry(event, worldElapsedSimulationMs) {
+    if (!this.manager || !this.manager.io) {
+      return;
+    }
+
+    const country = Array.isArray(event.countries) && event.countries.length > 0
+      ? event.countries[0]
+      : 'Unknown region';
+
+    let message;
+    if (event.type === WORLD_EVENT_TYPE_MAJOR_SPORTING_EVENT) {
+      const monthYear = this.formatWorldCalendarMonthYear(event.candidateAtSimulationMs);
+      message = `Major Sporting Event announced in ${country}` + (monthYear ? ` for ${monthYear}` : '');
+    } else {
+      message = `${event.type === WORLD_EVENT_TYPE_TRAVEL_SLUMP ? 'Travel Slump' : 'Travel Boom'} in ${country}`;
+    }
+
+    this.manager.io.to(this.getRoomName()).emit('game:event', {
+      type: 'world:event',
+      occurredAt: Date.now(),
+      worldElapsedSimulationMs: Number.isFinite(worldElapsedSimulationMs)
+        ? worldElapsedSimulationMs
+        : null,
+      gameId: this.id,
+      actorPlayerId: null,
+      data: {
+        message,
+        country,
+        eventType: event.type
+      }
+    });
+  }
+
+  formatWorldCalendarMonthYear(simulationTimeMs) {
+    const startGameMs = this.authoritativeState.simulationStartedAtGameMs;
+    const startYear = this.authoritativeState.worldCalendarStartYear;
+    if (
+      !Number.isFinite(simulationTimeMs) ||
+      !Number.isFinite(startGameMs) ||
+      !Number.isFinite(startYear)
+    ) {
+      return null;
+    }
+
+    const elapsed = simulationTimeMs - startGameMs;
+    if (elapsed < 0) {
+      return null;
+    }
+
+    const totalMonths = Math.floor(elapsed / WORLD_MONTH_MS);
+    const year = startYear + Math.floor(totalMonths / WORLD_MONTHS_PER_YEAR);
+    return `${WORLD_MONTH_ABBREVIATIONS[totalMonths % WORLD_MONTHS_PER_YEAR]} ${year}`;
+  }
+
+  updateWorldEventFactors(simulationNowMs) {
+    if (!this.worldEventEngine || !Number.isFinite(simulationNowMs)) {
+      return false;
+    }
+
+    this.worldEventEngine.tick(simulationNowMs);
+    this.emitPendingWorldEventAnnouncements(simulationNowMs);
+
+    const world = this.authoritativeState.world && typeof this.authoritativeState.world === 'object'
+      ? this.authoritativeState.world
+      : (this.authoritativeState.world = { countryProfitFactors: {} });
+    const currentFactors =
+      world.countryProfitFactors && typeof world.countryProfitFactors === 'object'
+        ? world.countryProfitFactors
+        : {};
+
+    const nextFactors = {};
+    for (const event of this.worldEventEngine.events) {
+      const factor = getWorldEventFactorAtTime(event, simulationNowMs);
+      if (!Number.isFinite(factor) || factor === WORLD_EVENT_NEUTRAL_FACTOR) {
+        continue;
+      }
+
+      const countries = Array.isArray(event.countries) ? event.countries : [];
+      for (const country of countries) {
+        if (!country) {
+          continue;
+        }
+        nextFactors[country] = (Number.isFinite(nextFactors[country]) ? nextFactors[country] : WORLD_EVENT_NEUTRAL_FACTOR)
+          + (factor - WORLD_EVENT_NEUTRAL_FACTOR);
+      }
+    }
+
+    const currentKeys = Object.keys(currentFactors);
+    const nextKeys = Object.keys(nextFactors);
+    let changed = currentKeys.length !== nextKeys.length;
+    if (!changed) {
+      for (const key of nextKeys) {
+        if (currentFactors[key] !== nextFactors[key]) {
+          changed = true;
+          break;
+        }
+      }
+    }
+
+    if (!changed) {
+      return false;
+    }
+
+    world.countryProfitFactors = nextFactors;
+    return true;
   }
 
   getSimulationTimeMs(realNowMs = Date.now()) {
@@ -126,6 +866,14 @@ class Game {
     return simulationStartedAtGameMs + (elapsedRealMs * simulationSpeedMultiplier);
   }
 
+  getWorldElapsedSimulationMs(simulationNowMs) {
+    const simulationStartedAtGameMs = this.authoritativeState.simulationStartedAtGameMs;
+    if (!Number.isFinite(simulationNowMs) || !Number.isFinite(simulationStartedAtGameMs)) {
+      return 0;
+    }
+    return Math.max(0, simulationNowMs - simulationStartedAtGameMs);
+  }
+
   getSimulationClockSnapshot(realNowMs = Date.now()) {
     return {
       simulationStartedAtRealMs: Number.isFinite(this.authoritativeState.simulationStartedAtRealMs)
@@ -140,6 +888,9 @@ class Game {
           : DEFAULT_SIMULATION_SPEED_MULTIPLIER,
       simulationEndedAtGameMs: Number.isFinite(this.authoritativeState.simulationEndedAtGameMs)
         ? this.authoritativeState.simulationEndedAtGameMs
+        : null,
+      worldCalendarStartYear: Number.isFinite(this.authoritativeState.worldCalendarStartYear)
+        ? this.authoritativeState.worldCalendarStartYear
         : null,
       simulationNowGameMs: this.getSimulationTimeMs(realNowMs)
     };
@@ -184,16 +935,61 @@ class Game {
     this.authoritativeState.status = 'ended';
     this.authoritativeState.endReason = reason;
     this.authoritativeState.endedAt = endedAtRealNowMs;
-    this.generateResults();
+    const results = this.generateResults();
+    this._logScoreEndDiagnostic(reason, results);
     this.stopFlightScheduler();
     this.clearExpirationTimeout();
-    this.broadcastState();
+    this.broadcastState('GAME_END');
 
     if (this.manager && typeof this.manager.handleGameEnded === 'function') {
       this.manager.handleGameEnded(this.id);
     }
 
     return true;
+  }
+
+  _logScoreEndDiagnostic(reason, results) {
+    if (!results || !results.winner) {
+      return;
+    }
+
+    const winnerId = String(results.winner.id || '');
+    if (!winnerId) {
+      return;
+    }
+
+    const winner = (this.authoritativeState.players || []).find((player) => {
+      return player && String(player.id || '') === winnerId;
+    });
+    if (!winner) {
+      return;
+    }
+
+    const netWorthByPlayerId = calculateNetWorthByPlayer(this.authoritativeState);
+    const netWorth = netWorthByPlayerId.has(winnerId) ? netWorthByPlayerId.get(winnerId) : 0;
+    const financial = calculateNetWorthScore(netWorth);
+    const airport = calculateAirportScore(this.authoritativeState, winnerId);
+    const route = calculateRouteScore(this.authoritativeState, winnerId);
+    const debug = Number.isFinite(winner.debugScoreOffset) ? winner.debugScoreOffset : 0;
+    const total = calculatePlayerScore(this.authoritativeState, winnerId);
+    const threshold = Number.isFinite(this.authoritativeState.scoreToWin)
+      ? this.authoritativeState.scoreToWin
+      : 0;
+
+    const aircraft = (this.authoritativeState.ownedAircraft || []).filter((ac) => {
+      return ac && String(ac.ownerPlayerId || '') === winnerId;
+    }).length;
+    const routes = (this.authoritativeState.routes || []).filter((r) => {
+      return r && r.pendingRemoval !== true && String(r.ownerPlayerId || '') === winnerId;
+    }).length;
+
+    const username = winner.username || '?';
+
+    console.log(
+      `[SCORE-END] reason=${reason} player=${winnerId}/${username} ` +
+      `financial=${financial} airport=${airport} route=${route} debug=${debug} ` +
+      `total=${total} threshold=${threshold} aircraft=${aircraft} routes=${routes}`
+    );
   }
 
   createCoinFlipValue(bitCount = 16) {
@@ -314,7 +1110,7 @@ class Game {
 
     const ended = this.checkWinConditions();
     if (!ended) {
-      this.broadcastState();
+      this.broadcastState('OTHER');
     }
 
     return true;
@@ -364,10 +1160,11 @@ class Game {
     }
 
     player.capital = currentCapital - basePrice;
+    this.recordCapitalDelta(player, -basePrice);
     airportState.ownerPlayerId = player.id;
     airportState.saleListing = null;
 
-    this.broadcastState();
+    this.broadcastState('AIRPORT_PURCHASE');
 
     return {
       success: true,
@@ -644,6 +1441,7 @@ class Game {
       };
     }
 
+
     const providedDetachmentContext =
       options && options.detachmentContext && options.detachmentContext.aircraft === aircraft
         ? options.detachmentContext
@@ -710,6 +1508,7 @@ class Game {
 
     aircraft.status = OWNED_AIRCRAFT_STATUS.AVAILABLE;
     aircraft.assignedRouteId = null;
+
 
     return {
       success: true,
@@ -848,14 +1647,15 @@ class Game {
                           String(flight.direction || '').trim() === 'outbound' &&
                           String(flight.originAirportId || '').trim() === routeOriginAirportId;
 
-      this.beginModelReconfiguration(route.routeId, aircraft.aircraftCatalogId);
-
       if (isHomeReady) {
         immediateSaleAircraft.push(aircraft);
       } else {
         deferredSaleAircraft.push(aircraft);
       }
     }
+
+    const availableQuantitySold = immediateSaleAircraft.filter((aircraft) => this.isAircraftAvailableAndUnassigned(aircraft)).length;
+    const assignedQuantitySold = immediateSaleAircraft.length - availableQuantitySold;
 
     const detachmentContextsByAircraftInstanceId = new Map();
     for (const aircraft of immediateSaleAircraft) {
@@ -883,8 +1683,15 @@ class Game {
       }
 
       const normalizedAircraftInstanceId = String(aircraft.aircraftInstanceId || '').trim();
+      const detachmentContext = detachmentContextsByAircraftInstanceId.get(normalizedAircraftInstanceId);
+      const assignedRouteId = String(aircraft.assignedRouteId || '').trim();
+      const route = routes.find((candidate) => candidate && candidate.routeId === assignedRouteId);
+      if (route) {
+        this.beginModelReconfiguration(route.routeId, aircraft.aircraftCatalogId);
+      }
+
       const detachResult = this.detachAircraftFromAssignment(normalizedAircraftInstanceId, {
-        detachmentContext: detachmentContextsByAircraftInstanceId.get(normalizedAircraftInstanceId)
+        detachmentContext
       });
 
       if (!detachResult.success) {
@@ -899,6 +1706,12 @@ class Game {
     }
 
     for (const aircraft of deferredSaleAircraft) {
+      const assignedRouteId = String(aircraft.assignedRouteId || '').trim();
+      const route = routes.find((candidate) => candidate && candidate.routeId === assignedRouteId);
+      if (route) {
+        this.beginModelReconfiguration(route.routeId, aircraft.aircraftCatalogId);
+      }
+
       aircraft.pendingRouteExitAction = 'sell';
       aircraft.pendingSaleRefund = sellQuote.unitSellPrice;
     }
@@ -923,11 +1736,12 @@ class Game {
     const totalRefund = sellQuote.unitSellPrice * quantitySoldImmediately;
     const currentCapital = Number.isFinite(context.player.capital) ? context.player.capital : 0;
     context.player.capital = currentCapital + totalRefund;
+    this.recordCapitalDelta(context.player, totalRefund);
     this.authoritativeState.ownedAircraft = updatedOwnedAircraft;
 
     const remainingOwnedQuantity = sellQuote.ownedQuantity - quantitySoldImmediately;
 
-    this.broadcastState();
+    this.broadcastState('AIRCRAFT_SALE');
 
     return {
       success: true,
@@ -936,8 +1750,8 @@ class Game {
       quantitySold: quantity,
       quantitySoldImmediately,
       quantityPendingSale,
-      availableQuantitySold: immediateSaleAircraft.filter((aircraft) => this.isAircraftAvailableAndUnassigned(aircraft)).length,
-      assignedQuantitySold: immediateSaleAircraft.filter((aircraft) => !this.isAircraftAvailableAndUnassigned(aircraft)).length,
+      availableQuantitySold,
+      assignedQuantitySold,
       unitSellPrice: sellQuote.unitSellPrice,
       totalRefund,
       ownedQuantity: remainingOwnedQuantity,
@@ -995,10 +1809,11 @@ class Game {
     }
 
     player.capital = currentCapital - totalCost;
+    this.recordCapitalDelta(player, -totalCost);
     ownedAircraft.push(...purchasedAircraftInstances);
     this.authoritativeState.ownedAircraft = ownedAircraft;
 
-    this.broadcastState();
+    this.broadcastState('AIRCRAFT_PURCHASE');
 
     const primaryAircraftInstance = purchasedAircraftInstances[0] || null;
 
@@ -1070,7 +1885,7 @@ class Game {
       askingPrice
     };
 
-    this.broadcastState();
+    this.broadcastState('OTHER');
 
     return {
       success: true,
@@ -1131,7 +1946,7 @@ class Game {
 
     airportState.saleListing = null;
 
-    this.broadcastState();
+    this.broadcastState('OTHER');
 
     return {
       success: true,
@@ -1474,12 +2289,14 @@ class Game {
 
     if (sellerRoutesUsingAirport.length === 0) {
       buyer.capital = buyerCapital - askingPrice;
+      this.recordCapitalDelta(buyer, -askingPrice);
       const sellerCapital = Number.isFinite(seller.capital) ? seller.capital : 0;
       seller.capital = sellerCapital + askingPrice;
+      this.recordCapitalDelta(seller, askingPrice);
       airportState.ownerPlayerId = buyer.id;
       airportState.saleListing = null;
 
-      this.broadcastState();
+      this.broadcastState('AIRPORT_PURCHASE');
 
       return {
         success: true,
@@ -1498,6 +2315,7 @@ class Game {
     const previousPendingState = airportState.pendingOwnershipChange;
 
     buyer.capital = buyerCapital - askingPrice;
+    this.recordCapitalDelta(buyer, -askingPrice);
 
     airportState.pendingOwnershipChange = {
       type: 'player-transfer',
@@ -1511,12 +2329,13 @@ class Game {
     const shutdownResult = this.initiateAirportRouteShutdowns(seller.id, airportDefinition.id);
     if (!shutdownResult.success) {
       buyer.capital = previousBuyerCapital;
+      this.recordCapitalDelta(buyer, askingPrice);
       airportState.saleListing = previousSaleListing;
       airportState.pendingOwnershipChange = previousPendingState;
       return shutdownResult;
     }
 
-    this.broadcastState();
+    this.broadcastState('AIRPORT_PURCHASE');
 
     return {
       success: true,
@@ -1586,10 +2405,11 @@ class Game {
 
     if (playerRoutesUsingAirport.length === 0) {
       player.capital = currentCapital + refundAmount;
+      this.recordCapitalDelta(player, refundAmount);
       airportState.ownerPlayerId = null;
       airportState.saleListing = null;
 
-      this.broadcastState();
+      this.broadcastState('AIRPORT_SALE');
 
       return {
         success: true,
@@ -1616,7 +2436,7 @@ class Game {
       return shutdownResult;
     }
 
-    this.broadcastState();
+    this.broadcastState('AIRPORT_SALE');
 
     return {
       success: true,
@@ -1729,6 +2549,7 @@ class Game {
 
     const sellerCapital = Number.isFinite(seller.capital) ? seller.capital : 0;
     seller.capital = sellerCapital + lockedAmount;
+    this.recordCapitalDelta(seller, lockedAmount);
     airportState.ownerPlayerId = null;
     airportState.saleListing = null;
     airportState.pendingOwnershipChange = null;
@@ -1867,6 +2688,7 @@ class Game {
 
     const sellerCapital = Number.isFinite(seller.capital) ? seller.capital : 0;
     seller.capital = sellerCapital + lockedAmount;
+    this.recordCapitalDelta(seller, lockedAmount);
     airportState.ownerPlayerId = buyerPlayerId;
     airportState.saleListing = null;
     airportState.pendingOwnershipChange = null;
@@ -1941,6 +2763,44 @@ class Game {
       };
     }
 
+    const countPlayerRoutesAtAirport = (airportId) => {
+      return routes.filter((route) => {
+        return (
+          route &&
+          String(route.ownerPlayerId) === String(player.id) &&
+          (String(route.originAirportId) === airportId ||
+            String(route.destinationAirportId) === airportId)
+        );
+      }).length;
+    };
+
+    for (const endpoint of [originAirportDefinition, destinationAirportDefinition]) {
+      const capacity = AIRPORT_CAPACITY[endpoint.economicClass];
+      const maxRoutes =
+        capacity && Number.isInteger(capacity.maxRoutes) && capacity.maxRoutes > 0
+          ? capacity.maxRoutes
+          : null;
+      if (maxRoutes === null) {
+        return {
+          success: false,
+          code: 'AIRPORT_CAPACITY_UNDEFINED',
+          message: 'Airport route capacity is not defined.'
+        };
+      }
+
+      const usedRoutes = countPlayerRoutesAtAirport(endpoint.id);
+      if (usedRoutes >= maxRoutes) {
+        console.log(
+          `[CAPACITY] Route creation blocked: ${endpoint.iata} (${endpoint.economicClass}) — ${usedRoutes}/${maxRoutes} routes`
+        );
+        return {
+          success: false,
+          code: 'AIRPORT_ROUTE_CAPACITY_REACHED',
+          message: 'Airport has reached its maximum route capacity.'
+        };
+      }
+    }
+
     const route = {
       routeId: `route-${randomUUID()}`,
       ownerPlayerId: player.id,
@@ -1957,7 +2817,7 @@ class Game {
 
     this.authoritativeState.routes = routes;
     this.authoritativeState.routes.push(route);
-    this.broadcastState();
+    this.broadcastState('ROUTE_CREATE');
 
     return {
       success: true,
@@ -2016,7 +2876,7 @@ class Game {
       route.reconfiguringModelCatalogIds = [];
       route.reconfigurationReferenceAircraftInstanceIds = {};
       route.pendingRemovalNotBeforeRealMs = Date.now() + 500;
-      this.broadcastState();
+      this.broadcastState('ROUTE_REMOVE');
 
       return {
         success: true,
@@ -2029,7 +2889,7 @@ class Game {
     route.pendingRemoval = true;
     route.reconfiguringModelCatalogIds = [];
     route.reconfigurationReferenceAircraftInstanceIds = {};
-    this.broadcastState();
+    this.broadcastState('ROUTE_REMOVE');
 
     return {
       success: true,
@@ -2223,6 +3083,7 @@ class Game {
       return pendingAction === 'unassign';
     });
 
+
     if (pendingUnassignAircraft.length === 0) {
       return { success: true, changed: false };
     }
@@ -2231,6 +3092,7 @@ class Game {
       const flight = flights.find((candidate) => {
         return candidate && String(candidate.aircraftInstanceId || '').trim() === String(aircraft.aircraftInstanceId || '').trim();
       });
+
 
       if (!flight) {
         return {
@@ -2389,6 +3251,7 @@ class Game {
       if (player) {
         const currentCapital = Number.isFinite(player.capital) ? player.capital : 0;
         player.capital = currentCapital + pendingSaleRefund;
+        this.recordCapitalDelta(player, pendingSaleRefund);
       }
     }
 
@@ -2566,6 +3429,7 @@ class Game {
       if (player) {
         const currentCapital = Number.isFinite(player.capital) ? player.capital : 0;
         player.capital = currentCapital + pendingSaleRefund;
+        this.recordCapitalDelta(player, pendingSaleRefund);
       }
     }
 
@@ -2618,6 +3482,7 @@ class Game {
   }
 
   rebuildModelDepartureSchedule(routeId, aircraftCatalogId, rebuildStartSimulationMs) {
+    this.economyDiagnostics.scheduleRebuilds += 1;
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
     const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft) ? this.authoritativeState.ownedAircraft : [];
     const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
@@ -2851,6 +3716,14 @@ class Game {
       };
     }
 
+    if (route.pendingRemoval === true) {
+      return {
+        success: false,
+        code: 'ROUTE_REMOVAL_PENDING',
+        message: 'Route is pending removal and cannot be edited.'
+      };
+    }
+
     if (String(aircraft.ownerPlayerId) !== String(player.id)) {
       return {
         success: false,
@@ -2937,7 +3810,54 @@ class Game {
       return {
         success: false,
         code: 'MODEL_EDIT_LOCKED',
-        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.'
+        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.',
+        routeId: route.routeId,
+        aircraftCatalogId: aircraft.aircraftCatalogId,
+        lockedUntilRealMs: lockedUntil
+      };
+    }
+
+    const routeOriginDefinition = AIRPORT_DEFINITIONS_BY_ID.get(String(route.originAirportId || '').trim());
+    const routeDestinationDefinition = AIRPORT_DEFINITIONS_BY_ID.get(String(route.destinationAirportId || '').trim());
+    if (!routeOriginDefinition || !routeDestinationDefinition) {
+      return {
+        success: false,
+        code: 'AIRPORT_NOT_FOUND',
+        message: 'Route endpoint airport was not found.'
+      };
+    }
+
+    const originCapacity = AIRPORT_CAPACITY[routeOriginDefinition.economicClass];
+    const destinationCapacity = AIRPORT_CAPACITY[routeDestinationDefinition.economicClass];
+    const originAircraftLimit =
+      originCapacity &&
+      Number.isInteger(originCapacity.maxAircraftPerRoute) &&
+      originCapacity.maxAircraftPerRoute > 0
+        ? originCapacity.maxAircraftPerRoute
+        : null;
+    const destinationAircraftLimit =
+      destinationCapacity &&
+      Number.isInteger(destinationCapacity.maxAircraftPerRoute) &&
+      destinationCapacity.maxAircraftPerRoute > 0
+        ? destinationCapacity.maxAircraftPerRoute
+        : null;
+    if (originAircraftLimit === null || destinationAircraftLimit === null) {
+      return {
+        success: false,
+        code: 'AIRPORT_CAPACITY_UNDEFINED',
+        message: 'Route aircraft capacity is not defined.'
+      };
+    }
+
+    const routeAircraftCapacity = Math.min(originAircraftLimit, destinationAircraftLimit);
+    if (assignedAircraftInstanceIds.length + 1 > routeAircraftCapacity) {
+      console.log(
+        `[CAPACITY] Aircraft assignment blocked: route ${route.routeId} — ${assignedAircraftInstanceIds.length}/${routeAircraftCapacity} aircraft`
+      );
+      return {
+        success: false,
+        code: 'ROUTE_AIRCRAFT_CAPACITY_REACHED',
+        message: 'Route has reached its maximum aircraft capacity.'
       };
     }
 
@@ -2950,7 +3870,7 @@ class Game {
     flights.push(this.createReadyFlightRecord(route, aircraft));
     this.authoritativeState.flights = flights;
 
-    this.broadcastState();
+    this.broadcastState('AIRCRAFT_ASSIGN');
 
     return {
       success: true,
@@ -3156,7 +4076,54 @@ class Game {
       return {
         success: false,
         code: 'MODEL_EDIT_LOCKED',
-        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.'
+        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.',
+        routeId: route.routeId,
+        aircraftCatalogId,
+        lockedUntilRealMs: lockedUntil
+      };
+    }
+
+    const routeOriginDefinition = AIRPORT_DEFINITIONS_BY_ID.get(String(route.originAirportId || '').trim());
+    const routeDestinationDefinition = AIRPORT_DEFINITIONS_BY_ID.get(String(route.destinationAirportId || '').trim());
+    if (!routeOriginDefinition || !routeDestinationDefinition) {
+      return {
+        success: false,
+        code: 'AIRPORT_NOT_FOUND',
+        message: 'Route endpoint airport was not found.'
+      };
+    }
+
+    const originCapacity = AIRPORT_CAPACITY[routeOriginDefinition.economicClass];
+    const destinationCapacity = AIRPORT_CAPACITY[routeDestinationDefinition.economicClass];
+    const originAircraftLimit =
+      originCapacity &&
+      Number.isInteger(originCapacity.maxAircraftPerRoute) &&
+      originCapacity.maxAircraftPerRoute > 0
+        ? originCapacity.maxAircraftPerRoute
+        : null;
+    const destinationAircraftLimit =
+      destinationCapacity &&
+      Number.isInteger(destinationCapacity.maxAircraftPerRoute) &&
+      destinationCapacity.maxAircraftPerRoute > 0
+        ? destinationCapacity.maxAircraftPerRoute
+        : null;
+    if (originAircraftLimit === null || destinationAircraftLimit === null) {
+      return {
+        success: false,
+        code: 'AIRPORT_CAPACITY_UNDEFINED',
+        message: 'Route aircraft capacity is not defined.'
+      };
+    }
+
+    const routeAircraftCapacity = Math.min(originAircraftLimit, destinationAircraftLimit);
+    if (assignedAircraftInstanceIds.length + validAircraft.length > routeAircraftCapacity) {
+      console.log(
+        `[CAPACITY] Bulk aircraft assignment blocked: route ${route.routeId} — ${assignedAircraftInstanceIds.length}/${routeAircraftCapacity} aircraft, ${validAircraft.length} requested`
+      );
+      return {
+        success: false,
+        code: 'ROUTE_AIRCRAFT_CAPACITY_REACHED',
+        message: 'Route has reached its maximum aircraft capacity.'
       };
     }
 
@@ -3175,7 +4142,7 @@ class Game {
     }
     this.authoritativeState.flights = flights;
 
-    this.broadcastState();
+    this.broadcastState('AIRCRAFT_ASSIGN');
 
     return {
       success: true,
@@ -3265,7 +4232,10 @@ class Game {
       return {
         success: false,
         code: 'MODEL_EDIT_LOCKED',
-        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.'
+        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.',
+        routeId: route.routeId,
+        aircraftCatalogId: aircraft.aircraftCatalogId,
+        lockedUntilRealMs: lockedUntil
       };
     }
 
@@ -3293,11 +4263,13 @@ class Game {
       return candidate && String(candidate.aircraftInstanceId || '').trim() === normalizedAircraftInstanceId;
     });
 
+
     const routeOriginAirportId = String(route.originAirportId || '').trim();
     const isHomeReady = flight &&
                         String(flight.status || '').trim() === 'ready' &&
                         String(flight.direction || '').trim() === 'outbound' &&
                         String(flight.originAirportId || '').trim() === routeOriginAirportId;
+
 
     if (isHomeReady) {
       const detachResult = this.detachAircraftFromAssignment(aircraft.aircraftInstanceId);
@@ -3308,7 +4280,8 @@ class Game {
       aircraft.pendingRouteExitAction = 'unassign';
     }
 
-    this.broadcastState();
+    this.broadcastState('AIRCRAFT_UNASSIGN');
+
 
     return {
       success: true,
@@ -3515,7 +4488,10 @@ class Game {
       return {
         success: false,
         code: 'MODEL_EDIT_LOCKED',
-        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.'
+        message: 'Aircraft scheduling is temporarily locked while the route schedule stabilizes.',
+        routeId: route.routeId,
+        aircraftCatalogId,
+        lockedUntilRealMs: lockedUntil
       };
     }
 
@@ -3535,7 +4511,7 @@ class Game {
       }
     }
 
-    this.broadcastState();
+    this.broadcastState('AIRCRAFT_UNASSIGN');
 
     return {
       success: true,
@@ -3574,7 +4550,7 @@ class Game {
     return this.flightEngine.resolveFlightTransitionContext(flightId);
   }
 
-  resolveFlightArrivalSettlementContext(transitionContext) {
+  resolveFlightArrivalSettlementContext(transitionContext, simulationNowMs) {
     if (!transitionContext || !transitionContext.flight || !transitionContext.route || !transitionContext.aircraftDefinition) {
       return {
         success: false,
@@ -3626,12 +4602,42 @@ class Game {
       };
     }
 
-    const finalRevenue = Number(settlementResult.finalRevenue);
-    if (!Number.isFinite(finalRevenue)) {
+    const routeCountryProfitFactor = this.resolveRouteCountryProfitFactor(
+      transitionContext.route,
+      simulationNowMs
+    );
+    if (!Number.isFinite(routeCountryProfitFactor) || routeCountryProfitFactor < 0) {
+      return {
+        success: false,
+        code: 'ROUTE_COUNTRY_PROFIT_FACTOR_INVALID',
+        message: 'Route country profit factor could not be resolved.',
+        flightId: transitionContext.flight.flightId,
+        playerId: ownerPlayer.id,
+        routeId: transitionContext.route.routeId,
+        aircraftCatalogId: transitionContext.aircraftDefinition.aircraftCatalogId
+      };
+    }
+
+    const routeAirportValueFactor = this.resolveRouteAirportValueFactor(transitionContext.route);
+    if (!Number.isFinite(routeAirportValueFactor) || routeAirportValueFactor <= 0) {
+      return {
+        success: false,
+        code: 'ROUTE_AIRPORT_VALUE_FACTOR_INVALID',
+        message: 'Route airport value factor could not be resolved.',
+        flightId: transitionContext.flight.flightId,
+        playerId: ownerPlayer.id,
+        routeId: transitionContext.route.routeId,
+        aircraftCatalogId: transitionContext.aircraftDefinition.aircraftCatalogId
+      };
+    }
+
+    const adjustedFinalRevenue =
+      Number(settlementResult.finalRevenue) * routeCountryProfitFactor * routeAirportValueFactor;
+    if (!Number.isFinite(adjustedFinalRevenue)) {
       return {
         success: false,
         code: 'FLIGHT_SETTLEMENT_INVALID',
-        message: 'Flight settlement produced an invalid final revenue value.',
+        message: 'Flight settlement produced an invalid adjusted final revenue value.',
         flightId: transitionContext.flight.flightId,
         playerId: ownerPlayer.id,
         routeId: transitionContext.route.routeId,
@@ -3643,19 +4649,226 @@ class Game {
       success: true,
       ownerPlayer,
       currentCapital,
-      settlementResult
+      settlementResult: {
+        ...settlementResult,
+        finalRevenue: adjustedFinalRevenue,
+        routeCountryProfitFactor,
+        routeAirportValueFactor
+      }
     };
+  }
+
+  resolveRouteCountryProfitFactor(route, simulationNowMs) {
+    if (!route || !route.originAirportId || !route.destinationAirportId) {
+      return 1.0;
+    }
+
+    const origin = AIRPORT_DEFINITIONS_BY_ID.get(String(route.originAirportId || '').trim());
+    const destination = AIRPORT_DEFINITIONS_BY_ID.get(String(route.destinationAirportId || '').trim());
+
+    if (!origin || !destination) {
+      return 1.0;
+    }
+
+    const factors = (this.authoritativeState.world && this.authoritativeState.world.countryProfitFactors) || {};
+    const originFactor = Number.isFinite(factors[origin.country]) ? factors[origin.country] : 1.0;
+    const destinationFactor = Number.isFinite(factors[destination.country]) ? factors[destination.country] : 1.0;
+
+    return (originFactor + destinationFactor) / 2;
+  }
+
+  resolveRouteAirportValueFactor(route) {
+    if (!route || !route.originAirportId || !route.destinationAirportId) {
+      return 1.0;
+    }
+
+    const origin = AIRPORT_DEFINITIONS_BY_ID.get(String(route.originAirportId || '').trim());
+    const destination = AIRPORT_DEFINITIONS_BY_ID.get(String(route.destinationAirportId || '').trim());
+
+    const originFactor = resolveAirportValueFactor(origin && origin.basePrice);
+    const destinationFactor = resolveAirportValueFactor(destination && destination.basePrice);
+
+    return (originFactor + destinationFactor) / 2;
   }
 
   applyFlightTransition(transition, simulationNowMs) {
     return this.flightEngine.applyFlightTransition(transition, simulationNowMs);
   }
 
+  _initializeExpectedCapital() {
+    const players = Array.isArray(this.authoritativeState.players)
+      ? this.authoritativeState.players
+      : [];
+    for (const player of players) {
+      if (player && player.id) {
+        this.economyDiagnostics.expectedCapitalByPlayerId.set(
+          player.id,
+          Number.isFinite(player.capital) ? player.capital : 0
+        );
+      }
+    }
+  }
+
+  recordCapitalDelta(player, delta) {
+    if (!player || !player.id || !Number.isFinite(delta)) {
+      return;
+    }
+    const previous = this.economyDiagnostics.expectedCapitalByPlayerId.get(player.id);
+    const baseline = Number.isFinite(previous)
+      ? previous
+      : (Number.isFinite(player.capital) ? player.capital - delta : -delta);
+    this.economyDiagnostics.expectedCapitalByPlayerId.set(player.id, baseline + delta);
+  }
+
+  recordRevenueCredited(player, amount) {
+    if (!player || !player.id || !Number.isFinite(amount)) {
+      return;
+    }
+    this.recordCapitalDelta(player, amount);
+    this.economyDiagnostics.revenueEvents += 1;
+    this.economyDiagnostics.revenueCredited += amount;
+  }
+
+  recordFlightLegDistance(aircraftInstance, completedLegDistanceKm) {
+    if (!aircraftInstance || !aircraftInstance.aircraftInstanceId || !Number.isFinite(completedLegDistanceKm)) {
+      return;
+    }
+    const aircraftInstanceId = String(aircraftInstance.aircraftInstanceId || '').trim();
+    const previous = this.weeklyAircraftDistanceKm.has(aircraftInstanceId)
+      ? this.weeklyAircraftDistanceKm.get(aircraftInstanceId)
+      : 0;
+    this.weeklyAircraftDistanceKm.set(aircraftInstanceId, previous + completedLegDistanceKm);
+  }
+
+  recordTransitionLag(lagMs) {
+    const lag = Math.max(0, lagMs);
+    this.economyDiagnostics.transitionsProcessed += 1;
+    this.economyDiagnostics.totalTransitionLagMs += lag;
+    if (lag > this.economyDiagnostics.maxTransitionLagMs) {
+      this.economyDiagnostics.maxTransitionLagMs = lag;
+    }
+  }
+
+  getEconomyDiagnosticsSnapshot() {
+    return {
+      expectedCapitalByPlayerId: new Map(this.economyDiagnostics.expectedCapitalByPlayerId),
+      revenueEvents: this.economyDiagnostics.revenueEvents,
+      revenueCredited: this.economyDiagnostics.revenueCredited,
+      transitionsProcessed: this.economyDiagnostics.transitionsProcessed,
+      totalTransitionLagMs: this.economyDiagnostics.totalTransitionLagMs,
+      maxTransitionLagMs: this.economyDiagnostics.maxTransitionLagMs,
+      schedulerTicks: this.economyDiagnostics.schedulerTicks,
+      transitionCapHits: this.economyDiagnostics.transitionCapHits,
+      processingTimeCapHits: this.economyDiagnostics.processingTimeCapHits,
+      totalSchedulerWorkMs: this.economyDiagnostics.totalSchedulerWorkMs,
+      maxSchedulerWorkMs: this.economyDiagnostics.maxSchedulerWorkMs,
+      dueScanMs: this.economyDiagnostics.dueScanMs,
+      applyTransitionMs: this.economyDiagnostics.applyTransitionMs,
+      routeCleanupMs: this.economyDiagnostics.routeCleanupMs,
+      airportCleanupMs: this.economyDiagnostics.airportCleanupMs,
+      broadcastPrepMs: this.economyDiagnostics.broadcastPrepMs,
+      fullFlightScans: this.economyDiagnostics.fullFlightScans,
+      aircraftLinearLookups: this.economyDiagnostics.aircraftLinearLookups,
+      routeLinearLookups: this.economyDiagnostics.routeLinearLookups,
+      scheduleRebuilds: this.economyDiagnostics.scheduleRebuilds
+    };
+  }
+
+  resetEconomyDiagnosticsCounters() {
+    this.economyDiagnostics.revenueEvents = 0;
+    this.economyDiagnostics.revenueCredited = 0;
+    this.economyDiagnostics.transitionsProcessed = 0;
+    this.economyDiagnostics.totalTransitionLagMs = 0;
+    this.economyDiagnostics.maxTransitionLagMs = 0;
+    this.economyDiagnostics.schedulerTicks = 0;
+    this.economyDiagnostics.transitionCapHits = 0;
+    this.economyDiagnostics.processingTimeCapHits = 0;
+    this.economyDiagnostics.totalSchedulerWorkMs = 0;
+    this.economyDiagnostics.maxSchedulerWorkMs = 0;
+    this.economyDiagnostics.dueScanMs = 0;
+    this.economyDiagnostics.applyTransitionMs = 0;
+    this.economyDiagnostics.routeCleanupMs = 0;
+    this.economyDiagnostics.airportCleanupMs = 0;
+    this.economyDiagnostics.broadcastPrepMs = 0;
+    this.economyDiagnostics.fullFlightScans = 0;
+    this.economyDiagnostics.aircraftLinearLookups = 0;
+    this.economyDiagnostics.routeLinearLookups = 0;
+    this.economyDiagnostics.scheduleRebuilds = 0;
+  }
+
+  recordSchedulerProfile(metrics) {
+    if (!metrics || typeof metrics !== 'object') {
+      return;
+    }
+    if (Number.isFinite(metrics.dueScanMs)) {
+      this.economyDiagnostics.dueScanMs += metrics.dueScanMs;
+    }
+    if (Number.isFinite(metrics.applyTransitionMs)) {
+      this.economyDiagnostics.applyTransitionMs += metrics.applyTransitionMs;
+    }
+    if (Number.isFinite(metrics.fullFlightScans)) {
+      this.economyDiagnostics.fullFlightScans += metrics.fullFlightScans;
+    }
+    if (Number.isFinite(metrics.aircraftLinearLookups)) {
+      this.economyDiagnostics.aircraftLinearLookups += metrics.aircraftLinearLookups;
+    }
+    if (Number.isFinite(metrics.routeLinearLookups)) {
+      this.economyDiagnostics.routeLinearLookups += metrics.routeLinearLookups;
+    }
+  }
+
+  getDueFlightBacklog() {
+    if (!this.flightEngine || typeof this.flightEngine.countDueFlightTransitions !== 'function') {
+      return 0;
+    }
+    const simulationNowMs = this.getSimulationTimeMs(Date.now());
+    if (!Number.isFinite(simulationNowMs)) {
+      return 0;
+    }
+    return this.flightEngine.countDueFlightTransitions(simulationNowMs);
+  }
+
+  recordSchedulerTick(result) {
+    if (!result || typeof result !== 'object') {
+      return;
+    }
+    this.economyDiagnostics.schedulerTicks += 1;
+    if (result.transitionCapHit === true) {
+      this.economyDiagnostics.transitionCapHits += 1;
+    }
+    if (result.timeCapHit === true) {
+      this.economyDiagnostics.processingTimeCapHits += 1;
+    }
+    const workMs = Number.isFinite(result.schedulerWorkMs) ? result.schedulerWorkMs : 0;
+    this.economyDiagnostics.totalSchedulerWorkMs += workMs;
+    if (workMs > this.economyDiagnostics.maxSchedulerWorkMs) {
+      this.economyDiagnostics.maxSchedulerWorkMs = workMs;
+    }
+    if (Number.isFinite(result.dueScanMs)) {
+      this.economyDiagnostics.dueScanMs += result.dueScanMs;
+    }
+    if (Number.isFinite(result.applyTransitionMs)) {
+      this.economyDiagnostics.applyTransitionMs += result.applyTransitionMs;
+    }
+    if (Number.isFinite(result.fullFlightScans)) {
+      this.economyDiagnostics.fullFlightScans += result.fullFlightScans;
+    }
+  }
+
   processFlightSchedulerTick(realNowMs = Date.now()) {
     const result = this.flightEngine.processFlightSchedulerTick(realNowMs);
+    this.recordSchedulerTick(result);
     const simulationNowMs = this.flightEngine.getSimulationTimeMs(realNowMs);
 
+    this.maybeTriggerDailyWorldEvent(simulationNowMs);
+    const worldFactorsChanged = this.updateWorldEventFactors(simulationNowMs);
+    const expensesChanged = this.processDailyExpenses(simulationNowMs);
+    const fuelExpensesChanged = this.processWeeklyFuelExpenses(simulationNowMs);
+    const maintenanceExpensesChanged = this.processMonthlyMaintenanceExpenses(simulationNowMs);
+    this.sampleFinanceHistory(simulationNowMs);
+
     let anyRebuildChanged = false;
+    const routeCleanupStart = Date.now();
 
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
     const routeSnapshot = routes.slice();
@@ -3704,6 +4917,7 @@ class Game {
             anyRebuildChanged = true;
           }
 
+
           const saleCleanupResult = this.completePendingSalesForModelReconfiguration(
             route.routeId,
             aircraftCatalogId
@@ -3735,7 +4949,9 @@ class Game {
         }
       }
     }
+    this.economyDiagnostics.routeCleanupMs += Date.now() - routeCleanupStart;
 
+    const airportCleanupStart = Date.now();
     const airports = Array.isArray(this.authoritativeState.airports) ? this.authoritativeState.airports : [];
     const airportSnapshot = airports.slice();
 
@@ -3769,9 +4985,34 @@ class Game {
         }
       }
     }
+    this.economyDiagnostics.airportCleanupMs += Date.now() - airportCleanupStart;
 
-    if (result.changed || anyRebuildChanged) {
-      this.broadcastState();
+    if (result.changed || anyRebuildChanged || worldFactorsChanged || expensesChanged || fuelExpensesChanged || maintenanceExpensesChanged) {
+      this.flightStateBroadcastPending = true;
+    }
+
+    this.flightStateBroadcastNeedsOwnedAircraft = this.flightStateBroadcastNeedsOwnedAircraft || anyRebuildChanged;
+
+    this.checkWinConditions();
+    if (this.status !== 'active') {
+      return result;
+    }
+
+    if (this.flightStateBroadcastPending) {
+      const nowMs = Date.now();
+      const canBroadcast =
+        this.lastFlightStateBroadcastRealMs === null ||
+        nowMs - this.lastFlightStateBroadcastRealMs >= FLIGHT_STATE_BROADCAST_MIN_INTERVAL_MS;
+
+
+      if (canBroadcast) {
+        this.lastFlightStateBroadcastRealMs = nowMs;
+        this.flightStateBroadcastPending = false;
+        const broadcastStart = Date.now();
+        this.broadcastState('FLIGHT_TICK');
+        this.economyDiagnostics.broadcastPrepMs += Date.now() - broadcastStart;
+      } else {
+      }
     }
 
     return result;
@@ -3798,6 +5039,8 @@ class Game {
         lat: definition.lat,
         lng: definition.lng,
         size: definition.size,
+        economicClass: definition.economicClass ?? null,
+        capacity: AIRPORT_CAPACITY[definition.economicClass] ?? null,
         basePrice: definition.basePrice,
         sellToGamePrice: calculateAirportSellToGamePrice(definition.basePrice),
         ownerPlayerId: airportState.ownerPlayerId ?? null,
@@ -3840,7 +5083,7 @@ class Game {
       : [];
 
     return ownedAircraft.map((aircraft) => {
-      const { pendingRouteExitAction, pendingSaleRefund, ...publicAircraft } = aircraft;
+      const { pendingRouteExitAction, pendingSaleRefund, acquisitionPrice, ...publicAircraft } = aircraft;
       return {
         ...publicAircraft,
         isPendingUnassign: Boolean(pendingRouteExitAction === 'unassign')
@@ -3889,9 +5132,11 @@ class Game {
   createPublicFlightSnapshot() {
     const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
 
-    return flights.map((flight) => {
-      return { ...flight };
-    });
+    return flights.map((flight) => ({
+      aircraftInstanceId: flight.aircraftInstanceId,
+      routeId: flight.routeId,
+      lastOutboundDepartedAtSimulationMs: flight.lastOutboundDepartedAtSimulationMs ?? null
+    }));
   }
 
   createPublicAircraftCatalogSnapshot() {
@@ -3900,23 +5145,67 @@ class Game {
     }));
   }
 
-  getPublicState() {
-    return {
-      game: {
-        ...this.authoritativeState,
-        simulationClock: this.getSimulationClockSnapshot(),
-        players: this.createPublicPlayerSnapshot(),
-        airports: this.createPublicAirportSnapshot(),
-        ownedAircraft: this.createPublicOwnedAircraftSnapshot(),
-        routes: this.createPublicRouteSnapshot(),
-        flights: this.createPublicFlightSnapshot(),
-        aircraftCatalog: this.createPublicAircraftCatalogSnapshot()
-      }
-    };
+  createPublicWorldSnapshot() {
+    const world = this.authoritativeState.world || { countryProfitFactors: {} };
+    return { countryProfitFactors: { ...world.countryProfitFactors } };
   }
 
-  broadcastState() {
-    this.manager.io.to(this.getRoomName()).emit('game:state', this.getPublicState());
+  getPublicState(options = {}) {
+    const includeOwnedAircraft = options.includeOwnedAircraft !== false;
+    const { ownedAircraft, ...authoritativeRest } = this.authoritativeState;
+    const realNowMs = Number.isFinite(options.realNowMs) ? options.realNowMs : Date.now();
+    const simulationNowMs = this.getSimulationTimeMs(realNowMs);
+    const game = {
+      ...authoritativeRest,
+      simulationClock: this.getSimulationClockSnapshot(realNowMs),
+      players: this.createPublicPlayerSnapshot(),
+      airports: this.createPublicAirportSnapshot(),
+      routes: this.createPublicRouteSnapshot(),
+      flights: this.createPublicFlightSnapshot(),
+      aircraftCatalog: this.createPublicAircraftCatalogSnapshot(),
+      world: this.createPublicWorldSnapshot(simulationNowMs)
+    };
+    if (includeOwnedAircraft) {
+      game.ownedAircraft = this.createPublicOwnedAircraftSnapshot();
+    }
+    return { game };
+  }
+
+  broadcastState(reason = 'OTHER') {
+    if (this.status === 'active') {
+      this.checkWinConditions();
+    }
+
+    if (this.status !== 'active' && reason !== 'GAME_END') {
+      return;
+    }
+
+    const includeOwnedAircraft = reason !== 'FLIGHT_TICK' || this.flightStateBroadcastNeedsOwnedAircraft === true;
+    const publicState = this.getPublicState({ includeOwnedAircraft });
+
+    if (this.manager && this.manager.perfDiagnostics && this.manager.perfDiagnostics.isEnabled()) {
+      this.manager.perfDiagnostics.beginStateBroadcast(this, publicState, reason);
+    }
+
+    const room = this.manager.io.to(this.getRoomName());
+    if (
+      reason === 'FLIGHT_TICK' &&
+      !includeOwnedAircraft &&
+      room.volatile &&
+      typeof room.volatile.emit === 'function'
+    ) {
+      room.volatile.emit('game:state', publicState);
+    } else {
+      room.emit('game:state', publicState);
+    }
+
+    if (reason === 'FLIGHT_TICK') {
+      this.flightStateBroadcastNeedsOwnedAircraft = false;
+    }
+
+    if (this.manager && this.manager.perfDiagnostics && this.manager.perfDiagnostics.isEnabled()) {
+      this.manager.perfDiagnostics.endStateBroadcast(this);
+    }
   }
 
   broadcastStarted() {
@@ -3953,7 +5242,7 @@ class Game {
       });
     }
 
-    this.broadcastState();
+    this.broadcastState('OTHER');
   }
 
   dispose() {

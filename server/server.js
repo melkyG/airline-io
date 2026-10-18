@@ -25,6 +25,24 @@ io.on('connection', (socket) => {
   socket.emit('connection:ready', { playerId: socket.id });
   gameManager.broadcastLobbyPreviews();
 
+  socket.on('disconnect', (reason) => {
+    gameManager.perfDiagnostics.logSocketEvent(socket, 'disconnect', { reason });
+  });
+
+  socket.on('error', (err) => {
+    gameManager.perfDiagnostics.logSocketEvent(socket, 'socket-error', { reason: err && err.message });
+  });
+
+  if (socket.conn) {
+    socket.conn.on('close', (reason, description) => {
+      gameManager.perfDiagnostics.logSocketEvent(socket, 'engine-close', { reason: `${reason}${description ? ` (${description})` : ''}` });
+    });
+
+    socket.conn.on('error', (err) => {
+      gameManager.perfDiagnostics.logSocketEvent(socket, 'engine-error', { reason: err && err.message });
+    });
+  }
+
   socket.on('lobby:join', (payload = {}) => {
     const result = gameManager.assignPlayerToLobby(socket.id, payload.username, payload.preferredColorId);
     if (!result.success) {
@@ -129,6 +147,11 @@ io.on('connection', (socket) => {
   socket.on('aircraft:sell:request', (payload = {}) => {
     const result = gameManager.handleAircraftSellSocketRequest(socket.id, payload);
     socket.emit('aircraft:sell:result', result);
+  });
+
+  socket.on('finance:history:request', () => {
+    const result = gameManager.handleFinanceHistoryRequest(socket.id);
+    socket.emit('finance:history:result', result);
   });
 
   socket.on('disconnect', () => {

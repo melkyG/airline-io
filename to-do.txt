@@ -1,10 +1,8 @@
-
+- max animation cap in tiers (short route max, medium route max, long route max)
 - client reconnect (8 sec limit) 
-- make route length affect turnaround time
-- fix airport distribution (not all expensive ones)
 - crop map
--
-
-So from the user’s perspective, bulk unassign already behaves correctly, and we don’t gain much by adding a separate atomic bulk-unassign endpoint right now.
-
-The main limitation is atomicity: if one request in the middle of a multi-unassign batch fails, earlier ones may already have succeeded. If that becomes a real gameplay problem later, we can add a true server-side bulk endpoint then.
+- score is based on capital? should be based on net worth
+- routes count
+- News/events notifs
+- Loans. Travel boosts reduce interest rates, travel slumps increase
+- add max aircraft capacity on route in edit route (assign/unassign) modal

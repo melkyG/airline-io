@@ -1,5 +1,22 @@
-const REVENUE_DISTANCE_REFERENCE_KM = 10000;
-const REVENUE_DISTANCE_EXPONENT = 1.015;
+const MAX_DISTANCE_BONUS = 0.85;
+const DISTANCE_BONUS_MIDPOINT_KM = 7000;
+const DISTANCE_BONUS_SCALE_KM = 1500;
+const FLIGHT_REVENUE_MULTIPLIER = 0.55;
+
+const AIRPORT_REVENUE_REFERENCE_PRICE = 650_000;
+const AIRPORT_REVENUE_EXPONENT = 0.27;
+
+function calculateDistanceBonusFactor(distanceKm) {
+  return 1 + MAX_DISTANCE_BONUS / (1 + Math.exp(-(distanceKm - DISTANCE_BONUS_MIDPOINT_KM) / DISTANCE_BONUS_SCALE_KM));
+}
+
+function resolveAirportValueFactor(basePrice) {
+  const price = Number(basePrice);
+  if (!Number.isFinite(price) || price <= 0) {
+    return 1.0;
+  }
+  return Math.pow(price / AIRPORT_REVENUE_REFERENCE_PRICE, AIRPORT_REVENUE_EXPONENT);
+}
 
 function calculateFlightSettlement({
   baseRevenuePerKm,
@@ -23,10 +40,9 @@ function calculateFlightSettlement({
     };
   }
 
-  const distanceRatio = normalizedRouteDistanceKm / REVENUE_DISTANCE_REFERENCE_KM;
-  const scaledDistanceKm =
-    REVENUE_DISTANCE_REFERENCE_KM * Math.pow(distanceRatio, REVENUE_DISTANCE_EXPONENT);
-  const finalRevenue = normalizedBaseRevenuePerKm * scaledDistanceKm;
+  const distanceBonusFactor = calculateDistanceBonusFactor(normalizedRouteDistanceKm);
+  const linearRevenue = normalizedBaseRevenuePerKm * normalizedRouteDistanceKm;
+  const finalRevenue = linearRevenue * distanceBonusFactor * FLIGHT_REVENUE_MULTIPLIER;
 
   return {
     success: true,
@@ -36,5 +52,9 @@ function calculateFlightSettlement({
 }
 
 module.exports = {
+  FLIGHT_REVENUE_MULTIPLIER,
+  AIRPORT_REVENUE_REFERENCE_PRICE,
+  AIRPORT_REVENUE_EXPONENT,
+  resolveAirportValueFactor,
   calculateFlightSettlement
 };

@@ -54,6 +54,7 @@ function createMockDocument() {
     gameScreen: createMockElement(),
     gameStatus: createMockElement(),
     leaderboard: createMockElement(),
+    capitalHud: createMockElement(),
     resultsOverlay: createMockElement(),
     resultsWinner: createMockElement(),
     resultsStandingsHeader: createMockElement(),
@@ -106,6 +107,73 @@ function createRendererUnderTest() {
 
   return { renderer, elements: documentRef.elements };
 }
+
+test('renderer derives player HUD counts and refreshes active aircraft from route assignment', () => {
+  const { renderer, elements } = createRendererUnderTest();
+  const ownedAircraft = [
+    { aircraftInstanceId: 'acft-1', ownerPlayerId: 'p1', assignedRouteId: 'route-1', status: 'ready' },
+    { aircraftInstanceId: 'acft-2', ownerPlayerId: 'p1', assignedRouteId: null, status: 'available' },
+    { aircraftInstanceId: 'acft-3', ownerPlayerId: 'p1', assignedRouteId: null, status: 'available' },
+    { aircraftInstanceId: 'acft-4', ownerPlayerId: 'p2', assignedRouteId: null, status: 'available' }
+  ];
+  const routes = [
+    { routeId: 'route-1', ownerPlayerId: 'p1', assignedAircraftInstanceIds: ['acft-1'] },
+    { routeId: 'route-2', ownerPlayerId: 'p1', assignedAircraftInstanceIds: [] },
+    { routeId: 'route-foreign', ownerPlayerId: 'p2', assignedAircraftInstanceIds: ['acft-4'] }
+  ];
+  const airports = [
+    { airportId: 'YYZ', ownerPlayerId: 'p1' },
+    { airportId: 'JFK', ownerPlayerId: 'p1' },
+    { airportId: 'LAX', ownerPlayerId: 'p1' },
+    { airportId: 'HND', ownerPlayerId: 'p2' }
+  ];
+  const state = {
+    connection: { status: 'connected' },
+    session: { playerId: 'p1', joinPending: false, joined: true },
+    lobby: { playerCount: 2, maxPlayers: 5, players: [], status: 'waiting', countdownSeconds: null },
+    ui: { errorMessage: null, screen: 'game' },
+    game: {
+      id: 'game-hud-1',
+      status: 'active',
+      players: [
+        { id: 'p1', username: 'Alice', capital: 1000000 },
+        { id: 'p2', username: 'Bob', capital: 1000000 }
+      ],
+      airports,
+      ownedAircraft,
+      routes
+    },
+    waitingAnimation: { step: 0 }
+  };
+
+  function getHudText() {
+    const hudContent = elements.capitalHud.children[0];
+    return hudContent && hudContent.textContent;
+  }
+
+  renderer.render(state);
+  assert.equal(getHudText(), 'Cash: $1,000,000\n🏢: 3 | 🛫: 3 (1) | 🛣️: 2');
+
+  ownedAircraft[1] = { ...ownedAircraft[1], assignedRouteId: 'route-1', status: 'turnaround' };
+  routes[0] = { ...routes[0], assignedAircraftInstanceIds: ['acft-1', 'acft-2'] };
+  renderer.render(state);
+  assert.equal(getHudText(), 'Cash: $1,000,000\n🏢: 3 | 🛫: 3 (2) | 🛣️: 2');
+
+  ownedAircraft[0] = { ...ownedAircraft[0], assignedRouteId: null, status: 'available' };
+  routes[0] = { ...routes[0], assignedAircraftInstanceIds: ['acft-2'] };
+  renderer.render(state);
+  assert.equal(getHudText(), 'Cash: $1,000,000\n🏢: 3 | 🛫: 3 (1) | 🛣️: 2');
+
+  state.game.routes = [];
+  renderer.render(state);
+  assert.equal(getHudText(), 'Cash: $1,000,000\n🏢: 3 | 🛫: 3 (0) | 🛣️: 0');
+
+  state.game.routes = [{ routeId: 'route-3', ownerPlayerId: 'p1', assignedAircraftInstanceIds: [] }];
+  renderer.render(state);
+  assert.equal(getHudText(), 'Cash: $1,000,000\n🏢: 3 | 🛫: 3 (0) | 🛣️: 1');
+
+  delete global.window;
+});
 
 test('renderer derives leaderboard from game players sorted by descending score', () => {
   const { renderer, elements } = createRendererUnderTest();

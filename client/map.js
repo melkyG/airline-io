@@ -8,8 +8,9 @@
   const AIRPORT_TOOLTIP_OFFSET_Y = -10;
   const AIRPORT_LABEL_ZOOM_IATA = 4.6;
   const AIRPORT_LABEL_ZOOM_NAME = 6.1;
-  const AIRPORT_MARKER_SCALE_MIN = 0.38;
-  const AIRPORT_MARKER_SCALE_MAX = 1.33;
+  const AIRPORT_MARKER_SCALE_MIN = 0.28;
+  const AIRPORT_MARKER_SCALE_MAX = 1.28;
+  const FILTERED_AIRPORT_MARKER_SCALE_MIN = 0.42;
   const AIRPORT_MARKER_SCALE_MIN_ZOOM = INITIAL_ZOOM;
   const AIRPORT_MARKER_SCALE_MAX_ZOOM = BASEMAP_MAX_ZOOM;
   const ROUTE_LINE_COLOR = '#000000';
@@ -22,6 +23,22 @@
   const MAPLIBRE_AIRPORT_BADGE_SOURCE_ID = 'airline-airport-badge-source';
   const MAPLIBRE_AIRPORT_BADGE_LAYER_ID = 'airline-airport-badge-layer';
   const MAPLIBRE_AIRPORT_BADGE_BEFORE_LAYER_ID = 'place_city';
+  const MAPLIBRE_COUNTRY_SOURCE_ID = 'airline-country-source';
+  const MAPLIBRE_COUNTRY_LAYER_ID = 'airline-country-layer';
+  const MAPLIBRE_COUNTRY_HOVER_LAYER_ID = 'airline-country-hover-layer';
+  const MAPLIBRE_COUNTRY_HOVER_LINE_COLOR = '#3d3d3d';
+  const MAPLIBRE_COUNTRY_HOVER_LINE_WIDTH = 0.28;
+  const MAPLIBRE_COUNTRY_HOVER_LINE_OPACITY = 0.7;
+  const MAPLIBRE_COUNTRY_HOVER_FADE_IN_DURATION_MS = 2750;
+  const MAPLIBRE_COUNTRY_HOVER_FADE_OUT_DURATION_MS = 16000;
+  const MAPLIBRE_COUNTRY_HOVER_FADE_DELAY_MS = 50;
+  const MAPLIBRE_COUNTRY_FILL_COLOR = '#00ff00';
+  const MAPLIBRE_COUNTRY_FILL_OPACITY = 0.4;
+  const MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR = 1.00;
+  const MAPLIBRE_COUNTRY_PROFIT_RED_MAX_FACTOR = 0.30;
+  const MAPLIBRE_COUNTRY_PROFIT_GREEN_MAX_FACTOR = 2.50;
+  const MAPLIBRE_COUNTRY_PROFIT_MAX_OPACITY = 0.50;
+  const COUNTRY_HOVER_POPUP_DWELL_MS = 500;
   const FLIGHT_DOT_COLOR = '#0e7ccf';
   const FLIGHT_DOT_RADIUS_MIN_PX = 4;
   const FLIGHT_DOT_RADIUS_MAX_PX = 7;
@@ -150,6 +167,19 @@
     );
   }
 
+  function getFilteredAirportMarkerScaleAdjustmentForZoom(zoomLevel) {
+    const markerScale = getAirportMarkerScaleForZoom(zoomLevel);
+    const filteredMarkerScale = interpolateLinearValue(
+      zoomLevel,
+      AIRPORT_MARKER_SCALE_MIN_ZOOM,
+      AIRPORT_MARKER_SCALE_MAX_ZOOM,
+      FILTERED_AIRPORT_MARKER_SCALE_MIN,
+      AIRPORT_MARKER_SCALE_MAX
+    );
+
+    return filteredMarkerScale / markerScale;
+  }
+
   function getAirportBadgeDiameterPxForZoom(zoomLevel) {
     const markerSizePx = 26;
     const badgeExtraPx = 8;
@@ -177,6 +207,10 @@
     }
 
     markerRootElement.style.setProperty('--airport-marker-scale', getAirportMarkerScaleForZoom(zoomLevel).toFixed(3));
+    markerRootElement.style.setProperty(
+      '--airport-filtered-marker-scale-adjustment',
+      getFilteredAirportMarkerScaleAdjustmentForZoom(zoomLevel).toFixed(3)
+    );
   }
 
   function applyAirportMarkerScaleInContainer(containerElement, zoomLevel) {
@@ -298,6 +332,192 @@
     const { red, green, blue } = parseHexColorChannels(colorHex);
     const normalizedAlpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
     return `rgba(${red}, ${green}, ${blue}, ${normalizedAlpha})`;
+  }
+
+  function getCountryProfitFactorFromState(state, countryName) {
+    const world = state && state.game && state.game.world;
+    const factors = world && world.countryProfitFactors;
+    const normalizedCountry = countryName != null ? String(countryName).trim() : '';
+    const value = normalizedCountry ? factors && factors[normalizedCountry] : undefined;
+
+    if (value == null) {
+      return MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR;
+    }
+
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR;
+  }
+
+  function getCountryProfitabilityColor(factor) {
+    const neutral = MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR;
+    const safeFactor = Number.isFinite(factor) ? factor : neutral;
+
+    if (safeFactor === neutral) {
+      return 'rgba(0, 0, 0, 0)';
+    }
+
+    return safeFactor < neutral ? 'rgb(255, 0, 0)' : 'rgb(0, 255, 0)';
+  }
+
+  function getCountryProfitabilityOpacity(factor) {
+    const neutral = MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR;
+    const safeFactor = Number.isFinite(factor) ? factor : neutral;
+
+    if (safeFactor === neutral) {
+      return 0;
+    }
+
+    const maxOpacity = MAPLIBRE_COUNTRY_PROFIT_MAX_OPACITY;
+
+    if (safeFactor < neutral) {
+      const distance = neutral - safeFactor;
+      const maxDistance = neutral - MAPLIBRE_COUNTRY_PROFIT_RED_MAX_FACTOR;
+      const intensity = Math.min(distance / maxDistance, 1);
+      return Math.pow(intensity, 1.5) * maxOpacity;
+    }
+
+    const distance = safeFactor - neutral;
+    const maxDistance = MAPLIBRE_COUNTRY_PROFIT_GREEN_MAX_FACTOR - neutral;
+    const intensity = Math.min(distance / maxDistance, 1);
+    return Math.pow(intensity, 1.5) * maxOpacity;
+  }
+
+  function formatCountryProfitabilityMultiplier(factor) {
+    const numericFactor = factor == null ? NaN : Number(factor);
+    const safeFactor = Number.isFinite(numericFactor) ? numericFactor : MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR;
+    return `${safeFactor.toFixed(2)}×`;
+  }
+
+  function getCountryPopupMultiplierText(state, countryAdmin) {
+    const factor = getCountryProfitFactorFromState(state, countryAdmin);
+    return `Current multiplier: ${formatCountryProfitabilityMultiplier(factor)}`;
+  }
+
+  function isAirportVisibleAtPrice(airport, range = {}) {
+    const { minPrice = null, maxPrice = null } = range || {};
+    const rawPrice = airport && airport.basePrice;
+    const price = rawPrice == null ? NaN : Number(rawPrice);
+
+    if (!Number.isFinite(price)) {
+      return true;
+    }
+
+    if (minPrice != null && Number.isFinite(Number(minPrice)) && price < Number(minPrice)) {
+      return false;
+    }
+
+    if (maxPrice != null && Number.isFinite(Number(maxPrice)) && price > Number(maxPrice)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function createCountryHoverPopupScheduler({
+    dwellMs = COUNTRY_HOVER_POPUP_DWELL_MS,
+    onShow = () => {},
+    onHide = () => {},
+    setTimeoutFn = (fn, ms) => setTimeout(fn, ms),
+    clearTimeoutFn = (id) => clearTimeout(id)
+  } = {}) {
+    let currentKey = null;
+    let timerId = null;
+    let blocked = false;
+
+    function cancelTimer() {
+      if (timerId !== null) {
+        clearTimeoutFn(timerId);
+        timerId = null;
+      }
+    }
+
+    function setBlocked(nextBlocked) {
+      blocked = Boolean(nextBlocked);
+      if (blocked) {
+        cancelTimer();
+        currentKey = null;
+        onHide();
+      }
+    }
+
+    function schedule(key) {
+      if (blocked) {
+        return;
+      }
+
+      const normalizedKey = key != null && String(key).trim() !== '' ? String(key) : null;
+
+      if (normalizedKey === currentKey) {
+        return;
+      }
+
+      cancelTimer();
+      onHide();
+      currentKey = normalizedKey;
+
+      if (!currentKey) {
+        return;
+      }
+
+      const scheduledKey = currentKey;
+      timerId = setTimeoutFn(() => {
+        timerId = null;
+        if (currentKey === scheduledKey) {
+          onShow(scheduledKey);
+        }
+      }, dwellMs);
+    }
+
+    function clear() {
+      cancelTimer();
+      currentKey = null;
+      onHide();
+    }
+
+    function isPending() {
+      return timerId !== null;
+    }
+
+    return { schedule, clear, isPending, setBlocked };
+  }
+
+  function getCountryProfitabilityPaint(factor) {
+    return {
+      'fill-color': getCountryProfitabilityColor(factor),
+      'fill-opacity': getCountryProfitabilityOpacity(factor)
+    };
+  }
+
+  function buildCountryProfitabilityPaint(state) {
+    const world = state && state.game && state.game.world;
+    const factors = world && world.countryProfitFactors;
+    const entries = [];
+
+    if (factors && typeof factors === 'object') {
+      for (const [country, value] of Object.entries(factors)) {
+        const numericValue = Number(value);
+        if (Number.isFinite(numericValue)) {
+          entries.push([country, numericValue]);
+        }
+      }
+    }
+
+    if (entries.length === 0) {
+      return getCountryProfitabilityPaint(MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR);
+    }
+
+    const colorStops = [];
+    const opacityStops = [];
+
+    for (const [country, factor] of entries) {
+      colorStops.push(country, getCountryProfitabilityColor(factor));
+      opacityStops.push(country, getCountryProfitabilityOpacity(factor));
+    }
+
+    return {
+      'fill-color': ['match', ['get', 'ADMIN'], ...colorStops, getCountryProfitabilityColor(MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR)],
+      'fill-opacity': ['match', ['get', 'ADMIN'], ...opacityStops, getCountryProfitabilityOpacity(MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR)]
+    };
   }
 
   function resolvePlayerColorHexById(playerId, playersById, fallbackColor = null) {
@@ -811,13 +1031,10 @@
   }
 
   function getProjectedInFlightLeg(flight, game, simNow) {
-    const flightId = String(flight && flight.flightId || '').trim();
     const routeId = String(flight && flight.routeId || '').trim();
     const aircraftInstanceId = String(flight && flight.aircraftInstanceId || '').trim();
-    const status = String(flight && flight.status || '').trim();
-    const direction = String(flight && flight.direction || '').trim();
 
-    if (!flightId || !routeId || !aircraftInstanceId) {
+    if (!routeId || !aircraftInstanceId) {
       return null;
     }
 
@@ -858,52 +1075,26 @@
       return String(candidateId || '').trim() === aircraftCatalogId;
     });
 
-    const lastOutbound = Number(flight && flight.lastOutboundDepartedAtSimulationMs);
-    const nextTransition = Number(flight && flight.nextTransitionAtSimulationMs);
-    let outboundAnchor = null;
-
-    if (status === 'ready') {
-      if (isReconfiguring) {
-        return null;
-      }
-      if (Number.isFinite(nextTransition)) {
-        if (simNow < nextTransition) {
-          return null;
-        }
-        outboundAnchor = nextTransition;
-      } else {
-        outboundAnchor = Number.isFinite(lastOutbound) ? lastOutbound : null;
-      }
-    } else if (status === 'turnaround') {
-      if (Number.isFinite(nextTransition)) {
-        if (simNow < nextTransition) {
-          return null;
-        }
-        if (direction === 'outbound') {
-          outboundAnchor = nextTransition - flightDuration - turnaround;
-        } else if (direction === 'inbound') {
-          if (isReconfiguring) {
-            return null;
-          }
-          outboundAnchor = nextTransition;
-        } else {
-          outboundAnchor = Number.isFinite(lastOutbound) ? lastOutbound : null;
-        }
-      } else {
-        if (direction === 'inbound' && isReconfiguring) {
-          return null;
-        }
-        outboundAnchor = Number.isFinite(lastOutbound) ? lastOutbound : null;
-      }
-    } else {
-      outboundAnchor = Number.isFinite(lastOutbound) ? lastOutbound : null;
+    const rawLastOutbound = flight && flight.lastOutboundDepartedAtSimulationMs;
+    if (rawLastOutbound == null) {
+      return null;
     }
-
-    if (!Number.isFinite(outboundAnchor) || simNow < outboundAnchor) {
+    const lastOutbound = Number(rawLastOutbound);
+    if (!Number.isFinite(lastOutbound)) {
       return null;
     }
 
-    const elapsed = simNow - outboundAnchor;
+    const elapsed = simNow - lastOutbound;
+    if (isReconfiguring && elapsed >= fullRoundTrip) {
+      return null;
+    }
+
+    const outboundAnchor = lastOutbound;
+
+    if (simNow < outboundAnchor) {
+      return null;
+    }
+
     const phase = elapsed % fullRoundTrip;
     const cycleOffset = Math.floor(elapsed / fullRoundTrip) * fullRoundTrip;
 
@@ -937,10 +1128,9 @@
     }
 
     return {
-      flightId,
-      ownerPlayerId: flight.ownerPlayerId,
-      routeId,
       aircraftInstanceId,
+      ownerPlayerId: route ? route.ownerPlayerId : null,
+      routeId,
       originAirportId,
       destinationAirportId,
       direction: legDirection,
@@ -1016,14 +1206,14 @@
       } catch (error) {
         fallbackUsed = true;
         if (typeof console !== 'undefined' && typeof console.warn === 'function') {
-          const flightId = String(flight && flight.flightId || '').trim();
+          const aircraftInstanceId = String(flight && flight.aircraftInstanceId || '').trim();
           const routeId = String(flight && flight.routeId || '').trim();
           const errorMessage = error && typeof error === 'object' && 'message' in error
             ? String(error.message)
             : String(error);
 
           console.warn('[flight-route-geometry:fallback]', {
-            flightId,
+            aircraftInstanceId,
             routeId,
             originAirportId,
             destinationAirportId,
@@ -1050,19 +1240,14 @@
   }
 
   function getFlightDot(flight, game, simNow, playersById, airportLookupById, routeGeometryLookup) {
-    if (!flight || !flight.flightId) {
+    if (!flight || !flight.aircraftInstanceId) {
       return null;
     }
 
-    const flightId = String(flight.flightId || '').trim();
-    const status = String(flight.status || '').trim();
-    let dotFlight = flight;
-
-    if (status !== 'in-flight') {
-      dotFlight = getProjectedInFlightLeg(flight, game, simNow);
-      if (!dotFlight) {
-        return null;
-      }
+    const aircraftInstanceId = String(flight.aircraftInstanceId || '').trim();
+    const dotFlight = getProjectedInFlightLeg(flight, game, simNow);
+    if (!dotFlight) {
+      return null;
     }
 
     const dotPosition = calculateFlightDotPosition(dotFlight, simNow, airportLookupById, routeGeometryLookup);
@@ -1071,8 +1256,8 @@
     }
 
     return {
-      flightId,
-      colorHex: resolvePlayerColorHexById(flight.ownerPlayerId, playersById, FLIGHT_DOT_COLOR),
+      aircraftInstanceId,
+      colorHex: resolvePlayerColorHexById(dotFlight.ownerPlayerId, playersById, FLIGHT_DOT_COLOR),
       lng: dotPosition.lng,
       lat: dotPosition.lat
     };
@@ -1167,8 +1352,13 @@
     const airportMarkerMetadataById = new Map();
     const tooltipElement = mapContainer ? documentRef.createElement('div') : null;
     const tooltipCodeElement = tooltipElement ? documentRef.createElement('div') : null;
+    const tooltipCodeTextElement = tooltipCodeElement ? documentRef.createElement('span') : null;
+    const tooltipTierBadgeElement = tooltipCodeElement ? documentRef.createElement('span') : null;
     const tooltipPriceElement = tooltipElement ? documentRef.createElement('div') : null;
     const tooltipOwnerElement = tooltipElement ? documentRef.createElement('div') : null;
+    const countryTooltipElement = mapContainer ? documentRef.createElement('div') : null;
+    const countryTooltipNameElement = countryTooltipElement ? documentRef.createElement('div') : null;
+    const countryTooltipFactorElement = countryTooltipElement ? documentRef.createElement('div') : null;
     let mapInstance = null;
     let mapLoaded = false;
     let hasAppliedInitialCameraSetup = false;
@@ -1180,6 +1370,16 @@
     let latestGameSnapshot = null;
     let flightAnimationFrameId = null;
     let isFlightAnimationRunning = false;
+    let lastCountryProfitabilityFillColor = null;
+    let lastCountryProfitabilityFillOpacity = null;
+    let hoveredCountryAdmin = '';
+    let isAirportHoverSuppressed = false;
+    let hasBoundCountryHoverHandlers = false;
+    let lastCountryHoverPoint = null;
+    let shownCountryPopupAdmin = null;
+    let countryHoverChangeHandler = null;
+    let airportPriceFilterMin = null;
+    let airportPriceFilterMax = null;
     const PENDING_REMOVAL_DASH_SEQUENCE = [[4, 6], [5, 5], [6, 4], [5, 5]];
     const PENDING_REMOVAL_DASH_UPDATE_INTERVAL_MS = 150;
     let pendingRemovalDashTimerId = null;
@@ -1188,12 +1388,24 @@
     if (tooltipElement) {
       tooltipElement.className = 'airport-tooltip airport-tooltip-hidden';
       tooltipCodeElement.className = 'airport-tooltip-code';
+      tooltipTierBadgeElement.className = 'airport-tier-badge airport-tier-badge-hidden';
+      tooltipCodeElement.appendChild(tooltipCodeTextElement);
+      tooltipCodeElement.appendChild(tooltipTierBadgeElement);
       tooltipPriceElement.className = 'airport-tooltip-price';
       tooltipOwnerElement.className = 'airport-tooltip-owner';
       tooltipElement.appendChild(tooltipCodeElement);
       tooltipElement.appendChild(tooltipPriceElement);
       tooltipElement.appendChild(tooltipOwnerElement);
       mapContainer.appendChild(tooltipElement);
+    }
+
+    if (countryTooltipElement) {
+      countryTooltipElement.className = 'airport-tooltip country-tooltip airport-tooltip-hidden';
+      countryTooltipNameElement.className = 'airport-tooltip-code';
+      countryTooltipFactorElement.className = 'airport-tooltip-price';
+      countryTooltipElement.appendChild(countryTooltipNameElement);
+      countryTooltipElement.appendChild(countryTooltipFactorElement);
+      mapContainer.appendChild(countryTooltipElement);
     }
 
     function formatCurrencyValue(value) {
@@ -1234,7 +1446,8 @@
       return {
         code: airport.iata || airport.id || String(airportId),
         price: formatCurrencyValue(relevantPrice),
-        ownerText
+        ownerText,
+        economicClass: airport.economicClass ?? null
       };
     }
 
@@ -1285,7 +1498,10 @@
         return;
       }
 
-      tooltipCodeElement.textContent = tooltipData.code;
+      tooltipCodeTextElement.textContent = tooltipData.code;
+      if (globalScope.airportTiers && typeof globalScope.airportTiers.syncAirportTierBadge === 'function') {
+        globalScope.airportTiers.syncAirportTierBadge(tooltipTierBadgeElement, tooltipData.economicClass);
+      }
       tooltipPriceElement.textContent = tooltipData.price;
       tooltipOwnerElement.textContent = tooltipData.ownerText;
       tooltipElement.classList.remove('airport-tooltip-hidden');
@@ -1297,6 +1513,67 @@
       refreshAirportTooltip();
     }
 
+    function hideCountryTooltip() {
+      shownCountryPopupAdmin = null;
+      if (!countryTooltipElement) {
+        return;
+      }
+
+      countryTooltipElement.classList.add('airport-tooltip-hidden');
+    }
+
+    function positionCountryTooltip() {
+      if (!countryTooltipElement || !mapContainer || !lastCountryHoverPoint) {
+        return;
+      }
+
+      const containerWidth = mapContainer.clientWidth;
+      const containerHeight = mapContainer.clientHeight;
+      const tooltipWidth = countryTooltipElement.offsetWidth;
+      const tooltipHeight = countryTooltipElement.offsetHeight;
+
+      let left = lastCountryHoverPoint.x + AIRPORT_TOOLTIP_OFFSET_X;
+      let top = lastCountryHoverPoint.y + AIRPORT_TOOLTIP_OFFSET_Y;
+
+      left = Math.max(6, Math.min(left, Math.max(6, containerWidth - tooltipWidth - 6)));
+      top = Math.max(6, Math.min(top, Math.max(6, containerHeight - tooltipHeight - 6)));
+
+      countryTooltipElement.style.left = `${Math.round(left)}px`;
+      countryTooltipElement.style.top = `${Math.round(top)}px`;
+    }
+
+    function showCountryTooltip(countryAdmin) {
+      if (!countryTooltipElement || !countryAdmin || countryAdmin !== hoveredCountryAdmin) {
+        return;
+      }
+
+      shownCountryPopupAdmin = countryAdmin;
+      countryTooltipNameElement.textContent = countryAdmin;
+      countryTooltipFactorElement.textContent = getCountryPopupMultiplierText({ game: latestGameSnapshot }, countryAdmin);
+      countryTooltipElement.classList.remove('airport-tooltip-hidden');
+      positionCountryTooltip();
+    }
+
+    function refreshCountryTooltip() {
+      if (
+        !countryTooltipElement ||
+        !shownCountryPopupAdmin ||
+        countryTooltipElement.classList.contains('airport-tooltip-hidden')
+      ) {
+        return;
+      }
+
+      countryTooltipFactorElement.textContent = getCountryPopupMultiplierText(
+        { game: latestGameSnapshot },
+        shownCountryPopupAdmin
+      );
+    }
+
+    const countryPopupScheduler = createCountryHoverPopupScheduler({
+      onShow: showCountryTooltip,
+      onHide: hideCountryTooltip
+    });
+
     function notifyAirportSelected(airportId) {
       if (typeof airportSelectHandler !== 'function') {
         return;
@@ -1307,6 +1584,25 @@
 
     function setAirportSelectHandler(handler) {
       airportSelectHandler = typeof handler === 'function' ? handler : null;
+    }
+
+    function setCountryHoverChangeHandler(handler) {
+      countryHoverChangeHandler = typeof handler === 'function' ? handler : null;
+    }
+
+    function setAirportPriceFilter(range) {
+      const nextRange = range && typeof range === 'object' ? range : {};
+      const nextMin = nextRange.minPrice != null ? Number(nextRange.minPrice) : null;
+      const nextMax = nextRange.maxPrice != null ? Number(nextRange.maxPrice) : null;
+
+      airportPriceFilterMin = Number.isFinite(nextMin) ? nextMin : null;
+      airportPriceFilterMax = Number.isFinite(nextMax) ? nextMax : null;
+
+      refreshAirportPriceFilter();
+      syncAirportBadges(
+        latestGameSnapshot && latestGameSnapshot.airports,
+        latestGameSnapshot && latestGameSnapshot.players
+      );
     }
 
     function getAirportMarkerId(airport, index) {
@@ -1395,6 +1691,25 @@
       });
     }
 
+    function refreshAirportPriceFilter() {
+      airportMarkersById.forEach((marker, markerId) => {
+        const airport = airportMarkerMetadataById.get(markerId);
+        const isVisible = isAirportVisibleAtPrice(airport, {
+          minPrice: airportPriceFilterMin,
+          maxPrice: airportPriceFilterMax
+        });
+        const markerElement = marker && typeof marker.getElement === 'function' ? marker.getElement() : null;
+
+        if (markerElement && markerElement.classList) {
+          markerElement.classList.toggle('airport-marker-root--filtered', !isVisible);
+        }
+
+        if (!isVisible && activeHoveredAirportId === markerId) {
+          hideAirportTooltip();
+        }
+      });
+    }
+
     function clearAirportMarkers() {
       airportMarkersById.forEach((marker) => {
         marker.remove();
@@ -1479,6 +1794,208 @@
       return true;
     }
 
+    function ensureCountryProfitabilityLayer() {
+      if (!mapInstance || !mapLoaded) {
+        return false;
+      }
+
+      try {
+        if (!mapInstance.getSource(MAPLIBRE_COUNTRY_SOURCE_ID)) {
+          mapInstance.addSource(MAPLIBRE_COUNTRY_SOURCE_ID, {
+            type: 'geojson',
+            data: '/assets/world-countries.geojson'
+          });
+        }
+
+        if (!mapInstance.getLayer(MAPLIBRE_COUNTRY_LAYER_ID)) {
+          const countryFillLayerDefinition = {
+            id: MAPLIBRE_COUNTRY_LAYER_ID,
+            type: 'fill',
+            source: MAPLIBRE_COUNTRY_SOURCE_ID,
+            paint: getCountryProfitabilityPaint(MAPLIBRE_COUNTRY_PROFIT_NEUTRAL_FACTOR)
+          };
+
+          const beforeId = mapInstance.getLayer('water')
+            ? 'water'
+            : (mapInstance.getLayer(MAPLIBRE_AIRPORT_BADGE_LAYER_ID)
+                ? MAPLIBRE_AIRPORT_BADGE_LAYER_ID
+                : (mapInstance.getLayer(MAPLIBRE_AIRPORT_BADGE_BEFORE_LAYER_ID)
+                    ? MAPLIBRE_AIRPORT_BADGE_BEFORE_LAYER_ID
+                    : null));
+
+          if (beforeId) {
+            mapInstance.addLayer(countryFillLayerDefinition, beforeId);
+          } else {
+            mapInstance.addLayer(countryFillLayerDefinition);
+          }
+        }
+
+        if (!mapInstance.getLayer(MAPLIBRE_COUNTRY_HOVER_LAYER_ID)) {
+          const countryHoverLineLayerDefinition = {
+            id: MAPLIBRE_COUNTRY_HOVER_LAYER_ID,
+            type: 'line',
+            source: MAPLIBRE_COUNTRY_SOURCE_ID,
+            filter: ['has', 'ADMIN'],
+            layout: {
+              'line-cap': 'round',
+              'line-join': 'round'
+            },
+            paint: {
+              'line-color': MAPLIBRE_COUNTRY_HOVER_LINE_COLOR,
+              'line-width': MAPLIBRE_COUNTRY_HOVER_LINE_WIDTH,
+              'line-opacity': ['case', ['==', ['get', 'ADMIN'], ['literal', '']], MAPLIBRE_COUNTRY_HOVER_LINE_OPACITY, 0],
+              'line-opacity-transition': {
+                duration: MAPLIBRE_COUNTRY_HOVER_FADE_IN_DURATION_MS,
+                delay: MAPLIBRE_COUNTRY_HOVER_FADE_DELAY_MS
+              }
+            }
+          };
+
+          if (mapInstance.getLayer(MAPLIBRE_AIRPORT_BADGE_BEFORE_LAYER_ID)) {
+            mapInstance.addLayer(countryHoverLineLayerDefinition, MAPLIBRE_AIRPORT_BADGE_BEFORE_LAYER_ID);
+          } else {
+            mapInstance.addLayer(countryHoverLineLayerDefinition);
+          }
+        }
+
+        if (!hasBoundCountryHoverHandlers) {
+          mapInstance.on('mousemove', MAPLIBRE_COUNTRY_LAYER_ID, (event) => {
+            if (isAirportHoverSuppressed || isPointerOverAirportMarkerOrBadge(event)) {
+              setHoveredCountry(null);
+              countryPopupScheduler.clear();
+              return;
+            }
+
+            const feature = event && Array.isArray(event.features) ? event.features[0] : null;
+            const admin = feature && feature.properties ? feature.properties.ADMIN : null;
+            lastCountryHoverPoint = event && event.point
+              ? { x: event.point.x, y: event.point.y }
+              : lastCountryHoverPoint;
+            setHoveredCountry(admin);
+            countryPopupScheduler.schedule(admin);
+          });
+          mapInstance.on('mouseleave', MAPLIBRE_COUNTRY_LAYER_ID, () => {
+            setHoveredCountry(null);
+            countryPopupScheduler.clear();
+          });
+          hasBoundCountryHoverHandlers = true;
+        }
+      } catch (_error) {
+        return false;
+      }
+
+      return true;
+    }
+
+    function isPointerOverAirportMarkerOrBadge(event) {
+      if (!event) {
+        return false;
+      }
+
+      const originalEvent = event.originalEvent;
+      if (
+        originalEvent &&
+        originalEvent.target &&
+        typeof originalEvent.target.closest === 'function' &&
+        originalEvent.target.closest('.airport-marker-root')
+      ) {
+        return true;
+      }
+
+      if (mapInstance && mapInstance.getLayer(MAPLIBRE_AIRPORT_BADGE_LAYER_ID) && event.point) {
+        try {
+          const badgeFeatures = mapInstance.queryRenderedFeatures(event.point, {
+            layers: [MAPLIBRE_AIRPORT_BADGE_LAYER_ID]
+          });
+          return Array.isArray(badgeFeatures) && badgeFeatures.length > 0;
+        } catch (_error) {
+          return false;
+        }
+      }
+
+      return false;
+    }
+
+    function setHoveredCountry(countryAdmin) {
+      const normalizedAdmin = countryAdmin != null ? String(countryAdmin).trim() : '';
+
+      if (isAirportHoverSuppressed && normalizedAdmin !== '') {
+        return;
+      }
+
+      if (normalizedAdmin === hoveredCountryAdmin) {
+        return;
+      }
+
+      hoveredCountryAdmin = normalizedAdmin;
+
+      if (typeof countryHoverChangeHandler === 'function') {
+        countryHoverChangeHandler(normalizedAdmin);
+      }
+
+      if (!mapInstance || !mapInstance.getLayer(MAPLIBRE_COUNTRY_HOVER_LAYER_ID)) {
+        return;
+      }
+
+      try {
+        const isFadingIn = normalizedAdmin !== '';
+
+        mapInstance.setPaintProperty(
+          MAPLIBRE_COUNTRY_HOVER_LAYER_ID,
+          'line-opacity-transition',
+          {
+            duration: isFadingIn
+              ? MAPLIBRE_COUNTRY_HOVER_FADE_IN_DURATION_MS
+              : MAPLIBRE_COUNTRY_HOVER_FADE_OUT_DURATION_MS,
+            delay: MAPLIBRE_COUNTRY_HOVER_FADE_DELAY_MS
+          }
+        );
+
+        mapInstance.setPaintProperty(
+          MAPLIBRE_COUNTRY_HOVER_LAYER_ID,
+          'line-opacity',
+          [
+            'case',
+            ['==', ['get', 'ADMIN'], ['literal', normalizedAdmin]],
+            MAPLIBRE_COUNTRY_HOVER_LINE_OPACITY,
+            0
+          ]
+        );
+      } catch (_error) {
+        // Ignore hover styling failures; the base map remains usable.
+      }
+    }
+
+    function syncCountryProfitability(state) {
+      if (!mapInstance || !mapLoaded) {
+        return false;
+      }
+
+      if (!mapInstance.getLayer(MAPLIBRE_COUNTRY_LAYER_ID)) {
+        return false;
+      }
+
+      try {
+        const paint = buildCountryProfitabilityPaint(state);
+        const fillColor = paint['fill-color'];
+        const fillOpacity = paint['fill-opacity'];
+
+        if (JSON.stringify(fillColor) !== lastCountryProfitabilityFillColor) {
+          mapInstance.setPaintProperty(MAPLIBRE_COUNTRY_LAYER_ID, 'fill-color', fillColor);
+          lastCountryProfitabilityFillColor = JSON.stringify(fillColor);
+        }
+
+        if (JSON.stringify(fillOpacity) !== lastCountryProfitabilityFillOpacity) {
+          mapInstance.setPaintProperty(MAPLIBRE_COUNTRY_LAYER_ID, 'fill-opacity', fillOpacity);
+          lastCountryProfitabilityFillOpacity = JSON.stringify(fillOpacity);
+        }
+
+        return true;
+      } catch (_error) {
+        return false;
+      }
+    }
+
     function syncAirportBadges(airports, players) {
       if (!mapInstance) {
         return;
@@ -1496,6 +2013,10 @@
           const lat = Number(airport && airport.lat);
           const lng = Number(airport && airport.lng);
           if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return features;
+          }
+
+          if (!isAirportVisibleAtPrice(airport, { minPrice: airportPriceFilterMin, maxPrice: airportPriceFilterMax })) {
             return features;
           }
 
@@ -1591,7 +2112,7 @@
         features: drawableFlights.map((flight) => ({
           type: 'Feature',
           properties: {
-            flightId: flight.flightId,
+            aircraftInstanceId: flight.aircraftInstanceId,
             colorHex: flight.colorHex
           },
           geometry: {
@@ -1874,10 +2395,15 @@
       labelElement.className = 'airport-marker-label';
       labelElement.setAttribute('aria-hidden', 'true');
 
+      const filteredDotElement = documentRef.createElement('span');
+      filteredDotElement.className = 'airport-marker-filtered-dot';
+      filteredDotElement.setAttribute('aria-hidden', 'true');
+
       pulseWrapperElement.appendChild(ownershipBadgeElement);
       pulseWrapperElement.appendChild(visualElement);
       contentElement.appendChild(pulseWrapperElement);
       contentElement.appendChild(labelElement);
+      contentElement.appendChild(filteredDotElement);
       markerElement.appendChild(contentElement);
       return markerElement;
     }
@@ -1924,13 +2450,18 @@
           .addTo(mapInstance);
 
         markerElement.addEventListener('mouseenter', () => {
+          isAirportHoverSuppressed = true;
+          setHoveredCountry(null);
+          countryPopupScheduler.setBlocked(true);
           showAirportTooltip(markerId);
         });
 
         markerElement.addEventListener('mouseleave', () => {
+          isAirportHoverSuppressed = false;
           if (activeHoveredAirportId === markerId) {
             hideAirportTooltip();
           }
+          countryPopupScheduler.setBlocked(false);
         });
 
         markerElement.addEventListener('click', () => {
@@ -1957,6 +2488,7 @@
       });
 
       refreshAirportMarkerLabels();
+      refreshAirportPriceFilter();
       refreshAirportTooltip();
     }
 
@@ -2061,6 +2593,7 @@
       mapInstance.once('load', () => {
         mapLoaded = true;
         ensureAirportBadgeLayer();
+        ensureCountryProfitabilityLayer();
         syncAirportBadges(latestGameSnapshot && latestGameSnapshot.airports, latestGameSnapshot && latestGameSnapshot.players);
         globalScope.requestAnimationFrame(() => {
           if (!mapInstance) {
@@ -2103,6 +2636,7 @@
           mapContainer.classList.remove('map-visible');
         }
         clearNativeDraggingState('screen-hidden');
+        countryPopupScheduler.clear();
         if (mapInstance) {
           clearAirportMarkers();
           clearAirportBadges();
@@ -2124,13 +2658,17 @@
       syncAirportBadges(state.game && state.game.airports, state.game && state.game.players);
       syncAirportMarkers(state.game && state.game.airports, state.game && state.game.players, state.game && state.game.routes);
       syncRouteLines(state.game && state.game.routes, state.game && state.game.airports);
+      syncCountryProfitability(state);
       ensureNativeFlightAnimationState();
       refreshAirportTooltip();
+      refreshCountryTooltip();
     }
 
     return {
       render,
       setAirportSelectHandler,
+      setCountryHoverChangeHandler,
+      setAirportPriceFilter,
       markerCollection,
       routeCollection
     };
@@ -2156,12 +2694,17 @@
     let isFlightAnimationRunning = false;
     const tooltipElement = mapContainer ? documentRef.createElement('div') : null;
     const tooltipCodeElement = tooltipElement ? documentRef.createElement('div') : null;
+    const tooltipCodeTextElement = tooltipCodeElement ? documentRef.createElement('span') : null;
+    const tooltipTierBadgeElement = tooltipCodeElement ? documentRef.createElement('span') : null;
     const tooltipPriceElement = tooltipElement ? documentRef.createElement('div') : null;
     const tooltipOwnerElement = tooltipElement ? documentRef.createElement('div') : null;
 
     if (tooltipElement) {
       tooltipElement.className = 'airport-tooltip airport-tooltip-hidden';
       tooltipCodeElement.className = 'airport-tooltip-code';
+      tooltipTierBadgeElement.className = 'airport-tier-badge airport-tier-badge-hidden';
+      tooltipCodeElement.appendChild(tooltipCodeTextElement);
+      tooltipCodeElement.appendChild(tooltipTierBadgeElement);
       tooltipPriceElement.className = 'airport-tooltip-price';
       tooltipOwnerElement.className = 'airport-tooltip-owner';
       tooltipElement.appendChild(tooltipCodeElement);
@@ -2208,7 +2751,8 @@
       return {
         code: airport.iata || airport.id || String(airportId),
         price: formatCurrencyValue(relevantPrice),
-        ownerText
+        ownerText,
+        economicClass: airport.economicClass ?? null
       };
     }
 
@@ -2254,7 +2798,10 @@
         return;
       }
 
-      tooltipCodeElement.textContent = tooltipData.code;
+      tooltipCodeTextElement.textContent = tooltipData.code;
+      if (globalScope.airportTiers && typeof globalScope.airportTiers.syncAirportTierBadge === 'function') {
+        globalScope.airportTiers.syncAirportTierBadge(tooltipTierBadgeElement, tooltipData.economicClass);
+      }
       tooltipPriceElement.textContent = tooltipData.price;
       tooltipOwnerElement.textContent = tooltipData.ownerText;
       tooltipElement.classList.remove('airport-tooltip-hidden');
@@ -2411,8 +2958,8 @@
       const activeFlightIds = new Set();
 
       drawableFlights.forEach((flight) => {
-        activeFlightIds.add(flight.flightId);
-        const existingMarker = flightMarkersById.get(flight.flightId);
+        activeFlightIds.add(flight.aircraftInstanceId);
+        const existingMarker = flightMarkersById.get(flight.aircraftInstanceId);
         if (existingMarker) {
           existingMarker.setLatLng([flight.lat, flight.lng]);
           existingMarker.setRadius(radiusPx);
@@ -2431,16 +2978,16 @@
           interactive: false
         });
         marker.addTo(map);
-        flightMarkersById.set(flight.flightId, marker);
+        flightMarkersById.set(flight.aircraftInstanceId, marker);
       });
 
-      Array.from(flightMarkersById.entries()).forEach(([flightId, marker]) => {
-        if (activeFlightIds.has(flightId)) {
+      Array.from(flightMarkersById.entries()).forEach(([aircraftInstanceId, marker]) => {
+        if (activeFlightIds.has(aircraftInstanceId)) {
           return;
         }
 
         map.removeLayer(marker);
-        flightMarkersById.delete(flightId);
+        flightMarkersById.delete(aircraftInstanceId);
       });
 
       return drawableFlights.length;
@@ -2755,4 +3302,30 @@
   }
 
   globalScope.createMapRenderer = createMapRenderer;
+
+  if (typeof module !== 'undefined' && typeof module.exports !== 'undefined') {
+    globalScope.__airlineFlightProjection = {
+      getProjectedInFlightLeg,
+      resolveAircraftCruiseSpeedKmH,
+      resolveRouteDistanceKm,
+      calculateClientFlightDurationSimulationMs,
+      calculateClientTurnaroundSimulationMs
+    };
+    globalScope.__airlineCountryProfitability = {
+      getCountryProfitFactorFromState,
+      getCountryProfitabilityColor,
+      getCountryProfitabilityOpacity,
+      getCountryProfitabilityPaint,
+      buildCountryProfitabilityPaint
+    };
+    globalScope.__airlineCountryHoverPopup = {
+      COUNTRY_HOVER_POPUP_DWELL_MS,
+      createCountryHoverPopupScheduler,
+      formatCountryProfitabilityMultiplier,
+      getCountryPopupMultiplierText
+    };
+    globalScope.__airlineAirportPriceFilter = {
+      isAirportVisibleAtPrice
+    };
+  }
 })(window);

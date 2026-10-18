@@ -34,6 +34,8 @@ test('createGame builds the expected initial authoritative state shape', () => {
   const lobbyPlayers = makeLobbyPlayers();
   const game = createGame(lobbyPlayers);
 
+  assert.equal(GAME_DURATION_MS, 60 * 60 * 1000);
+  assert.equal(SIMULATION_SPEED_MULTIPLIER, 12500);
   assert.equal(typeof game.id, 'string');
   assert.ok(game.id.length > 0);
   assert.equal(game.status, 'active');
@@ -47,6 +49,7 @@ test('createGame builds the expected initial authoritative state shape', () => {
   assert.equal(game.simulationStartedAtGameMs, null);
   assert.equal(game.simulationSpeedMultiplier, SIMULATION_SPEED_MULTIPLIER);
   assert.equal(game.simulationEndedAtGameMs, null);
+  assert.equal(game.worldCalendarStartYear, new Date(game.createdAt).getUTCFullYear());
 
   assert.equal(Array.isArray(game.players), true);
   assert.equal(game.players.length, 2);
@@ -75,7 +78,8 @@ test('createGame builds the expected initial authoritative state shape', () => {
     AIRPORT_CATALOG.map((airport) => ({
       airportId: airport.id,
       ownerPlayerId: null,
-      saleListing: null
+      saleListing: null,
+      pendingOwnershipChange: null
     }))
   );
 
@@ -191,6 +195,21 @@ test('new games start with no owned aircraft before purchasing is implemented', 
   const game = createGame(lobbyPlayers);
 
   assert.deepEqual(game.ownedAircraft, []);
+});
+
+test('createGame derives worldCalendarStartYear from the UTC creation year', () => {
+  const originalDateNow = Date.now;
+  const frozenMs = new Date('2026-06-15T12:00:00.000Z').getTime();
+
+  try {
+    Date.now = () => frozenMs;
+    const game = createGame([]);
+
+    assert.equal(game.worldCalendarStartYear, 2026);
+    assert.equal(game.worldCalendarStartYear, new Date(game.createdAt).getUTCFullYear());
+  } finally {
+    Date.now = originalDateNow;
+  }
 });
 
 test('airport catalog is immutable shared static world data', () => {

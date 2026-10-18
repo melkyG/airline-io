@@ -14,6 +14,16 @@
     second: '2-digit'
   });
   const EVENT_LOG_MAX_VISIBLE = 25;
+  const WORLD_MONTH_ABBREVIATIONS = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
+  const WORLD_HOURS_PER_DAY = 24;
+  const WORLD_DAYS_PER_MONTH = 30;
+  const WORLD_MONTHS_PER_YEAR = WORLD_MONTH_ABBREVIATIONS.length;
+  const WORLD_DAYS_PER_YEAR = WORLD_DAYS_PER_MONTH * WORLD_MONTHS_PER_YEAR;
+  const WORLD_MINUTE_MS = 60 * 1000;
+  const WORLD_HOUR_MS = 60 * WORLD_MINUTE_MS;
 
   function getConnectionPresentation(status) {
     if (status === 'connected') {
@@ -50,6 +60,44 @@
     }
 
     return EVENT_LOG_TIME_FORMATTER.format(new Date(occurredAt));
+  }
+
+  function formatWorldEventLogTimestamp(worldElapsedSimulationMs, worldCalendarStartYear) {
+    if (!Number.isFinite(worldElapsedSimulationMs) || !Number.isFinite(worldCalendarStartYear)) {
+      return null;
+    }
+
+    const elapsedMs = Math.max(0, worldElapsedSimulationMs);
+    const totalMinutes = Math.floor(elapsedMs / WORLD_MINUTE_MS);
+    const totalHours = Math.floor(elapsedMs / WORLD_HOUR_MS);
+    const minuteOfHour = totalMinutes % 60;
+    const hourOfDay = totalHours % WORLD_HOURS_PER_DAY;
+    const elapsedDays = Math.floor(totalHours / WORLD_HOURS_PER_DAY);
+
+    const year = worldCalendarStartYear + Math.floor(elapsedDays / WORLD_DAYS_PER_YEAR);
+    const dayOffsetInYear = elapsedDays % WORLD_DAYS_PER_YEAR;
+    const monthIndex = Math.floor(dayOffsetInYear / WORLD_DAYS_PER_MONTH);
+    const dayOfMonth = (dayOffsetInYear % WORLD_DAYS_PER_MONTH) + 1;
+
+    const padTwo = (value) => String(value).padStart(2, '0');
+
+    return (
+      `${WORLD_MONTH_ABBREVIATIONS[monthIndex]} ${padTwo(dayOfMonth)}/${padTwo(year % 100)} ` +
+      `· ${padTwo(hourOfDay)}:${padTwo(minuteOfHour)}`
+    );
+  }
+
+  function formatEventLogTimestampForDisplay(eventPayload, worldCalendarStartYear) {
+    const worldTimestamp = formatWorldEventLogTimestamp(
+      eventPayload && eventPayload.worldElapsedSimulationMs,
+      worldCalendarStartYear
+    );
+
+    if (worldTimestamp) {
+      return worldTimestamp;
+    }
+
+    return formatEventLogTimestamp(eventPayload && eventPayload.occurredAt);
   }
 
   function formatAssetIdForDisplay(assetId) {
@@ -471,6 +519,7 @@
       const localPlayer = players.find((player) => player && String(player.id) === String(localPlayerId));
       const airports = Array.isArray(state && state.game && state.game.airports) ? state.game.airports : [];
       const ownedAircraft = Array.isArray(state && state.game && state.game.ownedAircraft) ? state.game.ownedAircraft : [];
+      const routes = Array.isArray(state && state.game && state.game.routes) ? state.game.routes : [];
 
       if (!localPlayer || !Number.isFinite(localPlayer.capital)) {
         capitalHudContentEl.textContent = '';
@@ -494,14 +543,39 @@
         return String(aircraft.ownerPlayerId) === String(localPlayerId) ? count + 1 : count;
       }, 0);
 
+      const localRoutes = routes.filter((route) => {
+        return route && route.ownerPlayerId != null && String(route.ownerPlayerId) === String(localPlayerId);
+      });
+      const localRoutesById = new Map(localRoutes.map((route) => [String(route.routeId || ''), route]));
+      const activeAircraftCount = ownedAircraft.reduce((count, aircraft) => {
+        if (
+          !aircraft ||
+          aircraft.ownerPlayerId == null ||
+          String(aircraft.ownerPlayerId) !== String(localPlayerId) ||
+          aircraft.aircraftInstanceId == null
+        ) {
+          return count;
+        }
+
+        const assignedRouteId = String(aircraft.assignedRouteId || '');
+        const route = localRoutesById.get(assignedRouteId);
+        if (!assignedRouteId || !route) {
+          return count;
+        }
+
+        const assignedAircraftInstanceIds = route.assignedAircraftInstanceIds;
+        return Array.isArray(assignedAircraftInstanceIds) && assignedAircraftInstanceIds.includes(aircraft.aircraftInstanceId)
+          ? count + 1
+          : count;
+      }, 0);
+
       const netWorth = Number.isFinite(localPlayer.netWorth)
         ? localPlayer.netWorth
         : localPlayer.capital;
 
       capitalHudContentEl.textContent =
-        `Capital: ${CAPITAL_FORMATTER.format(localPlayer.capital)}\n` +
-        `Net Worth: ${CAPITAL_FORMATTER.format(netWorth)}\n` +
-        `🏢: ${ownedAirportCount} | 🛫: ${ownedAircraftCount}`;
+        `Cash: ${CAPITAL_FORMATTER.format(localPlayer.capital)}\n` +
+        `🏢: ${ownedAirportCount} | 🛫: ${ownedAircraftCount} (${activeAircraftCount}) | 🛣️: ${localRoutes.length}`;
       elements.capitalHud.classList.remove('hidden');
     }
 
@@ -558,6 +632,12 @@
         return;
       }
 
+      const worldCalendarStartYear =
+        state && state.game && state.game.simulationClock &&
+        Number.isFinite(state.game.simulationClock.worldCalendarStartYear)
+          ? state.game.simulationClock.worldCalendarStartYear
+          : null;
+
       const eventFragment = documentRef.createDocumentFragment();
       visibleHistory.forEach((eventPayload) => {
         const item = documentRef.createElement('li');
@@ -565,7 +645,7 @@
 
         const timestamp = documentRef.createElement('span');
         timestamp.className = 'event-log-time';
-        timestamp.textContent = formatEventLogTimestamp(eventPayload && eventPayload.occurredAt);
+        timestamp.textContent = formatEventLogTimestampForDisplay(eventPayload, worldCalendarStartYear);
 
         const message = documentRef.createElement('span');
         message.className = 'event-log-message';
@@ -722,10 +802,28 @@
       aircraftSelectHandler = handler;
     }
 
+    function setCountryHoverChangeHandler(handler) {
+      if (!mapRenderer || typeof mapRenderer.setCountryHoverChangeHandler !== 'function') {
+        return;
+      }
+
+      mapRenderer.setCountryHoverChangeHandler(handler);
+    }
+
+    function setAirportPriceFilter(range) {
+      if (!mapRenderer || typeof mapRenderer.setAirportPriceFilter !== 'function') {
+        return;
+      }
+
+      mapRenderer.setAirportPriceFilter(range);
+    }
+
     return {
       render,
       setAirportSelectHandler,
       setAircraftSelectHandler,
+      setCountryHoverChangeHandler,
+      setAirportPriceFilter,
       renderConnectionStatus,
       renderLobbyPreview,
       renderPlayerList,

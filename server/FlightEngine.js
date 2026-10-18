@@ -7,17 +7,86 @@ const {
 } = require('./flights/rules');
 const { OWNED_AIRCRAFT_STATUS } = require('./aircraft/ownership');
 
+class SchedulerDueHeap {
+  constructor(comparator) {
+    this.items = [];
+    this.comparator = comparator;
+  }
+
+  size() {
+    return this.items.length;
+  }
+
+  push(value) {
+    this.items.push(value);
+    this._siftUp(this.items.length - 1);
+  }
+
+  pop() {
+    if (this.items.length === 0) {
+      return undefined;
+    }
+    const result = this.items[0];
+    const last = this.items.pop();
+    if (this.items.length > 0) {
+      this.items[0] = last;
+      this._siftDown(0);
+    }
+    return result;
+  }
+
+  _siftUp(index) {
+    while (index > 0) {
+      const parentIndex = Math.floor((index - 1) / 2);
+      if (this.comparator(this.items[index], this.items[parentIndex]) < 0) {
+        [this.items[index], this.items[parentIndex]] = [this.items[parentIndex], this.items[index]];
+        index = parentIndex;
+      } else {
+        break;
+      }
+    }
+  }
+
+  _siftDown(index) {
+    const length = this.items.length;
+    while (true) {
+      let smallest = index;
+      const left = 2 * index + 1;
+      const right = 2 * index + 2;
+      if (left < length && this.comparator(this.items[left], this.items[smallest]) < 0) {
+        smallest = left;
+      }
+      if (right < length && this.comparator(this.items[right], this.items[smallest]) < 0) {
+        smallest = right;
+      }
+      if (smallest === index) {
+        break;
+      }
+      [this.items[index], this.items[smallest]] = [this.items[smallest], this.items[index]];
+      index = smallest;
+    }
+  }
+}
+
 class FlightEngine {
   constructor({
     authoritativeState,
     getSimulationTimeMs,
     resolveFlightArrivalSettlementContext,
     createBoundedScheduler,
+    onRevenueCredited,
+    onFlightLegCompleted,
+    onTransitionProcessed,
+    onSchedulerProfile,
     onTick
   }) {
     this.authoritativeState = authoritativeState;
     this.getSimulationTimeMs = getSimulationTimeMs;
     this.resolveFlightArrivalSettlementContext = resolveFlightArrivalSettlementContext;
+    this.onRevenueCredited = typeof onRevenueCredited === 'function' ? onRevenueCredited : null;
+    this.onFlightLegCompleted = typeof onFlightLegCompleted === 'function' ? onFlightLegCompleted : null;
+    this.onTransitionProcessed = typeof onTransitionProcessed === 'function' ? onTransitionProcessed : null;
+    this.onSchedulerProfile = typeof onSchedulerProfile === 'function' ? onSchedulerProfile : null;
     this.onTick = typeof onTick === 'function' ? onTick : null;
     this.flightScheduler = createBoundedScheduler({
       onTick: () => {
@@ -69,9 +138,8 @@ class FlightEngine {
   }
 
   collectDueFlightTransitions(simulationNowMs) {
+    const ctx = this._schedulerLookupContext || this._buildSchedulerLookupContext();
     const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
-    const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
-    const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft) ? this.authoritativeState.ownedAircraft : [];
 
     return flights
       .map((flight) => {
@@ -83,7 +151,7 @@ class FlightEngine {
         const currentDirection = String(flight.direction || '').trim();
 
         if (currentStatus === 'ready' && currentDirection === 'outbound') {
-          const route = routes.find((candidate) => candidate && String(candidate.routeId || '').trim() === String(flight.routeId || '').trim());
+          const route = ctx.routeById.get(String(flight.routeId || '').trim());
           if (route) {
             if (route.pendingRemoval === true) {
               return null;
@@ -92,7 +160,7 @@ class FlightEngine {
             const reconfiguringModelCatalogIds = Array.isArray(route.reconfiguringModelCatalogIds)
               ? route.reconfiguringModelCatalogIds
               : [];
-            const aircraft = ownedAircraft.find((candidate) => candidate && String(candidate.aircraftInstanceId || '').trim() === String(flight.aircraftInstanceId || '').trim());
+            const aircraft = ctx.aircraftByInstanceId.get(String(flight.aircraftInstanceId || '').trim());
             if (aircraft && reconfiguringModelCatalogIds.length > 0) {
               const aircraftCatalogId = String(aircraft.aircraftCatalogId || '').trim();
               const isModelReconfiguring = reconfiguringModelCatalogIds.some((modelId) => {
@@ -129,6 +197,10 @@ class FlightEngine {
       });
   }
 
+  countDueFlightTransitions(simulationNowMs) {
+    return this.collectDueFlightTransitions(simulationNowMs).length;
+  }
+
   validateFlightDirectionEndpoints(route, flight) {
     const normalizedDirection = String(flight.direction || '').trim();
     const routeOriginAirportId = String(route.originAirportId || '').trim();
@@ -147,16 +219,63 @@ class FlightEngine {
     return false;
   }
 
-  resolveFlightTransitionContext(flightId) {
-    const normalizedFlightId = String(flightId || '').trim();
+  _buildSchedulerLookupContext() {
     const flights = Array.isArray(this.authoritativeState.flights) ? this.authoritativeState.flights : [];
     const routes = Array.isArray(this.authoritativeState.routes) ? this.authoritativeState.routes : [];
     const ownedAircraft = Array.isArray(this.authoritativeState.ownedAircraft)
       ? this.authoritativeState.ownedAircraft
       : [];
 
-    const flightIndex = flights.findIndex((flight) => flight && String(flight.flightId || '').trim() === normalizedFlightId);
-    if (flightIndex < 0) {
+    const flightById = new Map();
+    const flightIndexById = new Map();
+    flights.forEach((flight, index) => {
+      if (flight && flight.flightId) {
+        const flightId = String(flight.flightId || '').trim();
+        flightById.set(flightId, flight);
+        flightIndexById.set(flightId, index);
+      }
+    });
+
+    const routeById = new Map();
+    const assignedAircraftSetByRouteId = new Map();
+    routes.forEach((route) => {
+      if (route && route.routeId) {
+        const routeId = String(route.routeId || '').trim();
+        routeById.set(routeId, route);
+
+        const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
+          ? route.assignedAircraftInstanceIds
+          : [];
+        const assignedAircraftSet = new Set();
+        for (const aircraftInstanceId of assignedAircraftInstanceIds) {
+          assignedAircraftSet.add(String(aircraftInstanceId || '').trim());
+        }
+        assignedAircraftSetByRouteId.set(routeId, assignedAircraftSet);
+      }
+    });
+
+    const aircraftByInstanceId = new Map();
+    ownedAircraft.forEach((aircraft) => {
+      if (aircraft && aircraft.aircraftInstanceId) {
+        aircraftByInstanceId.set(String(aircraft.aircraftInstanceId || '').trim(), aircraft);
+      }
+    });
+
+    return {
+      flightById,
+      flightIndexById,
+      routeById,
+      aircraftByInstanceId,
+      assignedAircraftSetByRouteId
+    };
+  }
+
+  resolveFlightTransitionContext(flightId) {
+    const normalizedFlightId = String(flightId || '').trim();
+    const ctx = this._schedulerLookupContext || this._buildSchedulerLookupContext();
+
+    const flight = ctx.flightById.get(normalizedFlightId);
+    if (!flight) {
       return {
         success: false,
         code: 'FLIGHT_NOT_FOUND',
@@ -164,8 +283,8 @@ class FlightEngine {
       };
     }
 
-    const flight = flights[flightIndex];
-    const route = routes.find((candidate) => candidate && String(candidate.routeId || '').trim() === String(flight.routeId || '').trim());
+    const flightIndex = ctx.flightIndexById.get(normalizedFlightId);
+    const route = ctx.routeById.get(String(flight.routeId || '').trim());
     if (!route) {
       return {
         success: false,
@@ -175,9 +294,7 @@ class FlightEngine {
       };
     }
 
-    const aircraft = ownedAircraft.find((candidate) => {
-      return candidate && String(candidate.aircraftInstanceId || '').trim() === String(flight.aircraftInstanceId || '').trim();
-    });
+    const aircraft = ctx.aircraftByInstanceId.get(String(flight.aircraftInstanceId || '').trim());
     if (!aircraft) {
       return {
         success: false,
@@ -187,12 +304,10 @@ class FlightEngine {
       };
     }
 
-    const assignedAircraftInstanceIds = Array.isArray(route.assignedAircraftInstanceIds)
-      ? route.assignedAircraftInstanceIds
-      : [];
-    const isAircraftListedOnRoute = assignedAircraftInstanceIds.some((aircraftInstanceId) => {
-      return String(aircraftInstanceId || '').trim() === String(aircraft.aircraftInstanceId || '').trim();
-    });
+    const assignedAircraftSet = ctx.assignedAircraftSetByRouteId.get(String(route.routeId || '').trim());
+    const isAircraftListedOnRoute = assignedAircraftSet
+      ? assignedAircraftSet.has(String(aircraft.aircraftInstanceId || '').trim())
+      : false;
     if (!isAircraftListedOnRoute) {
       return {
         success: false,
@@ -274,6 +389,12 @@ class FlightEngine {
       };
     }
 
+    if (!this._schedulerLookupContext) {
+      if (this.onSchedulerProfile) {
+        this.onSchedulerProfile({ aircraftLinearLookups: 1, routeLinearLookups: 1 });
+      }
+    }
+
     return {
       success: true,
       flight,
@@ -326,11 +447,14 @@ class FlightEngine {
       flight.lastOutboundDepartedAtSimulationMs = departureSimulationMs;
       flight.arrivesAtSimulationMs = departureSimulationMs + flightDurationSimulationMs;
       flight.nextTransitionAtSimulationMs = flight.arrivesAtSimulationMs;
+      if (this.onTransitionProcessed) {
+        this.onTransitionProcessed(Math.max(0, simulationNowMs - normalizedDueAtSimulationMs));
+      }
       return { success: true, changed: true };
     }
 
     if (currentStatus === 'in-flight') {
-      const settlementContext = this.resolveFlightArrivalSettlementContext(context);
+      const settlementContext = this.resolveFlightArrivalSettlementContext(context, simulationNowMs);
       if (!settlementContext.success) {
         return settlementContext;
       }
@@ -352,10 +476,27 @@ class FlightEngine {
       settlementContext.ownerPlayer.capital =
         settlementContext.currentCapital + settlementContext.settlementResult.finalRevenue;
 
+      if (this.onRevenueCredited) {
+        this.onRevenueCredited(
+          settlementContext.ownerPlayer,
+          settlementContext.settlementResult.finalRevenue
+        );
+      }
+
+      if (this.onFlightLegCompleted) {
+        this.onFlightLegCompleted(
+          context.aircraft,
+          Number(context.route.distanceKm) || 0
+        );
+      }
+
       flight.status = 'turnaround';
       flight.departedAtSimulationMs = null;
       flight.arrivesAtSimulationMs = null;
       flight.nextTransitionAtSimulationMs = arrivalSimulationMs + turnaroundDurationSimulationMs;
+      if (this.onTransitionProcessed) {
+        this.onTransitionProcessed(Math.max(0, simulationNowMs - normalizedDueAtSimulationMs));
+      }
       return { success: true, changed: true };
     }
 
@@ -387,6 +528,9 @@ class FlightEngine {
           flight.nextTransitionAtSimulationMs = null;
         }
 
+        if (this.onTransitionProcessed) {
+          this.onTransitionProcessed(Math.max(0, simulationNowMs - normalizedDueAtSimulationMs));
+        }
         return { success: true, changed: true };
       }
 
@@ -400,6 +544,9 @@ class FlightEngine {
       flight.departedAtSimulationMs = departureSimulationMs;
       flight.arrivesAtSimulationMs = departureSimulationMs + flightDurationSimulationMs;
       flight.nextTransitionAtSimulationMs = flight.arrivesAtSimulationMs;
+      if (this.onTransitionProcessed) {
+        this.onTransitionProcessed(Math.max(0, simulationNowMs - normalizedDueAtSimulationMs));
+      }
       return { success: true, changed: true };
     }
 
@@ -408,6 +555,52 @@ class FlightEngine {
       code: 'FLIGHT_STATUS_INVALID',
       message: 'Flight has an unknown status and cannot be transitioned safely.',
       flightId: transition.flightId
+    };
+  }
+
+  getDueTransitionForSingleFlight(flight, simulationNowMs) {
+    if (!flight || !flight.flightId) {
+      return null;
+    }
+
+    const currentStatus = String(flight.status || '').trim();
+    const currentDirection = String(flight.direction || '').trim();
+
+    if (currentStatus === 'ready' && currentDirection === 'outbound') {
+      const ctx = this._schedulerLookupContext || this._buildSchedulerLookupContext();
+      const route = ctx.routeById.get(String(flight.routeId || '').trim());
+      if (route) {
+        if (route.pendingRemoval === true) {
+          return null;
+        }
+
+        const reconfiguringModelCatalogIds = Array.isArray(route.reconfiguringModelCatalogIds)
+          ? route.reconfiguringModelCatalogIds
+          : [];
+        const aircraft = ctx.aircraftByInstanceId.get(String(flight.aircraftInstanceId || '').trim());
+        if (aircraft && reconfiguringModelCatalogIds.length > 0) {
+          const aircraftCatalogId = String(aircraft.aircraftCatalogId || '').trim();
+          const isModelReconfiguring = reconfiguringModelCatalogIds.some((modelId) => {
+            return String(modelId || '').trim() === aircraftCatalogId;
+          });
+          if (isModelReconfiguring) {
+            return null;
+          }
+        }
+      }
+    }
+
+    const dueAtSimulationMs = this.getFlightTransitionDueSimulationTimestamp(flight);
+    if (!Number.isFinite(dueAtSimulationMs) && dueAtSimulationMs !== Number.NEGATIVE_INFINITY) {
+      return null;
+    }
+    if (dueAtSimulationMs > simulationNowMs) {
+      return null;
+    }
+
+    return {
+      flightId: String(flight.flightId || '').trim(),
+      dueAtSimulationMs
     };
   }
 
@@ -421,37 +614,81 @@ class FlightEngine {
       };
     }
 
-    let changed = false;
-    let processedTransitions = 0;
-    const processingStartedRealMs = Date.now();
-    let lastError = null;
+    this._schedulerLookupContext = this._buildSchedulerLookupContext();
+    try {
+      let changed = false;
+      let processedTransitions = 0;
+      const processingStartedRealMs = Date.now();
+      let lastError = null;
+      let transitionCapHit = false;
+      let timeCapHit = false;
+      let dueScanMs = 0;
+      let applyTransitionMs = 0;
+      let fullFlightScans = 0;
 
-    while (
-      processedTransitions < MAX_FLIGHT_TRANSITIONS_PER_TICK &&
-      Date.now() - processingStartedRealMs <= MAX_FLIGHT_PROCESSING_REAL_MS
-    ) {
-      const dueTransitions = this.collectDueFlightTransitions(simulationNowMs);
-      if (dueTransitions.length === 0) {
-        break;
+      const dueQueueStart = Date.now();
+      const initialDueTransitions = this.collectDueFlightTransitions(simulationNowMs);
+      const dueQueue = new SchedulerDueHeap((left, right) => {
+        if (left.dueAtSimulationMs !== right.dueAtSimulationMs) {
+          return left.dueAtSimulationMs - right.dueAtSimulationMs;
+        }
+        return String(left.flightId).localeCompare(String(right.flightId));
+      });
+      for (const transition of initialDueTransitions) {
+        dueQueue.push(transition);
+      }
+      dueScanMs += Date.now() - dueQueueStart;
+      fullFlightScans = 1;
+
+      while (
+        processedTransitions < MAX_FLIGHT_TRANSITIONS_PER_TICK &&
+        Date.now() - processingStartedRealMs <= MAX_FLIGHT_PROCESSING_REAL_MS &&
+        dueQueue.size() > 0
+      ) {
+        const transition = dueQueue.pop();
+        const applyStart = Date.now();
+        const transitionResult = this.applyFlightTransition(transition, simulationNowMs);
+        applyTransitionMs += Date.now() - applyStart;
+        if (!transitionResult.success) {
+          lastError = transitionResult;
+          break;
+        }
+
+        changed = changed || Boolean(transitionResult.changed);
+        processedTransitions += 1;
+
+        const updatedFlight = this._schedulerLookupContext.flightById.get(transition.flightId);
+        if (updatedFlight) {
+          const nextTransition = this.getDueTransitionForSingleFlight(updatedFlight, simulationNowMs);
+          if (nextTransition) {
+            dueQueue.push(nextTransition);
+          }
+        }
       }
 
-      const transition = dueTransitions[0];
-      const transitionResult = this.applyFlightTransition(transition, simulationNowMs);
-      if (!transitionResult.success) {
-        lastError = transitionResult;
-        break;
+      const schedulerWorkMs = Date.now() - processingStartedRealMs;
+      if (processedTransitions >= MAX_FLIGHT_TRANSITIONS_PER_TICK) {
+        transitionCapHit = true;
+      }
+      if (schedulerWorkMs >= MAX_FLIGHT_PROCESSING_REAL_MS) {
+        timeCapHit = true;
       }
 
-      changed = changed || Boolean(transitionResult.changed);
-      processedTransitions += 1;
+      return {
+        success: !lastError,
+        changed,
+        processedTransitions,
+        error: lastError,
+        transitionCapHit,
+        timeCapHit,
+        schedulerWorkMs,
+        dueScanMs,
+        applyTransitionMs,
+        fullFlightScans
+      };
+    } finally {
+      this._schedulerLookupContext = null;
     }
-
-    return {
-      success: !lastError,
-      changed,
-      processedTransitions,
-      error: lastError
-    };
   }
 }
 

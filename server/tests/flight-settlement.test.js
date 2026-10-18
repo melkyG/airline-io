@@ -1,7 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { calculateFlightSettlement } = require('../economy/flightSettlement');
+const {
+  FLIGHT_REVENUE_MULTIPLIER,
+  calculateFlightSettlement
+} = require('../economy/flightSettlement');
 
 test('calculateFlightSettlement returns structured baseline revenue values', () => {
   const result = calculateFlightSettlement({
@@ -10,8 +13,14 @@ test('calculateFlightSettlement returns structured baseline revenue values', () 
   });
 
   assert.equal(result.success, true);
-  assert.equal(result.baseRevenue, 94500);
-  assert.equal(result.finalRevenue, 94500);
+  assert.equal(FLIGHT_REVENUE_MULTIPLIER, 0.55);
+  const expected =
+    105 *
+    900 *
+    (1 + 0.85 / (1 + Math.exp(-(900 - 7000) / 1500))) *
+    FLIGHT_REVENUE_MULTIPLIER;
+  assert.ok(Math.abs(result.baseRevenue - expected) < 1e-9);
+  assert.ok(Math.abs(result.finalRevenue - expected) < 1e-9);
 });
 
 test('calculateFlightSettlement rejects invalid aircraft settlement data', () => {

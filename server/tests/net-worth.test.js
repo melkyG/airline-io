@@ -11,6 +11,15 @@ const {
   calculateNetWorthByPlayer
 } = require('../economy/netWorth');
 const { AIRCRAFT_CATALOG_BY_ID } = require('../aircraft/catalog');
+const { AIRPORT_CATALOG } = require('../airports/catalog');
+
+function airportBasePrice(airportId) {
+  const def = AIRPORT_CATALOG.find((a) => a.id === airportId);
+  if (!def || !Number.isFinite(def.basePrice)) {
+    throw new Error(`Test airport ${airportId} missing from catalog`);
+  }
+  return def.basePrice;
+}
 
 function createManagerWithEmitCapture() {
   const emitted = [];
@@ -74,7 +83,7 @@ test('owned airport adds exact market sell-to-game value', () => {
     ownedAircraft: []
   });
 
-  const expectedAirportValue = calculateAirportSellToGamePrice(300000);
+  const expectedAirportValue = calculateAirportSellToGamePrice(airportBasePrice('YYZ'));
   assert.equal(calculatePlayerNetWorth(gameState, 'p1'), 1000000 + expectedAirportValue);
 });
 
@@ -126,8 +135,8 @@ test('multiple assets aggregate correctly, assigned aircraft count, listed airpo
   });
 
   const airportsValue =
-    calculateAirportSellToGamePrice(300000) +
-    calculateAirportSellToGamePrice(250000);
+    calculateAirportSellToGamePrice(airportBasePrice('YYZ')) +
+    calculateAirportSellToGamePrice(airportBasePrice('JFK'));
   const aircraftValue =
     calculateAircraftSellToGamePrice(AIRCRAFT_CATALOG_BY_ID.BOEING_747.purchasePrice) +
     calculateAircraftSellToGamePrice(AIRCRAFT_CATALOG_BY_ID.BOEING_737.purchasePrice);
@@ -215,7 +224,10 @@ test('flight revenue increases capital and derived net worth by the same amount'
   const afterNetWorth = calculatePlayerNetWorth(game.authoritativeState, 'p1');
 
   assert.equal(tickResult.success, true);
-  assert.equal(afterCapital - beforeCapital, afterNetWorth - beforeNetWorth);
+  assert.ok(
+    Math.abs((afterCapital - beforeCapital) - (afterNetWorth - beforeNetWorth)) < 1e-6,
+    `capital delta ${afterCapital - beforeCapital} should equal net-worth delta ${afterNetWorth - beforeNetWorth}`
+  );
 });
 
 test('buying and selling aircraft updates derived net worth from authoritative state', () => {
@@ -236,13 +248,35 @@ test('buying and selling aircraft updates derived net worth from authoritative s
   assert.equal(purchaseResult.success, true);
 
   const afterPurchaseNetWorth = calculatePlayerNetWorth(game.authoritativeState, 'p1');
-  assert.equal(afterPurchaseNetWorth, 940000);
+  assert.equal(afterPurchaseNetWorth, 920000);
 
   const sellResult = game.sellAircraftToGame('p1', 'BOEING_747', 1);
   assert.equal(sellResult.success, true);
 
   const afterSellNetWorth = calculatePlayerNetWorth(game.authoritativeState, 'p1');
-  assert.equal(afterSellNetWorth, 940000);
+  assert.equal(afterSellNetWorth, 920000);
+});
+
+test('Airbus A320 resale and net worth use its catalog purchase price', () => {
+  const { manager } = createManagerWithEmitCapture();
+  const game = new Game(
+    createBaseState({
+      players: [{ id: 'p1', username: 'Alice', capital: 500000 }],
+      airports: [],
+      ownedAircraft: []
+    }),
+    manager
+  );
+
+  const purchaseResult = game.purchaseAircraftFromGame('p1', 'AIRBUS_A320');
+  assert.equal(purchaseResult.success, true);
+  assert.equal(purchaseResult.unitPrice, 280000);
+  assert.equal(calculatePlayerNetWorth(game.authoritativeState, 'p1'), 444000);
+
+  const sellResult = game.sellAircraftToGame('p1', 'AIRBUS_A320');
+  assert.equal(sellResult.success, true);
+  assert.equal(sellResult.unitSellPrice, 224000);
+  assert.equal(calculatePlayerNetWorth(game.authoritativeState, 'p1'), 444000);
 });
 
 test('airport ownership transfer updates derived net worth from authoritative state', () => {
@@ -303,7 +337,7 @@ test('public player snapshots expose authoritative derived net worth', () => {
   const localPlayer = payload.game.players.find((player) => player.id === 'p1');
   const expectedNetWorth =
     1000000 +
-    calculateAirportSellToGamePrice(300000) +
+    calculateAirportSellToGamePrice(airportBasePrice('YYZ')) +
     calculateAircraftSellToGamePrice(AIRCRAFT_CATALOG_BY_ID.BOEING_747.purchasePrice);
 
   assert.ok(localPlayer);
@@ -324,6 +358,6 @@ test('calculateNetWorthByPlayer returns independent per-player values', () => {
   });
 
   const byPlayer = calculateNetWorthByPlayer(gameState);
-  assert.equal(byPlayer.get('p1'), 1000000 + calculateAirportSellToGamePrice(300000));
-  assert.equal(byPlayer.get('p2'), 500000 + calculateAirportSellToGamePrice(250000));
+  assert.equal(byPlayer.get('p1'), 1000000 + calculateAirportSellToGamePrice(airportBasePrice('YYZ')));
+  assert.equal(byPlayer.get('p2'), 500000 + calculateAirportSellToGamePrice(airportBasePrice('JFK')));
 });
